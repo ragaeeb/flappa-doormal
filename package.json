@@ -1,0 +1,49 @@
+{
+    "author": "Ragaeeb Haq",
+    "bugs": {
+        "url": "https://github.com/ragaeeb/flappa-doormal/issues"
+    },
+    "dependencies": {
+        "bitaboom": "^2.1.0"
+    },
+    "description": "Arabic text marker pattern library for generating regex from declarative configurations",
+    "devDependencies": {
+        "@biomejs/biome": "2.3.7",
+        "@types/bun": "latest",
+        "tsdown": "^0.16.7"
+    },
+    "exports": {
+        ".": {
+            "import": "./dist/index.mjs",
+            "types": "./dist/index.d.mts"
+        }
+    },
+    "files": [
+        "dist",
+        "README.md"
+    ],
+    "homepage": "https://github.com/ragaeeb/flappa-doormal#readme",
+    "keywords": [
+        "arabic",
+        "text-processing",
+        "hadith",
+        "islamic-texts",
+        "nlp",
+        "regex",
+        "pattern-matching",
+        "marker-detection"
+    ],
+    "license": "MIT",
+    "module": "./dist/index.mjs",
+    "name": "flappa-doormal",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/ragaeeb/flappa-doormal.git"
+    },
+    "scripts": {
+        "build": "tsdown"
+    },
+    "type": "module",
+    "types": "./dist/index.d.mts",
+    "version": "1.0.0"
+}
