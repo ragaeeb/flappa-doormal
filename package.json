@@ -10,7 +10,8 @@
     "devDependencies": {
         "@biomejs/biome": "2.3.7",
         "@types/bun": "latest",
-        "tsdown": "^0.16.7"
+        "tsdown": "^0.16.7",
+        "typescript": "^5.9.3"
     },
     "exports": {
         ".": {
