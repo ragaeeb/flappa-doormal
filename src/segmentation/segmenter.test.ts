@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 
 import { segmentPages } from './segmenter';
-import type { PageInput, SplitRule } from './types';
+import type { Page, SplitRule } from './types';
 
 describe('segmenter', () => {
     describe('segmentPages', () => {
         // ─────────────────────────────────────────────────────────────
-        // Basic split: 'before' tests (current behavior)
+        // Basic split: 'at' tests (current behavior)
         // ─────────────────────────────────────────────────────────────
 
         it('should segment a single plain-text page with 3 numeric markers', () => {
-            const pages: PageInput[] = [{ content: '١ - الحديث الأول\r٢ - الحديث الثاني\r٣ - الحديث الثالث', id: 1 }];
+            const pages: Page[] = [{ content: '١ - الحديث الأول\r٢ - الحديث الثاني\r٣ - الحديث الثالث', id: 1 }];
 
-            const rules: SplitRule[] = [{ regex: '^[٠-٩]+ - ', split: 'before' }];
+            const rules: SplitRule[] = [{ regex: '^[٠-٩]+ - ', split: 'at' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -23,7 +23,7 @@ describe('segmenter', () => {
         });
 
         it('should segment a single page with HTML title markers', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 {
                     content:
                         '<span data-type="title" id=toc-1>باب الأول</span>\rنص الباب الأول\r<span data-type="title" id=toc-2>باب الثاني</span>\rنص الباب الثاني',
@@ -31,7 +31,7 @@ describe('segmenter', () => {
                 },
             ];
 
-            const rules: SplitRule[] = [{ regex: '^<span data-type="title"', split: 'before' }];
+            const rules: SplitRule[] = [{ regex: '^<span data-type="title"', split: 'at' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -47,12 +47,12 @@ describe('segmenter', () => {
         });
 
         it('should handle content spanning across 2 pages with space joining', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: '١ - الحديث الأول كامل\r٢ - بداية الحديث الثاني', id: 10 },
                 { content: 'تكملة الحديث الثاني\r٣ - الحديث الثالث', id: 11 },
             ];
 
-            const rules: SplitRule[] = [{ regex: '^[٠-٩]+ - ', split: 'before' }];
+            const rules: SplitRule[] = [{ regex: '^[٠-٩]+ - ', split: 'at' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -71,12 +71,12 @@ describe('segmenter', () => {
         // ─────────────────────────────────────────────────────────────
 
         it('should expand {{raqms}} token in template patterns', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: '١ - الحديث الأول', id: 1 },
                 { content: '٢ - الحديث الثاني', id: 2 },
             ];
 
-            const rules: SplitRule[] = [{ split: 'before', template: '^{{raqms}} - ' }];
+            const rules: SplitRule[] = [{ split: 'at', template: '^{{raqms}} - ' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -86,12 +86,12 @@ describe('segmenter', () => {
         });
 
         it('should expand {{dash}} token in template patterns', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: '١ – الحديث الأول', id: 1 }, // en-dash
                 { content: '٢ — الحديث الثاني', id: 2 }, // em-dash
             ];
 
-            const rules: SplitRule[] = [{ split: 'before', template: '^{{raqms}} {{dash}} ' }];
+            const rules: SplitRule[] = [{ split: 'at', template: '^{{raqms}} {{dash}} ' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -101,13 +101,13 @@ describe('segmenter', () => {
         });
 
         it('should expand {{bab}} token in template patterns with fuzzy matching', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: 'بَابُ الصلاة', id: 1 },
                 { content: 'باب الزكاة', id: 2 }, // No diacritics
             ];
 
             // {{bab}} expands to 'باب', fuzzy: true makes it match بَابُ too
-            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{bab}}'], split: 'before' }];
+            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{bab}}'], split: 'at' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -121,7 +121,7 @@ describe('segmenter', () => {
         // ─────────────────────────────────────────────────────────────
 
         it('should support lineStartsWith with multiple patterns and fuzzy matching', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: '## باب الأول', id: 1 },
                 { content: 'بَابُ الثاني', id: 2 },
                 { content: '١ - الحديث الأول', id: 3 },
@@ -133,7 +133,7 @@ describe('segmenter', () => {
                     fuzzy: true,
                     lineStartsWith: ['## ', '{{bab}}', '{{raqms}} - '],
                     meta: { type: 'chapter' },
-                    split: 'before',
+                    split: 'at',
                 },
             ];
 
@@ -150,14 +150,14 @@ describe('segmenter', () => {
         });
 
         it('should support lineStartsAfter to exclude marker from content', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: 'Introduction text here', id: 1 },
                 { content: '## Chapter 1 Title\nChapter content', id: 2 },
                 { content: '## Chapter 2 Title\nMore content', id: 3 },
             ];
 
             // lineStartsAfter: matches lines starting with ## but captures only what comes after (same line only)
-            const rules: SplitRule[] = [{ lineStartsAfter: ['## '], meta: { type: 'chapter' }, split: 'before' }];
+            const rules: SplitRule[] = [{ lineStartsAfter: ['## '], meta: { type: 'chapter' }, split: 'at' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -169,13 +169,13 @@ describe('segmenter', () => {
         });
 
         it('should auto-detect capture groups in regex and use captured content', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: 'Header: Important Title\nBody text here', id: 1 },
                 { content: 'Header: Another Title\nMore body text', id: 2 },
             ];
 
             // Regex with capture group - only captured content should be used (same line)
-            const rules: SplitRule[] = [{ meta: { type: 'header' }, regex: '^Header: (.+)$', split: 'before' }];
+            const rules: SplitRule[] = [{ meta: { type: 'header' }, regex: '^Header: (.+)$', split: 'at' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -186,13 +186,13 @@ describe('segmenter', () => {
         });
 
         it('should include full content when regex has no capture groups', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: 'Header: Important Title\nBody text here', id: 1 },
                 { content: 'Header: Another Title\nMore body text', id: 2 },
             ];
 
             // Regex WITHOUT capture group - splits at match but includes all content up to next split
-            const rules: SplitRule[] = [{ meta: { type: 'header' }, regex: '^Header: .+$', split: 'before' }];
+            const rules: SplitRule[] = [{ meta: { type: 'header' }, regex: '^Header: .+$', split: 'at' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -215,13 +215,13 @@ describe('segmenter', () => {
         // ─────────────────────────────────────────────────────────────
 
         it('should only apply pattern when page is >= min', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: '١ - الحديث الأول', id: 1 },
                 { content: '٢ - الحديث الثاني', id: 5 },
                 { content: '٣ - الحديث الثالث', id: 10 },
             ];
 
-            const rules: SplitRule[] = [{ min: 5, regex: '^[٠-٩]+ - ', split: 'before' }];
+            const rules: SplitRule[] = [{ min: 5, regex: '^[٠-٩]+ - ', split: 'at' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -231,13 +231,13 @@ describe('segmenter', () => {
         });
 
         it('should only apply pattern when page is <= max', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: '١ - الحديث الأول', id: 1 },
                 { content: '٢ - الحديث الثاني', id: 5 },
                 { content: '٣ - الحديث الثالث', id: 10 },
             ];
 
-            const rules: SplitRule[] = [{ max: 5, regex: '^[٠-٩]+ - ', split: 'before' }];
+            const rules: SplitRule[] = [{ max: 5, regex: '^[٠-٩]+ - ', split: 'at' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -247,14 +247,14 @@ describe('segmenter', () => {
         });
 
         it('should apply pattern only within min-max range', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: '١ - الحديث الأول', id: 1 },
                 { content: '٢ - الحديث الثاني', id: 5 },
                 { content: '٣ - الحديث الثالث', id: 10 },
                 { content: '٤ - الحديث الرابع', id: 15 },
             ];
 
-            const rules: SplitRule[] = [{ max: 10, min: 5, regex: '^[٠-٩]+ - ', split: 'before' }];
+            const rules: SplitRule[] = [{ max: 10, min: 5, regex: '^[٠-٩]+ - ', split: 'at' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -272,8 +272,8 @@ describe('segmenter', () => {
             const rawContent = '٦٦٩٦ - حَدَّثَنَا <a href="inr://man-5093">أَبُو نُعَيْمٍ</a>';
             const strippedContent = rawContent.replace(/<[^>]*>/g, ''); // Client strips HTML
 
-            const pages: PageInput[] = [{ content: strippedContent, id: 142 }];
-            const rules: SplitRule[] = [{ regex: '^[٠-٩]+ - ', split: 'before' }];
+            const pages: Page[] = [{ content: strippedContent, id: 142 }];
+            const rules: SplitRule[] = [{ regex: '^[٠-٩]+ - ', split: 'at' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -287,7 +287,7 @@ describe('segmenter', () => {
         // ─────────────────────────────────────────────────────────────
 
         it('should split after pattern when split is after', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: 'The quick brown fox jumps over the lazy dog', id: 1 },
                 { content: 'This is another sentence about the quick brown fox jumping over the lazy dog', id: 2 },
             ];
@@ -308,7 +308,7 @@ describe('segmenter', () => {
         });
 
         it('should support lineEndsWith syntax sugar', () => {
-            const pages: PageInput[] = [{ content: 'Line a\nLine b\nLine c1\nLine d', id: 1 }];
+            const pages: Page[] = [{ content: 'Line a\nLine b\nLine c1\nLine d', id: 1 }];
 
             // lineEndsWith: pattern at end of line
             const rules: SplitRule[] = [{ lineEndsWith: ['\\d+'], split: 'after' }];
@@ -326,7 +326,7 @@ describe('segmenter', () => {
         // ─────────────────────────────────────────────────────────────
 
         it('should only split at last occurrence when occurrence is last', () => {
-            const pages: PageInput[] = [{ content: 'Sentence 1. Sentence 2. Sentence 3', id: 1 }];
+            const pages: Page[] = [{ content: 'Sentence 1. Sentence 2. Sentence 3', id: 1 }];
 
             const rules: SplitRule[] = [{ occurrence: 'last', regex: '\\.\\s*', split: 'after' }];
 
@@ -339,9 +339,9 @@ describe('segmenter', () => {
         });
 
         it('should only split at first occurrence when occurrence is first', () => {
-            const pages: PageInput[] = [{ content: 'Hello. World. Foo.', id: 1 }];
+            const pages: Page[] = [{ content: 'Hello. World. Foo.', id: 1 }];
 
-            const rules: SplitRule[] = [{ occurrence: 'first', regex: '\\.', split: 'before' }];
+            const rules: SplitRule[] = [{ occurrence: 'first', regex: '\\.', split: 'at' }];
 
             const result = segmentPages(pages, { rules });
 
@@ -351,7 +351,7 @@ describe('segmenter', () => {
         });
 
         it('should split at all occurrences by default', () => {
-            const pages: PageInput[] = [{ content: 'A.B.C.D', id: 1 }];
+            const pages: Page[] = [{ content: 'A.B.C.D', id: 1 }];
 
             const rules: SplitRule[] = [{ regex: '\\.', split: 'after' }];
 
@@ -366,7 +366,7 @@ describe('segmenter', () => {
 
         it('should only set "to" field when segment spans multiple IDs', () => {
             // Test 1: Segment within single ID - should NOT have "to" field
-            const singleIdPages: PageInput[] = [
+            const singleIdPages: Page[] = [
                 { content: 'First. Second.', id: 1 },
                 { content: 'Third.', id: 2 },
             ];
@@ -380,7 +380,7 @@ describe('segmenter', () => {
             expect(result1[1].to).toBeUndefined();
 
             // Test 2: Segment spanning multiple IDs - should have "to" field
-            const multiIdPages: PageInput[] = [
+            const multiIdPages: Page[] = [
                 { content: 'First part no punctuation', id: 1 },
                 { content: 'continues here.', id: 2 },
             ];
@@ -399,7 +399,7 @@ describe('segmenter', () => {
 
     describe('maxSpan option', () => {
         // Test data: 4 entries with 0-indexed IDs (id 0, 1, 2, 3)
-        const multiPageContent: PageInput[] = [
+        const multiPageContent: Page[] = [
             { content: 'P1A. P1B. E1', id: 0 },
             { content: 'P2A. P2B. E2', id: 1 },
             { content: 'P3A. P3B. E3', id: 2 },
@@ -468,7 +468,7 @@ describe('segmenter', () => {
 
         it('should work with occurrence first and maxSpan 1', () => {
             // occurrence: 'first' with maxSpan: 1 finds FIRST period on EACH page
-            const rules: SplitRule[] = [{ maxSpan: 1, occurrence: 'first', regex: '\\.', split: 'before' }];
+            const rules: SplitRule[] = [{ maxSpan: 1, occurrence: 'first', regex: '\\.', split: 'at' }];
 
             const result = segmentPages(multiPageContent, { rules });
 
@@ -498,7 +498,7 @@ describe('segmenter', () => {
 
         it('should work correctly with non-contiguous page IDs (gaps in page sequence)', () => {
             // Page IDs with gaps: 1, 5, 10, 100 (non-sequential)
-            const gappedPages: PageInput[] = [
+            const gappedPages: Page[] = [
                 { content: 'Page1A. Page1B. End1', id: 1 },
                 { content: 'Page5A. Page5B. End5', id: 5 },
                 { content: 'Page10A. Page10B. End10', id: 10 },
@@ -529,7 +529,7 @@ describe('segmenter', () => {
 
         it('should handle maxSpan with large gaps between page IDs', () => {
             // Edge case: very large gaps could theoretically cause grouping issues
-            const largeGapPages: PageInput[] = [
+            const largeGapPages: Page[] = [
                 { content: 'A. B.', id: 1 },
                 { content: 'C. D.', id: 1000 },
             ];
@@ -554,7 +554,7 @@ describe('segmenter', () => {
 
     describe('fuzzy matching', () => {
         it('should match Arabic words regardless of diacritics placement when fuzzy is true', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: 'بَابُ الصلاة', id: 1 }, // With harakat
                 { content: 'باب الزكاة', id: 2 }, // Without harakat
                 { content: 'بابٌ ثالث', id: 3 }, // With tanwin
@@ -562,19 +562,19 @@ describe('segmenter', () => {
 
             // Note: Regular regex already matches since diacritics appear after base letters
             // The main value of fuzzy is character equivalences (tested below)
-            const fuzzyRules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['باب'], split: 'before' }];
+            const fuzzyRules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['باب'], split: 'at' }];
             const fuzzyResult = segmentPages(pages, { rules: fuzzyRules });
             expect(fuzzyResult.length).toBe(3);
         });
 
         it('should handle character equivalences (ا/آ/أ/إ, ة/ه, ى/ي)', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: 'إسناد صحيح', id: 1 }, // إ
                 { content: 'اسناد حسن', id: 2 }, // ا
                 { content: 'أسناد ضعيف', id: 3 }, // أ
             ];
 
-            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['اسناد'], split: 'before' }];
+            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['اسناد'], split: 'at' }];
             const result = segmentPages(pages, { rules });
 
             // All three should match due to ا/إ/أ equivalence
@@ -582,13 +582,13 @@ describe('segmenter', () => {
         });
 
         it('should not apply fuzzy to non-Arabic patterns', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: '## Chapter 1', id: 1 },
                 { content: '## Chapter 2', id: 2 },
             ];
 
             // fuzzy should have no effect on non-Arabic patterns
-            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['## '], split: 'before' }];
+            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['## '], split: 'at' }];
             const result = segmentPages(pages, { rules });
 
             expect(result.length).toBe(2);
@@ -596,14 +596,14 @@ describe('segmenter', () => {
         });
 
         it('should apply fuzzy with lineStartsAfter', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: 'كِتَابُ الصلاة\nمحتوى الكتاب', id: 1 },
                 { content: 'كتاب الصيام\nمحتوى آخر', id: 2 },
             ];
 
             // lineStartsAfter with fuzzy: extracts content after marker
             const rules: SplitRule[] = [
-                { fuzzy: true, lineStartsAfter: ['كتاب '], meta: { type: 'book' }, split: 'before' },
+                { fuzzy: true, lineStartsAfter: ['كتاب '], meta: { type: 'book' }, split: 'at' },
             ];
             const result = segmentPages(pages, { rules });
 
@@ -614,7 +614,7 @@ describe('segmenter', () => {
         });
 
         it('should apply fuzzy with lineEndsWith', () => {
-            const pages: PageInput[] = [{ content: 'First sentence.\nSecond sentenceٌ\nThird', id: 1 }];
+            const pages: Page[] = [{ content: 'First sentence.\nSecond sentenceٌ\nThird', id: 1 }];
 
             // Match lines ending with period or tanwin
             const rules: SplitRule[] = [{ fuzzy: true, lineEndsWith: ['\\.', 'ة'], split: 'after' }];
@@ -626,38 +626,38 @@ describe('segmenter', () => {
 
     describe('phrase tokens', () => {
         it('should expand {{bab}} token for chapter markers', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: 'بَابُ الإيمان', id: 1 },
                 { content: 'باب الصلاة', id: 2 },
             ];
 
-            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{bab}}'], split: 'before' }];
+            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{bab}}'], split: 'at' }];
             const result = segmentPages(pages, { rules });
 
             expect(result.length).toBe(2);
         });
 
         it('should expand {{kitab}} token for book markers', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: 'كِتَابُ الطهارة', id: 1 },
                 { content: 'كتاب الصلاة', id: 2 },
             ];
 
-            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{kitab}}'], split: 'before' }];
+            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{kitab}}'], split: 'at' }];
             const result = segmentPages(pages, { rules });
 
             expect(result.length).toBe(2);
         });
 
-        it('should expand {{narrated}} token for hadith chains', () => {
-            const pages: PageInput[] = [
+        it('should expand {{naql}} token for hadith chains', () => {
+            const pages: Page[] = [
                 { content: 'حَدَّثَنَا أبو بكر', id: 1 },
                 { content: 'أخبرنا محمد', id: 2 },
                 { content: 'حدثني علي', id: 3 },
                 { content: 'سمعت عمر', id: 4 },
             ];
 
-            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{narrated}}'], split: 'before' }];
+            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{naql}}'], split: 'at' }];
             const result = segmentPages(pages, { rules });
 
             // All 4 should match different narrator phrases
@@ -665,26 +665,26 @@ describe('segmenter', () => {
         });
 
         it('should expand {{basmala}} token for bismillah patterns', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: 'بِسْمِ اللهِ الرَّحْمٰنِ الرَّحِيمِ', id: 1 },
                 { content: 'بسم الله', id: 2 },
             ];
 
-            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{basmala}}'], split: 'before' }];
+            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{basmala}}'], split: 'at' }];
             const result = segmentPages(pages, { rules });
 
             expect(result.length).toBe(2);
         });
 
         it('should combine multiple phrase tokens in lineStartsWith', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: 'كتاب الإيمان', id: 1 },
                 { content: 'باب أركان الإيمان', id: 2 },
                 { content: 'حدثنا أبو هريرة', id: 3 },
             ];
 
             const rules: SplitRule[] = [
-                { fuzzy: true, lineStartsWith: ['{{kitab}}', '{{bab}}', '{{narrated}}'], split: 'before' },
+                { fuzzy: true, lineStartsWith: ['{{kitab}}', '{{bab}}', '{{naql}}'], split: 'at' },
             ];
             const result = segmentPages(pages, { rules });
 
@@ -694,33 +694,33 @@ describe('segmenter', () => {
 
     describe('character tokens', () => {
         it('should expand {{harf}} token for single Arabic letter', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: 'أ - البند الأول', id: 1 },
                 { content: 'ب - البند الثاني', id: 2 },
             ];
 
-            const rules: SplitRule[] = [{ lineStartsWith: ['{{harf}} - '], split: 'before' }];
+            const rules: SplitRule[] = [{ lineStartsWith: ['{{harf}} - '], split: 'at' }];
             const result = segmentPages(pages, { rules });
 
             expect(result.length).toBe(2);
         });
 
         it('should expand {{bullet}} token for bullet markers', () => {
-            const pages: PageInput[] = [{ content: '• النقطة الأولى\n* النقطة الثانية\n° النقطة الثالثة', id: 1 }];
+            const pages: Page[] = [{ content: '• النقطة الأولى\n* النقطة الثانية\n° النقطة الثالثة', id: 1 }];
 
-            const rules: SplitRule[] = [{ lineStartsWith: ['{{bullet}} '], split: 'before' }];
+            const rules: SplitRule[] = [{ lineStartsWith: ['{{bullet}} '], split: 'at' }];
             const result = segmentPages(pages, { rules });
 
             expect(result.length).toBe(3);
         });
 
         it('should combine harf with raqm for numbered letter patterns', () => {
-            const pages: PageInput[] = [
+            const pages: Page[] = [
                 { content: '٥ أ - البند', id: 1 },
                 { content: '٥ ب - البند التالي', id: 2 },
             ];
 
-            const rules: SplitRule[] = [{ lineStartsWith: ['{{raqms}} {{harf}} - '], split: 'before' }];
+            const rules: SplitRule[] = [{ lineStartsWith: ['{{raqms}} {{harf}} - '], split: 'at' }];
             const result = segmentPages(pages, { rules });
 
             expect(result.length).toBe(2);
@@ -734,13 +734,13 @@ describe('segmenter', () => {
     describe('named capture groups', () => {
         describe('template patterns', () => {
             it('should extract single named capture from template', () => {
-                const pages: PageInput[] = [
+                const pages: Page[] = [
                     { content: '٦٦٩٦ - حَدَّثَنَا أَبُو بَكْرٍ', id: 1 },
                     { content: '٦٦٩٧ - حَدَّثَنَا عُمَرُ', id: 2 },
                 ];
 
                 // {{raqms:num}} captures the number into meta.num
-                const rules: SplitRule[] = [{ split: 'before', template: '^{{raqms:num}} {{dash}} ' }];
+                const rules: SplitRule[] = [{ split: 'at', template: '^{{raqms:num}} {{dash}} ' }];
                 const result = segmentPages(pages, { rules });
 
                 expect(result).toHaveLength(2);
@@ -749,10 +749,10 @@ describe('segmenter', () => {
             });
 
             it('should extract multiple named captures from template', () => {
-                const pages: PageInput[] = [{ content: '٣/٤٥٦ - نص الحديث', id: 1 }];
+                const pages: Page[] = [{ content: '٣/٤٥٦ - نص الحديث', id: 1 }];
 
                 // Capture volume and page separately
-                const rules: SplitRule[] = [{ split: 'before', template: '^{{raqms:vol}}/{{raqms:page}} {{dash}} ' }];
+                const rules: SplitRule[] = [{ split: 'at', template: '^{{raqms:vol}}/{{raqms:page}} {{dash}} ' }];
                 const result = segmentPages(pages, { rules });
 
                 expect(result).toHaveLength(1);
@@ -761,10 +761,10 @@ describe('segmenter', () => {
             });
 
             it('should capture rest of content with {{:name}} syntax', () => {
-                const pages: PageInput[] = [{ content: '٦٦٩٦ - حَدَّثَنَا أَبُو بَكْرٍ', id: 1 }];
+                const pages: Page[] = [{ content: '٦٦٩٦ - حَدَّثَنَا أَبُو بَكْرٍ', id: 1 }];
 
                 // {{:text}} captures everything after the pattern
-                const rules: SplitRule[] = [{ split: 'before', template: '^{{raqms:num}} {{dash}} {{:text}}' }];
+                const rules: SplitRule[] = [{ split: 'at', template: '^{{raqms:num}} {{dash}} {{:text}}' }];
                 const result = segmentPages(pages, { rules });
 
                 expect(result).toHaveLength(1);
@@ -775,12 +775,12 @@ describe('segmenter', () => {
 
         describe('lineStartsWith patterns', () => {
             it('should extract named capture from lineStartsWith', () => {
-                const pages: PageInput[] = [
+                const pages: Page[] = [
                     { content: '١ - الحديث الأول', id: 1 },
                     { content: '٢ - الحديث الثاني', id: 2 },
                 ];
 
-                const rules: SplitRule[] = [{ lineStartsWith: ['{{raqms:hadithNum}} {{dash}} '], split: 'before' }];
+                const rules: SplitRule[] = [{ lineStartsWith: ['{{raqms:hadithNum}} {{dash}} '], split: 'at' }];
                 const result = segmentPages(pages, { rules });
 
                 expect(result).toHaveLength(2);
@@ -789,10 +789,10 @@ describe('segmenter', () => {
             });
 
             it('should merge extracted captures with existing meta', () => {
-                const pages: PageInput[] = [{ content: '١٢٣ - الحديث', id: 1 }];
+                const pages: Page[] = [{ content: '١٢٣ - الحديث', id: 1 }];
 
                 const rules: SplitRule[] = [
-                    { lineStartsWith: ['{{raqms:num}} {{dash}} '], meta: { type: 'hadith' }, split: 'before' },
+                    { lineStartsWith: ['{{raqms:num}} {{dash}} '], meta: { type: 'hadith' }, split: 'at' },
                 ];
                 const result = segmentPages(pages, { rules });
 
@@ -801,12 +801,12 @@ describe('segmenter', () => {
             });
 
             it('should handle phrase token with named capture', () => {
-                const pages: PageInput[] = [
+                const pages: Page[] = [
                     { content: 'حدثنا أبو بكر', id: 1 },
                     { content: 'أخبرنا محمد', id: 2 },
                 ];
 
-                const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{narrated:phrase}}'], split: 'before' }];
+                const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{naql:phrase}}'], split: 'at' }];
                 const result = segmentPages(pages, { rules });
 
                 expect(result).toHaveLength(2);
@@ -817,13 +817,13 @@ describe('segmenter', () => {
 
         describe('lineStartsAfter patterns', () => {
             it('should extract named capture and exclude marker from content', () => {
-                const pages: PageInput[] = [
+                const pages: Page[] = [
                     { content: '٦٦٩٦ - حَدَّثَنَا أَبُو بَكْرٍ', id: 1 },
                     { content: '٦٦٩٧ - أَخْبَرَنَا عُمَرُ', id: 2 },
                 ];
 
                 // lineStartsAfter excludes marker, named capture extracts number
-                const rules: SplitRule[] = [{ lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'before' }];
+                const rules: SplitRule[] = [{ lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'at' }];
                 const result = segmentPages(pages, { rules });
 
                 expect(result).toHaveLength(2);
@@ -835,10 +835,10 @@ describe('segmenter', () => {
             });
 
             it('should extract multiple captures with lineStartsAfter', () => {
-                const pages: PageInput[] = [{ content: '٣/٤٥٦ - نص الحديث هنا', id: 1 }];
+                const pages: Page[] = [{ content: '٣/٤٥٦ - نص الحديث هنا', id: 1 }];
 
                 const rules: SplitRule[] = [
-                    { lineStartsAfter: ['{{raqms:vol}}/{{raqms:page}} {{dash}} '], split: 'before' },
+                    { lineStartsAfter: ['{{raqms:vol}}/{{raqms:page}} {{dash}} '], split: 'at' },
                 ];
                 const result = segmentPages(pages, { rules });
 
@@ -851,10 +851,10 @@ describe('segmenter', () => {
 
         describe('edge cases', () => {
             it('should handle tokens without capture (no :name suffix)', () => {
-                const pages: PageInput[] = [{ content: '١ - الحديث', id: 1 }];
+                const pages: Page[] = [{ content: '١ - الحديث', id: 1 }];
 
                 // No :name suffix - should work as before, no captures
-                const rules: SplitRule[] = [{ lineStartsWith: ['{{raqms}} {{dash}} '], split: 'before' }];
+                const rules: SplitRule[] = [{ lineStartsWith: ['{{raqms}} {{dash}} '], split: 'at' }];
                 const result = segmentPages(pages, { rules });
 
                 expect(result).toHaveLength(1);
@@ -862,10 +862,10 @@ describe('segmenter', () => {
             });
 
             it('should handle mixed captured and non-captured tokens', () => {
-                const pages: PageInput[] = [{ content: '٥ أ - البند الأول', id: 1 }];
+                const pages: Page[] = [{ content: '٥ أ - البند الأول', id: 1 }];
 
                 // Only capture the number, not the letter
-                const rules: SplitRule[] = [{ lineStartsWith: ['{{raqms:num}} {{harf}} {{dash}} '], split: 'before' }];
+                const rules: SplitRule[] = [{ lineStartsWith: ['{{raqms:num}} {{harf}} {{dash}} '], split: 'at' }];
                 const result = segmentPages(pages, { rules });
 
                 expect(result).toHaveLength(1);
@@ -874,12 +874,12 @@ describe('segmenter', () => {
             });
 
             it('should work with fuzzy and named captures together', () => {
-                const pages: PageInput[] = [
+                const pages: Page[] = [
                     { content: 'كِتَابُ الصلاة', id: 1 },
                     { content: 'كتاب الصيام', id: 2 },
                 ];
 
-                const rules: SplitRule[] = [{ fuzzy: true, lineStartsAfter: ['{{kitab:book}} '], split: 'before' }];
+                const rules: SplitRule[] = [{ fuzzy: true, lineStartsAfter: ['{{kitab:book}} '], split: 'at' }];
                 const result = segmentPages(pages, { rules });
 
                 expect(result).toHaveLength(2);
@@ -887,6 +887,26 @@ describe('segmenter', () => {
                 expect(result[0].content).toBe('الصلاة');
                 expect(result[0].meta?.book).toBeDefined(); // Should capture the matched variant
                 expect(result[1].content).toBe('الصيام');
+            });
+        });
+
+        describe('error handling', () => {
+            it('should throw helpful error for invalid regex patterns', () => {
+                const pages: Page[] = [{ content: 'test content', id: 1 }];
+
+                // Invalid regex: unbalanced parenthesis
+                const rules: SplitRule[] = [{ regex: '(unclosed', split: 'at' }];
+
+                expect(() => segmentPages(pages, { rules })).toThrow(/Invalid regex pattern/);
+            });
+
+            it('should throw error when no pattern type is specified', () => {
+                const pages: Page[] = [{ content: 'test', id: 1 }];
+
+                // Empty rule with only split behavior
+                const rules: SplitRule[] = [{ split: 'at' } as SplitRule];
+
+                expect(() => segmentPages(pages, { rules })).toThrow(/must specify exactly one pattern type/);
             });
         });
     });

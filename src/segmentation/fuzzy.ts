@@ -155,7 +155,7 @@ const normalizeArabicLight = (str: string) => {
  * // Using with split rules
  * {
  *   lineStartsWith: ['باب'],
- *   split: 'before',
+ *   split: 'at',
  *   fuzzy: true  // Applies makeDiacriticInsensitive internally
  * }
  */

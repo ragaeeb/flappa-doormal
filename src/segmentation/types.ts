@@ -11,11 +11,11 @@
  *
  * @example
  * // Match Arabic-Indic numbers followed by a dash
- * { regex: '^[٠-٩]+ - ', split: 'before' }
+ * { regex: '^[٠-٩]+ - ', split: 'at' }
  *
  * @example
  * // Capture group - content after the marker becomes segment content
- * { regex: '^[٠-٩]+ - (.*)', split: 'before' }
+ * { regex: '^[٠-٩]+ - (.*)', split: 'at' }
  */
 type RegexPattern = {
     /** Raw regex pattern string (no token expansion) */
@@ -29,11 +29,11 @@ type RegexPattern = {
  *
  * @example
  * // Using tokens for Arabic-Indic digits
- * { template: '^{{raqms}} {{dash}}', split: 'before' }
+ * { template: '^{{raqms}} {{dash}}', split: 'at' }
  *
  * @example
  * // Named capture to extract hadith number into metadata
- * { template: '^{{raqms:hadithNum}} {{dash}}', split: 'before' }
+ * { template: '^{{raqms:hadithNum}} {{dash}}', split: 'at' }
  *
  * @see TOKEN_PATTERNS for available tokens
  */
@@ -53,11 +53,11 @@ type TemplatePattern = {
  *
  * @example
  * // Split at chapter headings (marker included in content)
- * { lineStartsWith: ['## ', '### '], split: 'before' }
+ * { lineStartsWith: ['## ', '### '], split: 'at' }
  *
  * @example
  * // Split at Arabic book/chapter markers with fuzzy matching
- * { lineStartsWith: ['{{kitab}}', '{{bab}}'], split: 'before', fuzzy: true }
+ * { lineStartsWith: ['{{kitab}}', '{{bab}}'], split: 'at', fuzzy: true }
  */
 type LineStartsWithPattern = {
     /** Array of patterns that mark line beginnings (marker included in content) */
@@ -76,11 +76,11 @@ type LineStartsWithPattern = {
  *
  * @example
  * // Split at numbered hadiths, capturing content without the number prefix
- * { lineStartsAfter: ['{{raqms}} {{dash}} '], split: 'before' }
+ * { lineStartsAfter: ['{{raqms}} {{dash}} '], split: 'at' }
  *
  * @example
  * // Extract hadith number to metadata while stripping the prefix
- * { lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'before' }
+ * { lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'at' }
  */
 type LineStartsAfterPattern = {
     /** Array of patterns that mark line beginnings (marker excluded, rest captured) */
@@ -134,10 +134,10 @@ type PatternType =
 type SplitBehavior = {
     /**
      * Where to split relative to the match.
-     * - `'before'`: New segment starts at the match position
+     * - `'at'`: New segment starts at the match position
      * - `'after'`: New segment starts after the match ends
      */
-    split: 'before' | 'after';
+    split: 'at' | 'after';
 
     /**
      * Which occurrence(s) to split on.
@@ -246,7 +246,7 @@ type RuleConstraints = {
  * // Basic rule: split at markdown headers
  * const rule: SplitRule = {
  *   lineStartsWith: ['## ', '### '],
- *   split: 'before',
+ *   split: 'at',
  *   meta: { type: 'section' }
  * };
  *
@@ -254,7 +254,7 @@ type RuleConstraints = {
  * // Advanced rule: extract hadith numbers with fuzzy Arabic matching
  * const rule: SplitRule = {
  *   lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '],
- *   split: 'before',
+ *   split: 'at',
  *   fuzzy: true,
  *   min: 5,
  *   max: 500,
@@ -274,12 +274,12 @@ export type SplitRule = PatternType & SplitBehavior & RuleConstraints;
  * a document section) that can be tracked across segment boundaries.
  *
  * @example
- * const pages: PageInput[] = [
+ * const pages: Page[] = [
  *   { id: 1, content: '## Chapter 1\nFirst paragraph...' },
  *   { id: 2, content: 'Continued text...\n## Chapter 2' },
  * ];
  */
-export type PageInput = {
+export type Page = {
     /**
      * Unique page/entry ID used for:
      * - `maxSpan` grouping (segments spanning multiple pages)
@@ -292,7 +292,7 @@ export type PageInput = {
      * Raw page content (may contain HTML).
      *
      * Line endings are normalized internally (`\r\n` and `\r` → `\n`).
-     * Use `htmlToMarkdown()` or `stripHtmlTags()` to preprocess HTML.
+     * Use a utility to convert html to markdown or `stripHtmlTags()` to preprocess HTML.
      */
     content: string;
 };
@@ -303,8 +303,8 @@ export type PageInput = {
  * @example
  * const options: SegmentationOptions = {
  *   rules: [
- *     { lineStartsWith: ['## '], split: 'before', meta: { type: 'chapter' } },
- *     { lineStartsWith: ['### '], split: 'before', meta: { type: 'section' } },
+ *     { lineStartsWith: ['## '], split: 'at', meta: { type: 'chapter' } },
+ *     { lineStartsWith: ['### '], split: 'at', meta: { type: 'section' } },
  *   ]
  * };
  */
@@ -343,7 +343,7 @@ export type Segment = {
     content: string;
 
     /**
-     * Starting page ID (from `PageInput.id`).
+     * Starting page ID (from `Page.id`).
      */
     from: number;
 

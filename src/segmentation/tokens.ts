@@ -33,11 +33,11 @@
  *
  * @example
  * // Using tokens in a split rule
- * { lineStartsWith: ['{{kitab}}', '{{bab}}'], split: 'before', fuzzy: true }
+ * { lineStartsWith: ['{{kitab}}', '{{bab}}'], split: 'at', fuzzy: true }
  *
  * @example
  * // Using tokens with named captures
- * { lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '], split: 'before' }
+ * { lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '], split: 'at' }
  */
 export const TOKEN_PATTERNS: Record<string, string> = {
     /**
@@ -110,7 +110,7 @@ export const TOKEN_PATTERNS: Record<string, string> = {
     kitab: 'كتاب',
 
     /**
-     * Narrator phrases - common hadith transmission phrases.
+     * Naql (transmission) phrases - common hadith transmission phrases.
      *
      * Alternation of Arabic phrases used to indicate narration chains:
      * - حدثنا (he narrated to us)
@@ -120,9 +120,9 @@ export const TOKEN_PATTERNS: Record<string, string> = {
      * - أنبأنا (he reported to us)
      * - سمعت (I heard)
      *
-     * @example '{{narrated}}' matches any of the above phrases
+     * @example '{{naql}}' matches any of the above phrases
      */
-    narrated: 'حدثنا|أخبرنا|حدثني|وحدثنا|أنبأنا|سمعت',
+    naql: 'حدثنا|أخبرنا|حدثني|وحدثنا|أنبأنا|سمعت',
 
     /**
      * Single Arabic-Indic digit - matches one digit (٠-٩).
@@ -390,7 +390,7 @@ export function templateToRegex(template: string): RegExp | null {
  *
  * @example
  * getAvailableTokens()
- * // → ['bab', 'basmala', 'bullet', 'dash', 'harf', 'kitab', 'narrated', 'raqm', 'raqms']
+ * // → ['bab', 'basmala', 'bullet', 'dash', 'harf', 'kitab', 'naql', 'raqm', 'raqms']
  */
 export function getAvailableTokens(): string[] {
     return Object.keys(TOKEN_PATTERNS);

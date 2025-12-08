@@ -17,8 +17,8 @@
  *
  * const segments = segmentPages(pages, {
  *   rules: [
- *     { lineStartsWith: ['{{kitab}}'], split: 'before', fuzzy: true, meta: { type: 'book' } },
- *     { lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'before', meta: { type: 'hadith' } }
+ *     { lineStartsWith: ['{{kitab}}'], split: 'at', fuzzy: true, meta: { type: 'book' } },
+ *     { lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'at', meta: { type: 'hadith' } }
  *   ]
  * });
  */
@@ -31,15 +31,19 @@
 export { escapeRegex, makeDiacriticInsensitive } from './segmentation/fuzzy.js';
 
 // HTML utilities
-export { htmlToMarkdown, stripHtmlTags } from './segmentation/html.js';
+export { stripHtmlTags } from './segmentation/html.js';
 
 // Core segmentation
 export { segmentPages } from './segmentation/segmenter.js';
 
-// Token expansion
+// Token expansion types
+export type { ExpandResult } from './segmentation/tokens.js';
+
+// Token expansion (with named capture support)
 export {
     containsTokens,
     expandTokens,
+    expandTokensWithCaptures,
     getAvailableTokens,
     getTokenPattern,
     TOKEN_PATTERNS,
@@ -47,4 +51,4 @@ export {
 } from './segmentation/tokens.js';
 
 // Type definitions
-export type { PageInput, Segment, SegmentationOptions, SplitRule } from './segmentation/types.js';
+export type { Page, Segment, SegmentationOptions, SplitRule } from './segmentation/types.js';

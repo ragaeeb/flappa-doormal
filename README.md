@@ -66,7 +66,7 @@ const pages = [
 const segments = segmentPages(pages, {
   rules: [{
     lineStartsAfter: ['{{raqms:num}} {{dash}} '],
-    split: 'before',
+    split: 'at',
   }]
 });
 
@@ -91,7 +91,7 @@ Replace regex with readable tokens:
 | `{{dash}}` | Dash variants | `[-–—ـ]` |
 | `{{harf}}` | Arabic letter | `[أ-ي]` |
 | `{{bullet}}` | Bullet points | `[•*°]` |
-| `{{narrated}}` | Narrator phrases | `حدثنا\|أخبرنا\|...` |
+| `{{naql}}` | Narrator phrases | `حدثنا\|أخبرنا\|...` |
 | `{{kitab}}` | "كتاب" (book) | `كتاب` |
 | `{{bab}}` | "باب" (chapter) | `باب` |
 | `{{basmala}}` | "بسم الله" | `بسم الله` |
@@ -122,7 +122,7 @@ Match Arabic text regardless of harakat:
 const rules = [{
   fuzzy: true,
   lineStartsAfter: ['{{kitab:book}} '],
-  split: 'before',
+  split: 'at',
 }];
 
 // Matches both:
@@ -147,7 +147,7 @@ Limit rules to specific page ranges:
 ```typescript
 {
   lineStartsWith: ['## '],
-  split: 'before',
+  split: 'at',
   min: 10,    // Only pages 10+
   max: 100,   // Only pages up to 100
 }
@@ -174,7 +174,7 @@ Control which matches to use:
 const segments = segmentPages(pages, {
   rules: [{
     lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '],
-    split: 'before',
+    split: 'at',
     meta: { type: 'hadith' }
   }]
 });
@@ -191,7 +191,7 @@ const segments = segmentPages(pages, {
 const segments = segmentPages(pages, {
   rules: [{
     lineStartsAfter: ['{{raqms:vol}}/{{raqms:page}} {{dash}} '],
-    split: 'before'
+    split: 'at'
   }]
 });
 
@@ -205,7 +205,7 @@ const segments = segmentPages(pages, {
   rules: [{
     fuzzy: true,
     lineStartsAfter: ['{{kitab:book}} '],
-    split: 'before',
+    split: 'at',
     meta: { type: 'chapter' }
   }]
 });
@@ -213,14 +213,14 @@ const segments = segmentPages(pages, {
 // Matches "كِتَابُ" or "كتاب" regardless of diacritics
 ```
 
-### Narrator Phrase Detection
+### Naql (Transmission) Phrase Detection
 
 ```typescript
 const segments = segmentPages(pages, {
   rules: [{
     fuzzy: true,
-    lineStartsWith: ['{{narrated:phrase}}'],
-    split: 'before'
+    lineStartsWith: ['{{naql:phrase}}'],
+    split: 'at'
   }]
 });
 
@@ -235,7 +235,7 @@ const segments = segmentPages(pages, {
 const segments = segmentPages(pages, {
   rules: [{
     lineStartsWith: ['{{raqms:num}} {{harf}} {{dash}} '],
-    split: 'before'
+    split: 'at'
   }]
 });
 
@@ -262,11 +262,11 @@ const segments = segmentPages(pages, {
 const segments = segmentPages(pages, {
   rules: [
     // First: Chapter headers (highest priority)
-    { fuzzy: true, lineStartsAfter: ['{{kitab:book}} '], split: 'before', meta: { type: 'chapter' } },
+    { fuzzy: true, lineStartsAfter: ['{{kitab:book}} '], split: 'at', meta: { type: 'chapter' } },
     // Second: Sub-chapters
-    { fuzzy: true, lineStartsAfter: ['{{bab:section}} '], split: 'before', meta: { type: 'section' } },
+    { fuzzy: true, lineStartsAfter: ['{{bab:section}} '], split: 'at', meta: { type: 'section' } },
     // Third: Individual hadiths
-    { lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'before', meta: { type: 'hadith' } },
+    { lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'at', meta: { type: 'hadith' } },
   ]
 });
 ```
@@ -278,16 +278,16 @@ const segments = segmentPages(pages, {
 Main segmentation function.
 
 ```typescript
-import { segmentPages, type PageInput, type SegmentationOptions, type Segment } from 'flappa-doormal';
+import { segmentPages, type Page, type SegmentationOptions, type Segment } from 'flappa-doormal';
 
-const pages: PageInput[] = [
+const pages: Page[] = [
   { id: 1, content: 'First page content...' },
   { id: 2, content: 'Second page content...' },
 ];
 
 const options: SegmentationOptions = {
   rules: [
-    { lineStartsWith: ['## '], split: 'before' }
+    { lineStartsWith: ['## '], split: 'at' }
   ]
 };
 
@@ -366,7 +366,7 @@ type SplitRule = {
   regex?: string;
 
   // Split behavior
-  split: 'before' | 'after';
+  split: 'at' | 'after';
   occurrence?: 'first' | 'last' | 'all';
   maxSpan?: number;
   fuzzy?: boolean;
@@ -417,7 +417,7 @@ const pages = rawPages.map((p, i) => ({
 const segments = segmentPages(pages, {
   rules: [{
     lineStartsAfter: ['{{raqms:num}} {{dash}} '],
-    split: 'before'
+    split: 'at'
   }]
 });
 
@@ -435,6 +435,9 @@ bun test
 
 # Build
 bun run build
+
+# Run performance test (generates 50K pages, measures segmentation speed/memory)
+bun run perf
 
 # Lint
 bunx biome lint .
@@ -461,6 +464,34 @@ Fuzzy transforms are applied to raw Arabic text *before* wrapping in regex group
 ### Extracted Utilities
 
 Complex logic was extracted into `match-utils.ts` for independent testing and reduced complexity (main function: 37 → 10).
+
+## Performance Notes
+
+### Memory Requirements
+
+The library concatenates all pages into a single string for pattern matching across page boundaries. Memory usage scales linearly with total content size:
+
+| Pages | Avg Page Size | Approximate Memory |
+|-------|---------------|-------------------|
+| 1,000 | 5 KB | ~5 MB |
+| 6,000 | 5 KB | ~30 MB |
+| 40,000 | 5 KB | ~200 MB |
+
+For typical book processing (up to 6,000 pages), memory usage is well within Node.js defaults. For very large books (40,000+ pages), ensure adequate heap size.
+
+### `maxSpan` Grouping Behavior
+
+The `maxSpan` option groups pages by **ID ranges**, not consecutive array indices:
+
+```typescript
+// Pages with IDs [1, 2, 3, 4] and maxSpan: 2
+// Groups: [1, 2] and [3, 4]
+
+// BUT pages with IDs [1, 5, 10, 100] and maxSpan: 2  
+// Groups: [1] [5] [10] [100] (each in separate groups)
+```
+
+This is intentional for books where page IDs represent actual page numbers. If you need grouping by array position, pre-process pages to assign sequential IDs.
 
 ## For AI Agents
 

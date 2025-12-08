@@ -27,7 +27,6 @@ Traditional Arabic text segmentation requires:
 src/
 ├── index.ts                    # Main entry point and exports
 └── segmentation/
-    ├── index.ts                # Module exports
     ├── types.ts                # TypeScript type definitions for rules/segments
     ├── segmenter.ts            # Core segmentation engine (segmentPages)
     ├── tokens.ts               # Token definitions and expansion logic
@@ -179,6 +178,9 @@ bun test
 # Build distribution
 bun run build
 # Output: dist/index.mjs (~17 KB gzip ~5.7 KB)
+
+# Run performance test (generates 50K pages, measures segmentation speed/memory)
+bun run perf
 
 # Format code
 bunx biome format --write .

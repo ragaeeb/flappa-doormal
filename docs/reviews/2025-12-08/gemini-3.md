@@ -65,7 +65,7 @@ Instead of concatenating all pages:
 ### 4. Type Safety
 **Priority: Low**
 
-- The `PageInput` type is rigid. Consider making it generic or allowing a `getLine()` interface to decouple from the specific object structure.
+- The `Page` type is rigid. Consider making it generic or allowing a `getLine()` interface to decouple from the specific object structure.
 
 ## Conclusion
 

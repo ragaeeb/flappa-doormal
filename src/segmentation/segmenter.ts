@@ -19,7 +19,7 @@ import {
     type MatchResult,
 } from './match-utils.js';
 import { expandTokensWithCaptures } from './tokens.js';
-import type { PageInput, Segment, SegmentationOptions, SplitRule } from './types.js';
+import type { Page, Segment, SegmentationOptions, SplitRule } from './types.js';
 
 /**
  * Normalizes line endings to Unix-style (`\n`).
@@ -80,7 +80,7 @@ type ProcessedPattern = {
  * // → { pattern: '(?<num>[٠-٩]+) [-–—ـ]', captureNames: ['num'] }
  *
  * @example
- * processPattern('{{narrated}}', true)
+ * processPattern('{{naql}}', true)
  * // → { pattern: 'حَ?دَّ?ثَ?نَ?ا|...', captureNames: [] }
  */
 const processPattern = (pattern: string, fuzzy: boolean): ProcessedPattern => {
@@ -129,6 +129,18 @@ const buildRuleRegex = (rule: SplitRule): RuleRegex => {
     const fuzzy = (rule as { fuzzy?: boolean }).fuzzy ?? false;
     let allCaptureNames: string[] = [];
 
+    /**
+     * Safely compiles a regex pattern, throwing a helpful error if invalid.
+     */
+    const compileRegex = (pattern: string): RegExp => {
+        try {
+            return new RegExp(pattern, 'gmu');
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Invalid regex pattern: ${pattern}\n  Cause: ${message}`);
+        }
+    };
+
     // lineStartsAfter: creates a capturing group to exclude the marker from content
     if (s.lineStartsAfter?.length) {
         const processed = s.lineStartsAfter.map((p) => processPattern(p, fuzzy));
@@ -138,7 +150,7 @@ const buildRuleRegex = (rule: SplitRule): RuleRegex => {
         s.regex = `^(?:${patterns})(.*)`;
         return {
             captureNames: allCaptureNames,
-            regex: new RegExp(s.regex, 'gmu'),
+            regex: compileRegex(s.regex),
             usesCapture: true,
             usesLineStartsAfter: true,
         };
@@ -163,10 +175,16 @@ const buildRuleRegex = (rule: SplitRule): RuleRegex => {
         allCaptureNames = [...allCaptureNames, ...captureNames];
     }
 
-    const usesCapture = hasCapturingGroup(s.regex!) || allCaptureNames.length > 0;
+    if (!s.regex) {
+        throw new Error(
+            'Rule must specify exactly one pattern type: regex, template, lineStartsWith, lineStartsAfter, or lineEndsWith',
+        );
+    }
+
+    const usesCapture = hasCapturingGroup(s.regex) || allCaptureNames.length > 0;
     return {
         captureNames: allCaptureNames,
-        regex: new RegExp(s.regex!, 'gmu'),
+        regex: compileRegex(s.regex),
         usesCapture,
         usesLineStartsAfter: false,
     };
@@ -180,7 +198,7 @@ type PageBoundary = {
     start: number;
     /** End offset (inclusive) in the concatenated content string */
     end: number;
-    /** Page ID from the original `PageInput` */
+    /** Page ID from the original `Page` */
     id: number;
 };
 
@@ -197,8 +215,8 @@ type PageMap = {
     getId: (offset: number) => number;
     /** Array of page boundaries in order */
     boundaries: PageBoundary[];
-    /** Set of offsets where page breaks occur (for converting to spaces) */
-    pageBreaks: Set<number>;
+    /** Sorted array of offsets where page breaks occur (for binary search) */
+    pageBreaks: number[];
 };
 
 /**
@@ -221,9 +239,9 @@ type PageMap = {
  * // pageMap.getId(0) = 1
  * // pageMap.getId(12) = 2
  */
-const buildPageMap = (pages: PageInput[]): { content: string; pageMap: PageMap } => {
+const buildPageMap = (pages: Page[]): { content: string; pageMap: PageMap } => {
     const boundaries: PageBoundary[] = [];
-    const pageBreaks = new Set<number>();
+    const pageBreaks: number[] = []; // Sorted array for binary search
     let offset = 0;
     const parts: string[] = [];
 
@@ -232,7 +250,7 @@ const buildPageMap = (pages: PageInput[]): { content: string; pageMap: PageMap }
         boundaries.push({ end: offset + normalized.length, id: pages[i].id, start: offset });
         parts.push(normalized);
         if (i < pages.length - 1) {
-            pageBreaks.add(offset + normalized.length);
+            pageBreaks.push(offset + normalized.length); // Already in sorted order
             offset += normalized.length + 1;
         } else {
             offset += normalized.length;
@@ -322,43 +340,70 @@ const findMatches = (content: string, regex: RegExp, usesCapture: boolean, captu
 };
 
 /**
+ * Finds page breaks within a given offset range using binary search.
+ * O(log n + k) where n = total breaks, k = breaks in range.
+ *
+ * @param startOffset - Start of range (inclusive)
+ * @param endOffset - End of range (exclusive)
+ * @param sortedBreaks - Sorted array of page break offsets
+ * @returns Array of break offsets relative to startOffset
+ */
+const findBreaksInRange = (startOffset: number, endOffset: number, sortedBreaks: number[]): number[] => {
+    if (sortedBreaks.length === 0) {
+        return [];
+    }
+
+    // Binary search for first break >= startOffset
+    let lo = 0;
+    let hi = sortedBreaks.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (sortedBreaks[mid] < startOffset) {
+            lo = mid + 1;
+        } else {
+            hi = mid;
+        }
+    }
+
+    // Collect breaks until we exceed endOffset
+    const result: number[] = [];
+    for (let i = lo; i < sortedBreaks.length && sortedBreaks[i] < endOffset; i++) {
+        result.push(sortedBreaks[i] - startOffset);
+    }
+    return result;
+};
+
+/**
  * Converts page-break newlines to spaces in segment content.
  *
  * When a segment spans multiple pages, the newline characters that were
  * inserted as page separators during concatenation are converted to spaces
  * for more natural reading.
  *
- * Optimized to skip processing for segments that don't contain page breaks.
+ * Uses binary search for O(log n + k) lookup instead of O(n) iteration.
  *
  * @param content - Segment content string
  * @param startOffset - Starting offset of this content in concatenated string
- * @param pageBreaks - Set of offsets where page breaks occur
+ * @param pageBreaks - Sorted array of page break offsets
  * @returns Content with page-break newlines converted to spaces
  */
-const convertPageBreaks = (content: string, startOffset: number, pageBreaks: Set<number>): string => {
-    // Fast path: check if any page breaks fall within this segment's range
+const convertPageBreaks = (content: string, startOffset: number, pageBreaks: number[]): string => {
     const endOffset = startOffset + content.length;
-    const breaksInRange: number[] = [];
-
-    for (const pb of pageBreaks) {
-        if (pb >= startOffset && pb < endOffset) {
-            breaksInRange.push(pb - startOffset);
-        }
-    }
+    const breaksInRange = findBreaksInRange(startOffset, endOffset, pageBreaks);
 
     // No page breaks in this segment - return as-is (most common case)
     if (breaksInRange.length === 0) {
         return content;
     }
 
-    // Convert page-break newlines to spaces
-    let result = content;
+    // Convert page-break newlines to spaces using array for efficiency
+    const chars = Array.from(content);
     for (const idx of breaksInRange) {
-        if (result[idx] === '\n') {
-            result = `${result.slice(0, idx)} ${result.slice(idx + 1)}`;
+        if (chars[idx] === '\n') {
+            chars[idx] = ' ';
         }
     }
-    return result;
+    return chars.join('');
 };
 
 /**
@@ -376,7 +421,7 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: Set
  * // Split markdown by headers
  * const segments = segmentPages(pages, {
  *   rules: [
- *     { lineStartsWith: ['## '], split: 'before', meta: { type: 'chapter' } }
+ *     { lineStartsWith: ['## '], split: 'at', meta: { type: 'chapter' } }
  *   ]
  * });
  *
@@ -386,7 +431,7 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: Set
  *   rules: [
  *     {
  *       lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '],
- *       split: 'before',
+ *       split: 'at',
  *       fuzzy: true,
  *       meta: { type: 'hadith' }
  *     }
@@ -397,13 +442,13 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: Set
  * // Multiple rules with page constraints
  * const segments = segmentPages(pages, {
  *   rules: [
- *     { lineStartsWith: ['{{kitab}}'], split: 'before', meta: { type: 'book' } },
- *     { lineStartsWith: ['{{bab}}'], split: 'before', min: 10, meta: { type: 'chapter' } },
- *     { regex: '^[٠-٩]+ - ', split: 'before', meta: { type: 'hadith' } }
+ *     { lineStartsWith: ['{{kitab}}'], split: 'at', meta: { type: 'book' } },
+ *     { lineStartsWith: ['{{bab}}'], split: 'at', min: 10, meta: { type: 'chapter' } },
+ *     { regex: '^[٠-٩]+ - ', split: 'at', meta: { type: 'hadith' } }
  *   ]
  * });
  */
-export function segmentPages(pages: PageInput[], options: SegmentationOptions): Segment[] {
+export function segmentPages(pages: Page[], options: SegmentationOptions): Segment[] {
     const { rules = [] } = options;
     if (!rules.length || !pages.length) {
         return [];
@@ -428,7 +473,7 @@ export function segmentPages(pages: PageInput[], options: SegmentationOptions): 
         for (const m of finalMatches) {
             splitPoints.push({
                 capturedContent: m.captured,
-                index: rule.split === 'before' ? m.start : m.end,
+                index: rule.split === 'at' ? m.start : m.end,
                 meta: rule.meta,
                 namedCaptures: m.namedCaptures,
             });

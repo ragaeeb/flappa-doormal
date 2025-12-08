@@ -1,11 +1,11 @@
 import { segmentPages } from './src/segmentation/segmenter';
-import type { PageInput } from './src/segmentation/types';
+import type { Page } from './src/segmentation/types';
 
 const NUM_PAGES = 50000;
 const PAGE_SIZE = 1000; // 1KB per page -> 50MB total
 
 console.log(`Generating ${NUM_PAGES} pages of ${PAGE_SIZE} bytes each...`);
-const pages: PageInput[] = [];
+const pages: Page[] = [];
 for (let i = 0; i < NUM_PAGES; i++) {
     // Add some Arabic text to trigger fuzzy matching logic
     pages.push({
@@ -23,9 +23,9 @@ const segments = segmentPages(pages, {
         {
             fuzzy: true,
             // Complex rule: fuzzy match, token expansion, capture
-            lineStartsAfter: ['{{narrated}} {{harf}}'],
+            lineStartsAfter: ['{{naql}} {{harf}}'],
             meta: { type: 'hadith' },
-            split: 'before',
+            split: 'at',
         },
     ],
 });
