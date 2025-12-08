@@ -29,12 +29,10 @@
 
 // Fuzzy matching utilities
 export { escapeRegex, makeDiacriticInsensitive } from './segmentation/fuzzy.js';
-
-// HTML utilities
-export { stripHtmlTags } from './segmentation/html.js';
-
 // Core segmentation
 export { segmentPages } from './segmentation/segmenter.js';
+// Text utilities
+export { normalizeLineEndings, stripHtmlTags } from './segmentation/textUtils.js';
 
 // Token expansion types
 export type { ExpandResult } from './segmentation/tokens.js';

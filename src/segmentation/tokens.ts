@@ -91,6 +91,12 @@ export const TOKEN_PATTERNS: Record<string, string> = {
     dash: '[-–—ـ]',
 
     /**
+     * Section marker - Arabic word for "section/issue".
+     * Commonly used for fiqh books.
+     */
+    fasl: 'فصل|مسألة',
+
+    /**
      * Single Arabic letter - matches any Arabic letter character.
      *
      * Character range from أ (alef with hamza) to ي (ya).
@@ -182,10 +188,10 @@ const SIMPLE_TOKEN_REGEX = /\{\{(\w+)\}\}/g;
  * containsTokens('plain text')          // → false
  * containsTokens('[٠-٩]+ - ')           // → false (raw regex, no tokens)
  */
-export function containsTokens(query: string): boolean {
+export const containsTokens = (query: string): boolean => {
     SIMPLE_TOKEN_REGEX.lastIndex = 0;
     return SIMPLE_TOKEN_REGEX.test(query);
-}
+};
 
 /**
  * Result from expanding tokens with capture information.
@@ -252,7 +258,7 @@ export type ExpandResult = {
  * expandTokensWithCaptures('{{bab}}', makeDiacriticInsensitive)
  * // → { pattern: 'بَ?ا?بٌ?', captureNames: [], hasCaptures: false }
  */
-export function expandTokensWithCaptures(query: string, fuzzyTransform?: (pattern: string) => string): ExpandResult {
+export const expandTokensWithCaptures = (query: string, fuzzyTransform?: (pattern: string) => string): ExpandResult => {
     const captureNames: string[] = [];
 
     // Split the query into token matches and non-token segments
@@ -332,7 +338,7 @@ export function expandTokensWithCaptures(query: string, fuzzyTransform?: (patter
         hasCaptures: captureNames.length > 0,
         pattern: processedParts.join(''),
     };
-}
+};
 
 /**
  * Expands template tokens in a query string to their regex equivalents.
@@ -353,9 +359,7 @@ export function expandTokensWithCaptures(query: string, fuzzyTransform?: (patter
  *
  * @see expandTokensWithCaptures for full capture group support
  */
-export function expandTokens(query: string): string {
-    return expandTokensWithCaptures(query).pattern;
-}
+export const expandTokens = (query: string): string => expandTokensWithCaptures(query).pattern;
 
 /**
  * Converts a template string to a compiled RegExp.
@@ -371,14 +375,14 @@ export function expandTokens(query: string): string {
  * templateToRegex('{{raqms}}+')   // → /[٠-٩]++/u (might be invalid in some engines)
  * templateToRegex('(((')          // → null (invalid regex)
  */
-export function templateToRegex(template: string): RegExp | null {
+export const templateToRegex = (template: string): RegExp | null => {
     const expanded = expandTokens(template);
     try {
         return new RegExp(expanded, 'u');
     } catch {
         return null;
     }
-}
+};
 
 /**
  * Lists all available token names defined in `TOKEN_PATTERNS`.
@@ -392,9 +396,7 @@ export function templateToRegex(template: string): RegExp | null {
  * getAvailableTokens()
  * // → ['bab', 'basmala', 'bullet', 'dash', 'harf', 'kitab', 'naql', 'raqm', 'raqms']
  */
-export function getAvailableTokens(): string[] {
-    return Object.keys(TOKEN_PATTERNS);
-}
+export const getAvailableTokens = (): string[] => Object.keys(TOKEN_PATTERNS);
 
 /**
  * Gets the regex pattern for a specific token name.
@@ -410,6 +412,4 @@ export function getAvailableTokens(): string[] {
  * getTokenPattern('dash')    // → '[-–—ـ]'
  * getTokenPattern('unknown') // → undefined
  */
-export function getTokenPattern(tokenName: string): string | undefined {
-    return TOKEN_PATTERNS[tokenName];
-}
+export const getTokenPattern = (tokenName: string): string | undefined => TOKEN_PATTERNS[tokenName];

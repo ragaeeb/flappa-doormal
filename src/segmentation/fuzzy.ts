@@ -159,7 +159,7 @@ const normalizeArabicLight = (str: string) => {
  *   fuzzy: true  // Applies makeDiacriticInsensitive internally
  * }
  */
-export const makeDiacriticInsensitive = (text: string): string => {
+export const makeDiacriticInsensitive = (text: string) => {
     const diacriticsMatcher = `${DIACRITICS_CLASS}*`;
     const norm = normalizeArabicLight(text);
     // Use Array.from to iterate grapheme-safe over the string (works fine for Arabic letters)

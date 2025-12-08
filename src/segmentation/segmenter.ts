@@ -18,19 +18,9 @@ import {
     groupBySpanAndFilter,
     type MatchResult,
 } from './match-utils.js';
+import { normalizeLineEndings } from './textUtils.js';
 import { expandTokensWithCaptures } from './tokens.js';
 import type { Page, Segment, SegmentationOptions, SplitRule } from './types.js';
-
-/**
- * Normalizes line endings to Unix-style (`\n`).
- *
- * Converts Windows (`\r\n`) and old Mac (`\r`) line endings to Unix style
- * for consistent pattern matching across platforms.
- *
- * @param content - Raw content with potentially mixed line endings
- * @returns Content with all line endings normalized to `\n`
- */
-const normalizeLineEndings = (content: string): string => content.replace(/\r\n?/g, '\n');
 
 /**
  * Checks if a regex pattern contains standard (anonymous) capturing groups.
@@ -312,7 +302,7 @@ type SplitPoint = {
  * @param captureNames - Names of expected named capture groups
  * @returns Array of match results with positions and captures
  */
-const findMatches = (content: string, regex: RegExp, usesCapture: boolean, captureNames: string[]): MatchResult[] => {
+const findMatches = (content: string, regex: RegExp, usesCapture: boolean, captureNames: string[]) => {
     const matches: MatchResult[] = [];
     regex.lastIndex = 0;
     let m = regex.exec(content);
@@ -348,7 +338,7 @@ const findMatches = (content: string, regex: RegExp, usesCapture: boolean, captu
  * @param sortedBreaks - Sorted array of page break offsets
  * @returns Array of break offsets relative to startOffset
  */
-const findBreaksInRange = (startOffset: number, endOffset: number, sortedBreaks: number[]): number[] => {
+const findBreaksInRange = (startOffset: number, endOffset: number, sortedBreaks: number[]) => {
     if (sortedBreaks.length === 0) {
         return [];
     }
@@ -448,7 +438,7 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
  *   ]
  * });
  */
-export function segmentPages(pages: Page[], options: SegmentationOptions): Segment[] {
+export const segmentPages = (pages: Page[], options: SegmentationOptions): Segment[] => {
     const { rules = [] } = options;
     if (!rules.length || !pages.length) {
         return [];
@@ -492,7 +482,7 @@ export function segmentPages(pages: Page[], options: SegmentationOptions): Segme
     unique.sort((a, b) => a.index - b.index);
 
     return buildSegments(unique, matchContent, pageMap, rules);
-}
+};
 
 /**
  * Creates segment objects from split points.
@@ -509,18 +499,9 @@ export function segmentPages(pages: Page[], options: SegmentationOptions): Segme
  * @param rules - Original rules (for constraint checking on first segment)
  * @returns Array of segment objects
  */
-function buildSegments(splitPoints: SplitPoint[], content: string, pageMap: PageMap, rules: SplitRule[]): Segment[] {
-    const segments: Segment[] = [];
-
+const buildSegments = (splitPoints: SplitPoint[], content: string, pageMap: PageMap, rules: SplitRule[]): Segment[] => {
     /**
      * Creates a single segment from a content range.
-     *
-     * @param start - Start offset in content
-     * @param end - End offset in content
-     * @param meta - Static metadata from rule
-     * @param capturedContent - Pre-captured content (for lineStartsAfter)
-     * @param namedCaptures - Named capture group values
-     * @returns Segment object or null if content is empty
      */
     const createSegment = (
         start: number,
@@ -548,6 +529,30 @@ function buildSegments(splitPoints: SplitPoint[], content: string, pageMap: Page
         return seg;
     };
 
+    /**
+     * Creates segments from an array of split points.
+     */
+    const createSegmentsFromSplitPoints = (): Segment[] => {
+        const result: Segment[] = [];
+        for (let i = 0; i < splitPoints.length; i++) {
+            const start = splitPoints[i].index;
+            const end = i < splitPoints.length - 1 ? splitPoints[i + 1].index : content.length;
+            const s = createSegment(
+                start,
+                end,
+                splitPoints[i].meta,
+                splitPoints[i].capturedContent,
+                splitPoints[i].namedCaptures,
+            );
+            if (s) {
+                result.push(s);
+            }
+        }
+        return result;
+    };
+
+    const segments: Segment[] = [];
+
     // Handle case with no split points
     if (!splitPoints.length) {
         const firstId = pageMap.getId(0);
@@ -571,21 +576,6 @@ function buildSegments(splitPoints: SplitPoint[], content: string, pageMap: Page
         }
     }
 
-    // Create segments from split points
-    for (let i = 0; i < splitPoints.length; i++) {
-        const start = splitPoints[i].index;
-        const end = i < splitPoints.length - 1 ? splitPoints[i + 1].index : content.length;
-        const s = createSegment(
-            start,
-            end,
-            splitPoints[i].meta,
-            splitPoints[i].capturedContent,
-            splitPoints[i].namedCaptures,
-        );
-        if (s) {
-            segments.push(s);
-        }
-    }
-
-    return segments;
-}
+    // Create segments from split points using extracted utility
+    return [...segments, ...createSegmentsFromSplitPoints()];
+};
