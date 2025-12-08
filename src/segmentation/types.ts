@@ -1,0 +1,366 @@
+// ─────────────────────────────────────────────────────────────
+// Pattern Types (mutually exclusive - only ONE per rule)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Literal regex pattern rule - no token expansion is applied.
+ *
+ * Use this when you need full control over the regex pattern.
+ * If the regex contains capturing groups, the captured content
+ * will be used as the segment content.
+ *
+ * @example
+ * // Match Arabic-Indic numbers followed by a dash
+ * { regex: '^[٠-٩]+ - ', split: 'before' }
+ *
+ * @example
+ * // Capture group - content after the marker becomes segment content
+ * { regex: '^[٠-٩]+ - (.*)', split: 'before' }
+ */
+type RegexPattern = {
+    /** Raw regex pattern string (no token expansion) */
+    regex: string;
+};
+
+/**
+ * Template pattern rule - expands `{{tokens}}` before compiling to regex.
+ *
+ * Supports all tokens defined in `TOKEN_PATTERNS` and named capture syntax.
+ *
+ * @example
+ * // Using tokens for Arabic-Indic digits
+ * { template: '^{{raqms}} {{dash}}', split: 'before' }
+ *
+ * @example
+ * // Named capture to extract hadith number into metadata
+ * { template: '^{{raqms:hadithNum}} {{dash}}', split: 'before' }
+ *
+ * @see TOKEN_PATTERNS for available tokens
+ */
+type TemplatePattern = {
+    /** Template string with `{{token}}` or `{{token:name}}` placeholders */
+    template: string;
+};
+
+/**
+ * Line-start pattern rule - matches lines starting with any of the given patterns.
+ *
+ * Syntactic sugar for `^(?:pattern1|pattern2|...)`. The matched marker
+ * is **included** in the segment content.
+ *
+ * Token expansion is applied to each pattern. Use `fuzzy: true` for
+ * diacritic-insensitive Arabic matching.
+ *
+ * @example
+ * // Split at chapter headings (marker included in content)
+ * { lineStartsWith: ['## ', '### '], split: 'before' }
+ *
+ * @example
+ * // Split at Arabic book/chapter markers with fuzzy matching
+ * { lineStartsWith: ['{{kitab}}', '{{bab}}'], split: 'before', fuzzy: true }
+ */
+type LineStartsWithPattern = {
+    /** Array of patterns that mark line beginnings (marker included in content) */
+    lineStartsWith: string[];
+};
+
+/**
+ * Line-start-after pattern rule - matches lines starting with patterns,
+ * but **excludes** the marker and captures only the rest of the line.
+ *
+ * Syntactic sugar for `^(?:pattern1|pattern2|...)(.*)`. The matched marker
+ * is stripped; only content after the marker becomes the segment content.
+ *
+ * Token expansion is applied to each pattern. Use `fuzzy: true` for
+ * diacritic-insensitive Arabic matching.
+ *
+ * @example
+ * // Split at numbered hadiths, capturing content without the number prefix
+ * { lineStartsAfter: ['{{raqms}} {{dash}} '], split: 'before' }
+ *
+ * @example
+ * // Extract hadith number to metadata while stripping the prefix
+ * { lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'before' }
+ */
+type LineStartsAfterPattern = {
+    /** Array of patterns that mark line beginnings (marker excluded, rest captured) */
+    lineStartsAfter: string[];
+};
+
+/**
+ * Line-end pattern rule - matches lines ending with any of the given patterns.
+ *
+ * Syntactic sugar for `(?:pattern1|pattern2|...)$`.
+ *
+ * Token expansion is applied to each pattern. Use `fuzzy: true` for
+ * diacritic-insensitive Arabic matching.
+ *
+ * @example
+ * // Split at lines ending with Arabic sentence-ending punctuation
+ * { lineEndsWith: ['۔', '؟', '!'], split: 'after' }
+ */
+type LineEndsWithPattern = {
+    /** Array of patterns that mark line endings */
+    lineEndsWith: string[];
+};
+
+/**
+ * Union of all pattern types for split rules.
+ *
+ * Each rule must have exactly ONE pattern type:
+ * - `regex` - Raw regex pattern (no token expansion)
+ * - `template` - Pattern with `{{token}}` expansion
+ * - `lineStartsWith` - Match line beginnings (marker included)
+ * - `lineStartsAfter` - Match line beginnings (marker excluded)
+ * - `lineEndsWith` - Match line endings
+ */
+type PatternType =
+    | RegexPattern
+    | TemplatePattern
+    | LineStartsWithPattern
+    | LineStartsAfterPattern
+    | LineEndsWithPattern;
+
+// ─────────────────────────────────────────────────────────────
+// Split Behavior
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Configuration for how and where to split content when a pattern matches.
+ *
+ * Controls the split position relative to matches, which occurrences to
+ * split on, page span limits, and fuzzy matching for Arabic text.
+ */
+type SplitBehavior = {
+    /**
+     * Where to split relative to the match.
+     * - `'before'`: New segment starts at the match position
+     * - `'after'`: New segment starts after the match ends
+     */
+    split: 'before' | 'after';
+
+    /**
+     * Which occurrence(s) to split on.
+     * - `'all'`: Split at every match (default)
+     * - `'first'`: Only split at the first match
+     * - `'last'`: Only split at the last match
+     *
+     * When `maxSpan` is set, occurrence filtering is applied per page-group
+     * rather than globally.
+     *
+     * @default 'all'
+     */
+    occurrence?: 'first' | 'last' | 'all';
+
+    /**
+     * Maximum number of pages a segment can span before forcing a split.
+     *
+     * When set, occurrence filtering is applied per page-group:
+     * - `maxSpan: 1` = per-page (e.g., last punctuation on EACH page)
+     * - `maxSpan: 2` = at most 2 pages per segment
+     * - `undefined` = no limit (entire content treated as one group)
+     *
+     * @example
+     * // Split at last period on each page
+     * { lineEndsWith: ['.'], split: 'after', occurrence: 'last', maxSpan: 1 }
+     */
+    maxSpan?: number;
+
+    /**
+     * Enable diacritic-insensitive matching for Arabic text.
+     *
+     * When `true`, patterns in `lineStartsWith`, `lineEndsWith`, and
+     * `lineStartsAfter` are transformed to match text regardless of:
+     * - Diacritics (harakat/tashkeel): فَتْحَة، ضَمَّة، كَسْرَة، etc.
+     * - Character equivalences: ا/آ/أ/إ, ة/ه, ى/ي
+     *
+     * **Note**: Does NOT apply to `regex` or `template` patterns.
+     * For templates, apply fuzzy manually using `makeDiacriticInsensitive()`.
+     *
+     * @default false
+     */
+    fuzzy?: boolean;
+};
+
+// ─────────────────────────────────────────────────────────────
+// Constraints & Metadata
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Optional constraints and metadata for a split rule.
+ *
+ * Use constraints to limit which pages a rule applies to, and
+ * metadata to attach arbitrary data to resulting segments.
+ */
+type RuleConstraints = {
+    /**
+     * Minimum page ID for this rule to apply.
+     *
+     * Matches on pages with `id < min` are ignored.
+     *
+     * @example
+     * // Only apply rule starting from page 10
+     * { min: 10, lineStartsWith: ['##'], split: 'before' }
+     */
+    min?: number;
+
+    /**
+     * Maximum page ID for this rule to apply.
+     *
+     * Matches on pages with `id > max` are ignored.
+     *
+     * @example
+     * // Only apply rule up to page 100
+     * { max: 100, lineStartsWith: ['##'], split: 'before' }
+     */
+    max?: number;
+
+    /**
+     * Arbitrary metadata attached to segments matching this rule.
+     *
+     * This metadata is merged with any named captures from the pattern.
+     * Named captures (e.g., `{{raqms:num}}`) take precedence over
+     * static metadata with the same key.
+     *
+     * @example
+     * // Tag segments as chapters
+     * { lineStartsWith: ['{{bab}}'], split: 'before', meta: { type: 'chapter' } }
+     */
+    meta?: Record<string, unknown>;
+};
+
+// ─────────────────────────────────────────────────────────────
+// Combined Rule Type
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * A complete split rule combining pattern, behavior, and constraints.
+ *
+ * Each rule must specify:
+ * - **Pattern** (exactly one): `regex`, `template`, `lineStartsWith`,
+ *   `lineStartsAfter`, or `lineEndsWith`
+ * - **Split behavior**: `split` (required), `occurrence`, `maxSpan`, `fuzzy`
+ * - **Constraints** (optional): `min`, `max`, `meta`
+ *
+ * @example
+ * // Basic rule: split at markdown headers
+ * const rule: SplitRule = {
+ *   lineStartsWith: ['## ', '### '],
+ *   split: 'before',
+ *   meta: { type: 'section' }
+ * };
+ *
+ * @example
+ * // Advanced rule: extract hadith numbers with fuzzy Arabic matching
+ * const rule: SplitRule = {
+ *   lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '],
+ *   split: 'before',
+ *   fuzzy: true,
+ *   min: 5,
+ *   max: 500,
+ *   meta: { type: 'hadith' }
+ * };
+ */
+export type SplitRule = PatternType & SplitBehavior & RuleConstraints;
+
+// ─────────────────────────────────────────────────────────────
+// Input & Output
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Input page structure for segmentation.
+ *
+ * Each page represents a logical unit of content (e.g., a book page,
+ * a document section) that can be tracked across segment boundaries.
+ *
+ * @example
+ * const pages: PageInput[] = [
+ *   { id: 1, content: '## Chapter 1\nFirst paragraph...' },
+ *   { id: 2, content: 'Continued text...\n## Chapter 2' },
+ * ];
+ */
+export type PageInput = {
+    /**
+     * Unique page/entry ID used for:
+     * - `maxSpan` grouping (segments spanning multiple pages)
+     * - `min`/`max` constraint filtering
+     * - `from`/`to` tracking in output segments
+     */
+    id: number;
+
+    /**
+     * Raw page content (may contain HTML).
+     *
+     * Line endings are normalized internally (`\r\n` and `\r` → `\n`).
+     * Use `htmlToMarkdown()` or `stripHtmlTags()` to preprocess HTML.
+     */
+    content: string;
+};
+
+/**
+ * Segmentation options controlling how pages are split.
+ *
+ * @example
+ * const options: SegmentationOptions = {
+ *   rules: [
+ *     { lineStartsWith: ['## '], split: 'before', meta: { type: 'chapter' } },
+ *     { lineStartsWith: ['### '], split: 'before', meta: { type: 'section' } },
+ *   ]
+ * };
+ */
+export type SegmentationOptions = {
+    /**
+     * Rules applied in order to find split points.
+     *
+     * All rules are evaluated against the content, and their matches
+     * are combined to determine final split points. The first matching
+     * rule's metadata is used for each segment.
+     */
+    rules: SplitRule[];
+};
+
+/**
+ * Output segment produced by `segmentPages()`.
+ *
+ * Each segment contains extracted content, page references, and
+ * optional metadata from the matched rule and captured groups.
+ *
+ * @example
+ * // Simple segment on a single page
+ * { content: '## Chapter 1\nIntroduction...', from: 1, meta: { type: 'chapter' } }
+ *
+ * @example
+ * // Segment spanning pages 5-7 with captured hadith number
+ * { content: 'Hadith text...', from: 5, to: 7, meta: { type: 'hadith', hadithNum: '٤٢' } }
+ */
+export type Segment = {
+    /**
+     * Segment content with:
+     * - Leading/trailing whitespace trimmed
+     * - Page breaks converted to spaces (for multi-page segments)
+     * - Markers stripped (for `lineStartsAfter` patterns)
+     */
+    content: string;
+
+    /**
+     * Starting page ID (from `PageInput.id`).
+     */
+    from: number;
+
+    /**
+     * Ending page ID if segment spans multiple pages.
+     *
+     * Only present when the segment content extends across page boundaries.
+     * When `undefined`, the segment is contained within a single page.
+     */
+    to?: number;
+
+    /**
+     * Combined metadata from:
+     * 1. Rule's `meta` property (static metadata)
+     * 2. Named captures from patterns (e.g., `{{raqms:num}}` → `{ num: '٤٢' }`)
+     *
+     * Named captures override static metadata with the same key.
+     */
+    meta?: Record<string, unknown>;
+};

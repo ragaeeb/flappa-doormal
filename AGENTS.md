@@ -2,139 +2,183 @@
 
 ## Project Overview
 
-**flappa-doormal** is an Arabic text marker pattern library that generates regular expressions from declarative marker configurations. It simplifies Arabic text segmentation by replacing complex regex patterns with readable, composable templates.
+**flappa-doormal** is a declarative text segmentation library for Arabic texts. It splits pages of content into logical segments (hadiths, chapters, verses) using pattern-based rules with a human-readable template syntax.
+
+### Why This Library Exists
+
+Traditional Arabic text segmentation requires:
+- Hand-crafted regular expressions with complex Unicode patterns
+- Deep knowledge of Arabic diacritics and character equivalences
+- Handling page boundaries and multi-page content spans
+- Manual capture group management for metadata extraction
+
+**flappa-doormal** solves these problems with:
+- **Declarative rules**: Describe *what* to match, not *how* to match it
+- **Template tokens**: `{{raqms}} {{dash}}` instead of `[\u0660-\u0669]+\s*[-–—ـ]`
+- **Named captures**: `{{raqms:hadithNum}}` → automatic `meta.hadithNum` extraction
+- **Fuzzy matching**: Diacritic-insensitive matching for harakat variations
+- **Page-aware**: Tracks which page each segment comes from
 
 ## Architecture
 
-### Core Components
+### Repository Structure
 
 ```
 src/
-├── index.ts                  # Main entry point and exports
-├── types.ts                  # TypeScript type definitions
-└── markers/
-    ├── generator.ts          # Main regex generator (entry point)
-    ├── type-generators.ts    # Individual marker type generators
-    ├── template-parser.ts    # Template token expansion
-    ├── tokens.ts             # Token definitions
-    ├── defaults.ts           # Default configuration values
-    └── presets.ts            # Pre-configured phrase lists
+├── index.ts                    # Main entry point and exports
+└── segmentation/
+    ├── index.ts                # Module exports
+    ├── types.ts                # TypeScript type definitions for rules/segments
+    ├── segmenter.ts            # Core segmentation engine (segmentPages)
+    ├── tokens.ts               # Token definitions and expansion logic
+    ├── fuzzy.ts                # Diacritic-insensitive matching utilities
+    ├── html.ts                 # HTML utilities (stripHtmlTags)
+    ├── match-utils.ts          # Extracted match processing utilities
+    ├── segmenter.test.ts       # Core test suite (66 tests)
+    ├── segmenter.bukhari.test.ts # Real-world test cases
+    └── match-utils.test.ts     # Utility function tests (30 tests)
 ```
 
-### Key Design Patterns
+### Core Components
 
-1. **Type-Specific Generators** (`type-generators.ts`)
-   - 12 isolated generator functions, one per marker type
-   - Each returns a RegExp with named capture groups: `full`, `marker`, `content`
-   - Handles diacritic-insensitivity via `bitaboom` library
+1. **`segmentPages(pages, options)`** - Main entry point
+   - Takes array of `{id, content}` pages and split rules
+   - Returns array of `{content, from, to?, meta?}` segments
 
-2. **Template System** (`template-parser.ts`, `tokens.ts`)
-   - Converts readable templates like `{num} {dash}` into regex patterns
-   - Supports quantifiers: `{token}+`, `{token}*`, `{token}?`
-   - Custom tokens via `createTokenMap()`
+2. **`tokens.ts`** - Template system
+   - `TOKEN_PATTERNS` - Map of token names to regex patterns
+   - `expandTokensWithCaptures()` - Expands `{{token:name}}` syntax
+   - Supports fuzzy transform for diacritic-insensitive matching
 
-3. **Configuration Normalization** (`generator.ts`)
-   - `generateRegexFromMarker()` applies defaults before calling type-specific generators
-   - Centralizes default handling to keep type generators pure
+3. **`match-utils.ts`** - Extracted utilities (for testability)
+   - `extractNamedCaptures()` - Get named groups from regex match
+   - `filterByConstraints()` - Apply min/max page filters
+   - `groupBySpanAndFilter()` - Handle maxSpan grouping
+   - `anyRuleAllowsId()` - Check if page passes rule constraints
 
-## Marker Types
+4. **`fuzzy.ts`** - Arabic text normalization
+   - `makeDiacriticInsensitive()` - Generate regex that ignores diacritics
 
-### Pattern Categories
+## Key Algorithms
 
-1. **Preset Types** (no configuration required)
-   - `bab` - Chapter markers (باب)
-   - `basmala` - بسم الله patterns
-   - `hadith-chain` - Narrator phrases (حَدَّثَنَا, etc.)
-   - `square-bracket` - Reference numbers [٦٥]
-   - `bullet` - Bullet points (•, *, °, -)
-   - `heading` - Markdown headings (#, ##, ###)
+### Token Expansion
 
-2. **Numbered Types** (configurable numbering/separator)
-   - `numbered` - Basic numbered markers
-   - `num-letter` - Number + Arabic letter (٥ أ -)
-   - `num-paren` - Number + parenthetical (٥ (أ) -)
-   - `num-slash` - Number/number (٥/٦ -)
+```
+Input:  "{{raqms:num}} {{dash}} {{:text}}"
+Output: "(?<num>[\u0660-\u0669]+) [-–—ـ] (?<text>.+)"
+```
 
-3. **Custom Types** (require configuration)
-   - `pattern` - Custom template or raw regex
-   - `phrase` - User-defined phrase list
+The expansion algorithm:
+1. Splits query into token and text segments
+2. Looks up token patterns from `TOKEN_PATTERNS`
+3. Wraps in named capture group if `:name` suffix present
+4. Applies fuzzy transform if enabled (before wrapping in groups)
 
-## Working with AI Agents
+### Fuzzy Application Order
 
-### Common Tasks
+**Critical design decision**: Fuzzy transforms are applied to raw token patterns and plain text *before* they're wrapped in regex groups.
 
-#### Adding a New Marker Type
+```
+WRONG:  makeDiacriticInsensitive("(?<name>حدثنا)")  // Breaks ( ? < > )
+RIGHT:  "(?<name>" + makeDiacriticInsensitive("حدثنا") + ")"
+```
 
-1. Add the new type to `MarkerType` union in `types.ts`
-2. Create generator function in `type-generators.ts`:
+### lineStartsAfter Content Capture
+
+For patterns like `^٦٦٩٦ - (content)`, the content capture is the *last* positional group:
+
+```typescript
+// Pattern: ^(?:(?<num>[\u0660-\u0669]+) [-–—ـ] )(.*)
+// Match:   m[1] = named group value, m[2] = content
+// Solution: Iterate backward from m.length-1 to find last defined capture
+```
+
+## Design Decisions
+
+### 1. Why `{{double-braces}}`?
+
+- Single braces `{}` conflict with regex quantifiers `{n,m}`
+- Double braces are visually distinct and rarely appear in content
+- Consistent with template systems (Handlebars, Mustache)
+
+### 2. Why `lineStartsAfter` vs `lineStartsWith`?
+
+| Pattern | Marker in content? | Use case |
+|---------|-------------------|----------|
+| `lineStartsWith` | ✅ Yes | Keep marker, segment at boundary |
+| `lineStartsAfter` | ❌ No | Strip marker, capture only content |
+
+### 3. Why fuzzy transform at token level?
+
+Applying fuzzy globally would corrupt regex metacharacters. Instead:
+- Fuzzy is passed to `expandTokensWithCaptures()` 
+- Applied only to Arabic text portions
+- Preserves `(`, `)`, `|`, `?`, etc.
+
+### 4. Why extract match utilities?
+
+The original `segmentPages` had complexity 37 (max: 15). Extraction:
+- Creates independently testable units
+- Reduces main function complexity
+- Improves code readability
+
+## Working with the Codebase
+
+### Adding a New Token
+
+1. Add to `TOKEN_PATTERNS` in `tokens.ts`:
    ```typescript
-   export function generateMyTypeRegex(config: MarkerConfig): RegExp {
-     // Implementation
-     const pattern = String.raw`^(?<full>(?<marker>...)(?<content>[\s\S]*))`;
-     return new RegExp(pattern, 'u');
-   }
+   export const TOKEN_PATTERNS = {
+     // ...existing
+     verse: '﴿[^﴾]+﴾',  // Quranic verse markers
+   };
    ```
-3. Add case to switch statement in `generator.ts`
-4. Add comprehensive tests in `type-generators.test.ts`
-5. Update README.md examples
+2. Add test cases in `segmenter.test.ts`
+3. Document in README.md
 
-#### Modifying Templates
+### Adding a New Pattern Type
 
-- Template tokens are defined in `tokens.ts`
-- Template expansion logic is in `template-parser.ts`
-- Always maintain backward compatibility when changing tokens
+1. Add type to union in `types.ts`:
+   ```typescript
+   type NewPattern = { newPatternField: string[] };
+   type PatternType = ... | NewPattern;
+   ```
+2. Handle in `buildRuleRegex()` in `segmenter.ts`
+3. Add comprehensive tests
 
-#### Testing Strategy
+### Testing Strategy
 
-- **Unit Tests**: Each generator function has dedicated test suite
-- **Integration Tests**: `generator.test.ts` tests end-to-end flows
-- **Complex Patterns**: `complex-patterns.test.ts` for real-world edge cases
-- Run tests: `bun test`
+- **Unit tests**: Each utility function has dedicated tests
+- **Integration tests**: Full pipeline tests in `segmenter.test.ts`
+- **Real-world tests**: `segmenter.bukhari.test.ts` uses actual hadith data
+- Run: `bun test`
 
-### Code Quality Standards
+## Code Quality Standards
 
-1. **JSDocs**: All exported functions must have:
-   - Description
-   - `@param` for each parameter
-   - `@returns` describing return value
-   - `@throws` for error cases
-   - `@example` showing usage
-
-2. **Type Safety**:
-   - Use TypeScript's strict mode
-   - Avoid `any` types
-   - Use `Pick<>` utility for partial configs
-
-3. **Error Handling**:
-   - Throw descriptive errors for invalid configurations
-   - Validate required fields (e.g., `phrases` array for `phrase` type)
-
-4. **Naming Conventions**:
-   - Functions: `generateXxxRegex()` for generators
-   - Types: PascalCase
-   - Constants: SCREAMING_SNAKE_CASE for exports, camelCase for locals
+1. **TypeScript strict mode** - No `any` types
+2. **Biome linting** - Max complexity 15 per function
+3. **JSDoc comments** - All exported functions documented
+4. **Test coverage** - 96 tests, all passing
 
 ## Dependencies
 
-### Runtime (Peer Dependencies)
-- **bitaboom** (^2.1.0) - Arabic text utilities for diacritic-insensitive matching
-
 ### Development
 - **@biomejs/biome** - Linting and formatting
-- **@types/bun** - TypeScript definitions
-- **tsdown** - Build tool for TypeScript
-
-### Testing
-- **Bun's built-in test runner** - Fast, lightweight testing
+- **tsdown** - Build tool (generates `.mjs` and `.d.mts`)
+- **Bun** - Runtime and test runner
 
 ## Build & Release
 
 ```bash
-# Build distribution
-bun run build
+# Install dependencies
+bun install
 
 # Run all tests
 bun test
+
+# Build distribution
+bun run build
+# Output: dist/index.mjs (~17 KB gzip ~5.7 KB)
 
 # Format code
 bunx biome format --write .
@@ -143,38 +187,20 @@ bunx biome format --write .
 bunx biome lint .
 ```
 
-**Build Output**: `dist/` contains compiled `.mjs` and `.d.mts` files
+## Lessons Learned
 
-## Extension Points
+### From Development
 
-1. **Custom Tokens**: Users can define their own via `createTokenMap()`
-2. **Phrase Lists**: Extend `DEFAULT_HADITH_PHRASES` and `DEFAULT_BASMALA_PATTERNS`
-3. **Direct Generator Access**: Import type-specific generators for fine-grained control
+1. **Named captures shift positional indices**: When `(?<name>…)` appears before `(.*)`, the content is at `m[2]` not `m[1]`. Solution: iterate backward to find last defined group.
 
-## Performance Considerations
+2. **Fuzzy + metacharacters don't mix**: `makeDiacriticInsensitive` expands Arabic to character classes. If applied to `(?<name>text)`, it corrupts the `(`, `?`, `<`, `>` characters.
 
-- RegExp compilation happens once per `generateRegexFromMarker()` call
-- Template expansion is lightweight (string manipulation only)
-- Diacritic-insensitive patterns are optimized by `bitaboom`
+3. **Alternations need per-alternative fuzzy**: Token `narrated: 'حدثنا|أخبرنا'` requires splitting at `|`, applying fuzzy to each, then rejoining.
 
-## Troubleshooting
+4. **Complexity extraction works**: Pulling logic into `match-utils.ts` reduced main function complexity from 37 to 10 and made the code testable.
 
-### Common Issues
+### Architecture Insights
 
-1. **"pattern marker must provide either a template or pattern"**
-   - Add `template` or `pattern` field to config
-
-2. **"phrase marker requires phrases array"**
-   - Ensure `phrases` is defined and non-empty
-
-3. **Named groups not matching**
-   - All generators return `full`, `marker`, `content` groups
-   - Check that regex is anchored with `^` at start
-
-## Future Improvements
-
-Potential areas for enhancement:
-- Add more preset types (e.g., Quranic verse markers)
-- Support for RTL-specific patterns
-- Performance benchmarks
-- Visual regex debugger/tester
+- **Declarative > Imperative**: Users describe patterns, library handles regex
+- **Composability**: Tokens can be combined freely with `:name` captures
+- **Fail gracefully**: Unknown tokens are left as-is, allowing partial templates

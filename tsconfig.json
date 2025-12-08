@@ -16,7 +16,7 @@
         "moduleResolution": "Bundler",
         "noFallthroughCasesInSwitch": true,
         "noImplicitOverride": true,
-        "noUncheckedIndexedAccess": true,
+        "noUncheckedIndexedAccess": false,
         "noUnusedLocals": true,
         "noUnusedParameters": true,
         "outDir": "./dist",
