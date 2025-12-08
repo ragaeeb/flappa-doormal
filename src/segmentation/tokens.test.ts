@@ -12,24 +12,24 @@ import {
 describe('tokens', () => {
     describe('containsTokens', () => {
         it('should return true when string contains token pattern', () => {
-            expect(containsTokens('{{raqms}} {{dash}}')).toBe(true);
+            expect(containsTokens('{{raqms}} {{dash}}')).toBeTrue();
         });
 
         it('should return true for single token', () => {
-            expect(containsTokens('{{bab}}')).toBe(true);
+            expect(containsTokens('{{bab}}')).toBeTrue();
         });
 
         it('should return false for plain text', () => {
-            expect(containsTokens('plain text')).toBe(false);
+            expect(containsTokens('plain text')).toBeFalse();
         });
 
         it('should return false for raw regex patterns', () => {
-            expect(containsTokens('[٠-٩]+ - ')).toBe(false);
+            expect(containsTokens('[٠-٩]+ - ')).toBeFalse();
         });
 
         it('should return false for partial token syntax', () => {
-            expect(containsTokens('{raqms}')).toBe(false);
-            expect(containsTokens('{{raqms')).toBe(false);
+            expect(containsTokens('{raqms}')).toBeFalse();
+            expect(containsTokens('{{raqms')).toBeFalse();
         });
     });
 
@@ -58,27 +58,27 @@ describe('tokens', () => {
             const result = expandTokensWithCaptures('{{raqms}} {{dash}}');
             expect(result.pattern).toBe('[\\u0660-\\u0669]+ [-–—ـ]');
             expect(result.captureNames).toEqual([]);
-            expect(result.hasCaptures).toBe(false);
+            expect(result.hasCaptures).toBeFalse();
         });
 
         it('should create named capture group for {{token:name}}', () => {
             const result = expandTokensWithCaptures('{{raqms:num}} {{dash}}');
             expect(result.pattern).toBe('(?<num>[\\u0660-\\u0669]+) [-–—ـ]');
             expect(result.captureNames).toEqual(['num']);
-            expect(result.hasCaptures).toBe(true);
+            expect(result.hasCaptures).toBeTrue();
         });
 
         it('should handle {{:name}} capture-only syntax', () => {
             const result = expandTokensWithCaptures('{{:content}}');
             expect(result.pattern).toBe('(?<content>.+)');
             expect(result.captureNames).toEqual(['content']);
-            expect(result.hasCaptures).toBe(true);
+            expect(result.hasCaptures).toBeTrue();
         });
 
         it('should handle multiple named captures', () => {
             const result = expandTokensWithCaptures('{{raqms:vol}}/{{raqms:page}}');
             expect(result.captureNames).toEqual(['vol', 'page']);
-            expect(result.hasCaptures).toBe(true);
+            expect(result.hasCaptures).toBeTrue();
         });
 
         it('should apply fuzzy transform when provided', () => {
@@ -102,15 +102,15 @@ describe('tokens', () => {
 
         it('should create working regex for Arabic patterns', () => {
             const regex = templateToRegex('{{dash}}');
-            expect(regex?.test('-')).toBe(true);
-            expect(regex?.test('–')).toBe(true);
+            expect(regex?.test('-')).toBeTrue();
+            expect(regex?.test('–')).toBeTrue();
         });
     });
 
     describe('getAvailableTokens', () => {
         it('should return array of token names', () => {
             const tokens = getAvailableTokens();
-            expect(Array.isArray(tokens)).toBe(true);
+            expect(Array.isArray(tokens)).toBeTrue();
             expect(tokens.length).toBeGreaterThan(0);
         });
 

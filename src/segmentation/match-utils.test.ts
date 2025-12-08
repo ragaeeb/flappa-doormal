@@ -180,27 +180,27 @@ describe('match-utils', () => {
     describe('anyRuleAllowsId', () => {
         it('should return true when no constraints exist', () => {
             const rules = [{}];
-            expect(anyRuleAllowsId(rules, 5)).toBe(true);
+            expect(anyRuleAllowsId(rules, 5)).toBeTrue();
         });
 
         it('should return true when ID is within min constraint', () => {
             const rules = [{ min: 3 }];
-            expect(anyRuleAllowsId(rules, 5)).toBe(true);
+            expect(anyRuleAllowsId(rules, 5)).toBeTrue();
         });
 
         it('should return false when ID is below min constraint', () => {
             const rules = [{ min: 10 }];
-            expect(anyRuleAllowsId(rules, 5)).toBe(false);
+            expect(anyRuleAllowsId(rules, 5)).toBeFalse();
         });
 
         it('should return true when ID is within max constraint', () => {
             const rules = [{ max: 10 }];
-            expect(anyRuleAllowsId(rules, 5)).toBe(true);
+            expect(anyRuleAllowsId(rules, 5)).toBeTrue();
         });
 
         it('should return false when ID is above max constraint', () => {
             const rules = [{ max: 3 }];
-            expect(anyRuleAllowsId(rules, 5)).toBe(false);
+            expect(anyRuleAllowsId(rules, 5)).toBeFalse();
         });
 
         it('should return true when any rule allows the ID', () => {
@@ -208,12 +208,12 @@ describe('match-utils', () => {
                 { min: 10 }, // Does not allow 5
                 { max: 8 }, // Allows 5
             ];
-            expect(anyRuleAllowsId(rules, 5)).toBe(true);
+            expect(anyRuleAllowsId(rules, 5)).toBeTrue();
         });
 
         it('should return false when no rules allow the ID', () => {
             const rules = [{ min: 10 }, { max: 3 }];
-            expect(anyRuleAllowsId(rules, 5)).toBe(false);
+            expect(anyRuleAllowsId(rules, 5)).toBeFalse();
         });
     });
 });
