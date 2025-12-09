@@ -156,16 +156,25 @@ describe('segmenter', () => {
                 { content: '## Chapter 2 Title\nMore content', id: 3 },
             ];
 
-            // lineStartsAfter: matches lines starting with ## but captures only what comes after (same line only)
+            // lineStartsAfter: matches lines starting with ## but excludes the marker from segment content
+            // Content extends to next split point, not just end of line
             const rules: SplitRule[] = [{ lineStartsAfter: ['## '], meta: { type: 'chapter' }, split: 'at' }];
 
             const result = segmentPages(pages, { rules });
 
             expect(result).toHaveLength(3);
             expect(result[0]).toMatchObject({ content: 'Introduction text here', from: 1 });
-            // The ## is NOT included in the content - only captures to end of line
-            expect(result[1]).toMatchObject({ content: 'Chapter 1 Title', from: 2, meta: { type: 'chapter' } });
-            expect(result[2]).toMatchObject({ content: 'Chapter 2 Title', from: 3, meta: { type: 'chapter' } });
+            // The ## is NOT included in the content, but segment extends to next split
+            expect(result[1]).toMatchObject({
+                content: 'Chapter 1 Title\nChapter content',
+                from: 2,
+                meta: { type: 'chapter' },
+            });
+            expect(result[2]).toMatchObject({
+                content: 'Chapter 2 Title\nMore content',
+                from: 3,
+                meta: { type: 'chapter' },
+            });
         });
 
         it('should auto-detect capture groups in regex and use captured content', () => {
@@ -549,6 +558,95 @@ describe('segmenter', () => {
     });
 
     // ─────────────────────────────────────────────────────────────
+    // NEW: fallback option tests
+    // ─────────────────────────────────────────────────────────────
+
+    describe('fallback option', () => {
+        it('should create page-boundary splits when fallback is page and no matches found', () => {
+            // Pages with no punctuation marks
+            const pages: Page[] = [
+                { content: 'No punctuation here', id: 1 },
+                { content: 'Also no punctuation', id: 2 },
+                { content: 'Third page without marks', id: 3 },
+            ];
+
+            // Rule looking for period with fallback: 'page'
+            const rules: SplitRule[] = [
+                { fallback: 'page', maxSpan: 1, occurrence: 'last', regex: '\\.', split: 'after' },
+            ];
+
+            const result = segmentPages(pages, { rules });
+
+            // Should create 3 segments, one per page
+            expect(result).toHaveLength(3);
+            expect(result[0]).toMatchObject({ content: 'No punctuation here', from: 1 });
+            expect(result[1]).toMatchObject({ content: 'Also no punctuation', from: 2 });
+            expect(result[2]).toMatchObject({ content: 'Third page without marks', from: 3 });
+        });
+
+        it('should merge pages when fallback is omitted and no matches found', () => {
+            // Same pages but without fallback
+            const pages: Page[] = [
+                { content: 'No punctuation here', id: 1 },
+                { content: 'Also no punctuation', id: 2 },
+                { content: 'Third page without marks', id: 3 },
+            ];
+
+            // Rule looking for period WITHOUT fallback (default behavior)
+            const rules: SplitRule[] = [{ maxSpan: 1, occurrence: 'last', regex: '\\.', split: 'after' }];
+
+            const result = segmentPages(pages, { rules });
+
+            // No matches found, no splits created - entire content returned as one segment
+            // (because anyRuleAllowsId returns true for first page)
+            expect(result).toHaveLength(1);
+        });
+
+        it('should mix matched and fallback pages correctly', () => {
+            const pages: Page[] = [
+                { content: 'First page.', id: 1 }, // Has punctuation
+                { content: 'No punctuation here', id: 2 }, // No punctuation
+                { content: 'Third page.', id: 3 }, // Has punctuation
+            ];
+
+            const rules: SplitRule[] = [
+                { fallback: 'page', maxSpan: 1, occurrence: 'last', regex: '\\.', split: 'after' },
+            ];
+
+            const result = segmentPages(pages, { rules });
+
+            // Page 1: has punctuation match at end
+            // Page 2: no match, but fallback creates split at page start
+            // Page 3: has punctuation match at end
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // First segment ends with 'First page.'
+            expect(result[0].content).toContain('First page.');
+            // Last segment should contain 'Third page.'
+            expect(result[result.length - 1].content).toContain('Third page.');
+        });
+
+        it('should respect min/max constraints with fallback', () => {
+            const pages: Page[] = [
+                { content: 'Page 1 no match', id: 1 },
+                { content: 'Page 5 no match', id: 5 },
+                { content: 'Page 10 no match', id: 10 },
+            ];
+
+            const rules: SplitRule[] = [
+                { fallback: 'page', max: 5, maxSpan: 1, min: 5, occurrence: 'last', regex: '\\.', split: 'after' },
+            ];
+
+            const result = segmentPages(pages, { rules });
+
+            // Page 5 is within constraints, gets fallback split
+            // Pages 1 and 10 are outside constraints
+            expect(result.length).toBeGreaterThanOrEqual(1);
+            // Should have segment starting from page 5
+            expect(result.some((s) => s.from === 5)).toBe(true);
+        });
+    });
+
+    // ─────────────────────────────────────────────────────────────
     // NEW: Fuzzy matching and phrase token tests
     // ─────────────────────────────────────────────────────────────
 
@@ -601,16 +699,16 @@ describe('segmenter', () => {
                 { content: 'كتاب الصيام\nمحتوى آخر', id: 2 },
             ];
 
-            // lineStartsAfter with fuzzy: extracts content after marker
+            // lineStartsAfter with fuzzy: excludes marker but content extends to next split
             const rules: SplitRule[] = [
                 { fuzzy: true, lineStartsAfter: ['كتاب '], meta: { type: 'book' }, split: 'at' },
             ];
             const result = segmentPages(pages, { rules });
 
             expect(result.length).toBe(2);
-            // Content should have the marker excluded
-            expect(result[0].content).toBe('الصلاة');
-            expect(result[1].content).toBe('الصيام');
+            // Content has marker excluded but extends to next split
+            expect(result[0].content).toBe('الصلاة\nمحتوى الكتاب');
+            expect(result[1].content).toBe('الصيام\nمحتوى آخر');
         });
 
         it('should apply fuzzy with lineEndsWith', () => {
@@ -664,13 +762,13 @@ describe('segmenter', () => {
             expect(result.length).toBe(4);
         });
 
-        it('should expand {{basmala}} token for bismillah patterns', () => {
+        it('should expand {{basmalah}} token for bismillah patterns', () => {
             const pages: Page[] = [
                 { content: 'بِسْمِ اللهِ الرَّحْمٰنِ الرَّحِيمِ', id: 1 },
                 { content: 'بسم الله', id: 2 },
             ];
 
-            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{basmala}}'], split: 'at' }];
+            const rules: SplitRule[] = [{ fuzzy: true, lineStartsWith: ['{{basmalah}}'], split: 'at' }];
             const result = segmentPages(pages, { rules });
 
             expect(result.length).toBe(2);
@@ -724,6 +822,60 @@ describe('segmenter', () => {
             const result = segmentPages(pages, { rules });
 
             expect(result.length).toBe(2);
+        });
+    });
+
+    describe('composite tokens', () => {
+        it('should expand {{numbered}} token with lineStartsAfter for common hadith format', () => {
+            const pages: Page[] = [
+                { content: '٢٢ - حَدَّثَنَا أَبُو بَكْرٍ عَنِ النَّبِيِّ', id: 1 },
+                { content: '٢٣ – أَخْبَرَنَا عُمَرُ قَالَ', id: 2 }, // en-dash
+                { content: '٦٦٩٦ — حَدَّثَنِي مُحَمَّدٌ', id: 3 }, // em-dash
+            ];
+
+            // {{numbered}} expands to {{raqms}} {{dash}} = [٠-٩]+ [-–—ـ]
+            const rules: SplitRule[] = [{ lineStartsAfter: ['{{numbered}}'], meta: { type: 'hadith' }, split: 'at' }];
+            const result = segmentPages(pages, { rules });
+
+            expect(result).toHaveLength(3);
+            // Content should NOT include the number prefix (lineStartsAfter excludes marker)
+            expect(result[0]).toMatchObject({
+                content: 'حَدَّثَنَا أَبُو بَكْرٍ عَنِ النَّبِيِّ',
+                from: 1,
+                meta: { type: 'hadith' },
+            });
+            expect(result[1]).toMatchObject({
+                content: 'أَخْبَرَنَا عُمَرُ قَالَ',
+                from: 2,
+                meta: { type: 'hadith' },
+            });
+            expect(result[2]).toMatchObject({
+                content: 'حَدَّثَنِي مُحَمَّدٌ',
+                from: 3,
+                meta: { type: 'hadith' },
+            });
+        });
+
+        it('should handle {{numbered}} with content spanning multiple pages', () => {
+            const pages: Page[] = [
+                { content: '٢٢ - بداية الحديث', id: 10 },
+                { content: 'تكملة الحديث الأول\n٢٣ - الحديث الثاني', id: 11 },
+            ];
+
+            const rules: SplitRule[] = [{ lineStartsAfter: ['{{numbered}}'], split: 'at' }];
+            const result = segmentPages(pages, { rules });
+
+            expect(result).toHaveLength(2);
+            // lineStartsAfter excludes marker but extends content to next split point
+            expect(result[0]).toMatchObject({
+                content: 'بداية الحديث تكملة الحديث الأول',
+                from: 10,
+                to: 11,
+            });
+            expect(result[1]).toMatchObject({
+                content: 'الحديث الثاني',
+                from: 11,
+            });
         });
     });
 

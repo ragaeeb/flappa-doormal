@@ -97,7 +97,7 @@ Replace regex with readable tokens:
 | `{{naql}}` | Narrator phrases | `حدثنا\|أخبرنا\|...` |
 | `{{kitab}}` | "كتاب" (book) | `كتاب` |
 | `{{bab}}` | "باب" (chapter) | `باب` |
-| `{{basmala}}` | "بسم الله" | `بسم الله` |
+| `{{basmalah}}` | "بسم الله" | `بسم الله` |
 
 ### 2. Named Capture Groups
 
@@ -278,6 +278,27 @@ const segments = segmentPages(pages, {
 });
 ```
 
+### Page Fallback for Unmatched Content
+
+When using `maxSpan` to group matches per page, use `fallback: 'page'` to prevent unmatched pages from merging with adjacent segments:
+
+```typescript
+const segments = segmentPages(pages, {
+  rules: [{
+    template: '{{tarqim}}',  // Match punctuation marks
+    split: 'after',
+    occurrence: 'last',
+    maxSpan: 1,
+    fallback: 'page'  // If no punctuation found, segment the page anyway
+  }]
+});
+```
+
+**Without `fallback`**: Pages without matches merge into the next segment  
+**With `fallback: 'page'`**: Each page becomes its own segment even without matches
+
+> **Future extensions**: The `fallback` option may support additional values like `'skip'` (omit unmatched content) or `'line'` (split at line breaks) in future versions.
+
 ### Multiple Rules with Priority
 
 ```typescript
@@ -392,6 +413,7 @@ type SplitRule = {
   occurrence?: 'first' | 'last' | 'all';
   maxSpan?: number;
   fuzzy?: boolean;
+  fallback?: 'page';  // NEW: Page-boundary fallback
 
   // Constraints
   min?: number;

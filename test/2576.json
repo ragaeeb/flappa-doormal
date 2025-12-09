@@ -75,7 +75,7 @@
             "template": "{{tarqim}}\\s*"
         },
         {
-            "lineStartsWith": ["{{basmala}}"],
+            "lineStartsWith": ["{{basmalah}}"],
             "split": "at"
         },
         {

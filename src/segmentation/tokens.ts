@@ -69,7 +69,7 @@ const BASE_TOKENS: Record<string, string> = {
      *
      * @example 'بسم الله الرحمن الرحيم' (In the name of Allah, the Most Gracious, the Most Merciful)
      */
-    basmala: 'بسم الله|﷽',
+    basmalah: 'بسم الله|﷽',
 
     /**
      * Bullet point variants - common bullet characters.

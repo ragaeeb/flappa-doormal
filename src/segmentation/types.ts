@@ -66,16 +66,18 @@ type LineStartsWithPattern = {
 
 /**
  * Line-start-after pattern rule - matches lines starting with patterns,
- * but **excludes** the marker and captures only the rest of the line.
+ * but **excludes** the marker from the segment content.
  *
- * Syntactic sugar for `^(?:pattern1|pattern2|...)(.*)`. The matched marker
- * is stripped; only content after the marker becomes the segment content.
+ * Behaves like `lineStartsWith` but strips the marker from the output.
+ * The segment content starts after the marker and extends to the next split point
+ * (not just the end of the matching line).
  *
  * Token expansion is applied to each pattern. Use `fuzzy: true` for
  * diacritic-insensitive Arabic matching.
  *
  * @example
  * // Split at numbered hadiths, capturing content without the number prefix
+ * // Content extends to next split, not just end of that line
  * { lineStartsAfter: ['{{raqms}} {{dash}} '], split: 'at' }
  *
  * @example
@@ -83,7 +85,7 @@ type LineStartsWithPattern = {
  * { lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'at' }
  */
 type LineStartsAfterPattern = {
-    /** Array of patterns that mark line beginnings (marker excluded, rest captured) */
+    /** Array of patterns that mark line beginnings (marker excluded from content) */
     lineStartsAfter: string[];
 };
 
@@ -227,6 +229,13 @@ type RuleConstraints = {
      * { lineStartsWith: ['{{bab}}'], split: 'before', meta: { type: 'chapter' } }
      */
     meta?: Record<string, unknown>;
+
+    /**
+     * Fallback behavior when no matches are found within a maxSpan boundary.
+     * - 'page': Create split points at page boundaries
+     * - undefined: No fallback (current behavior)
+     */
+    fallback?: 'page';
 };
 
 // ─────────────────────────────────────────────────────────────

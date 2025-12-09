@@ -287,10 +287,17 @@ type SplitPoint = {
     index: number;
     /** Static metadata from the matched rule */
     meta?: Record<string, unknown>;
-    /** Content captured by `lineStartsAfter` patterns (rest of line after marker) */
+    /** Content captured by regex patterns with capturing groups */
     capturedContent?: string;
     /** Named captures from `{{token:name}}` patterns */
     namedCaptures?: Record<string, string>;
+    /**
+     * Offset from index where content actually starts (for lineStartsAfter).
+     * If set, the segment content starts at `index + contentStartOffset`.
+     * This allows excluding the marker from content while keeping the split index
+     * at the match start so previous segment doesn't include the marker.
+     */
+    contentStartOffset?: number;
 };
 
 /**
@@ -448,7 +455,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
     const splitPoints: SplitPoint[] = [];
 
     for (const rule of rules) {
-        const { regex, usesCapture, captureNames } = buildRuleRegex(rule);
+        const { regex, usesCapture, captureNames, usesLineStartsAfter } = buildRuleRegex(rule);
         const allMatches = findMatches(matchContent, regex, usesCapture, captureNames);
 
         // Filter matches by page ID constraints
@@ -461,12 +468,55 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
                 : filterByOccurrence(constrainedMatches, rule.occurrence);
 
         for (const m of finalMatches) {
+            // For lineStartsAfter: we want to exclude the marker from content.
+            // - Split at m.start so previous segment doesn't include the marker
+            // - Set contentStartOffset to skip the marker when slicing this segment
+            const isLineStartsAfter = usesLineStartsAfter && m.captured !== undefined;
+            const markerLength = isLineStartsAfter ? m.end - m.captured!.length - m.start : 0;
+
             splitPoints.push({
-                capturedContent: m.captured,
+                // lineStartsAfter: DON'T use capturedContent, let normal slicing extend to next split
+                capturedContent: isLineStartsAfter ? undefined : m.captured,
+                // lineStartsAfter: skip the marker when slicing content
+                contentStartOffset: isLineStartsAfter ? markerLength : undefined,
                 index: rule.split === 'at' ? m.start : m.end,
                 meta: rule.meta,
                 namedCaptures: m.namedCaptures,
             });
+        }
+
+        // Handle fallback: 'page' - add page boundary splits for spans with no matches
+        if (rule.fallback === 'page' && rule.maxSpan !== undefined && rule.maxSpan > 0) {
+            // Find which pages had matches
+            const pagesWithMatches = new Set(finalMatches.map((m) => pageMap.getId(m.start)));
+
+            // For each page boundary, check if its page group had any matches
+            for (const boundary of pageMap.boundaries) {
+                const groupKey = Math.floor(boundary.id / rule.maxSpan);
+
+                // Check if any page in this group had matches
+                let groupHasMatch = false;
+                for (const pageId of pagesWithMatches) {
+                    if (Math.floor(pageId / rule.maxSpan) === groupKey) {
+                        groupHasMatch = true;
+                        break;
+                    }
+                }
+
+                // If no matches in this group, add a split at page boundary
+                if (!groupHasMatch) {
+                    // Check constraints
+                    if (
+                        (rule.min === undefined || boundary.id >= rule.min) &&
+                        (rule.max === undefined || boundary.id <= rule.max)
+                    ) {
+                        splitPoints.push({
+                            index: boundary.start,
+                            meta: rule.meta,
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -509,16 +559,22 @@ const buildSegments = (splitPoints: SplitPoint[], content: string, pageMap: Page
         meta?: Record<string, unknown>,
         capturedContent?: string,
         namedCaptures?: Record<string, string>,
+        contentStartOffset?: number,
     ): Segment | null => {
-        let text = capturedContent?.trim() ?? content.slice(start, end).replace(/[\s\n]+$/, '');
+        // For lineStartsAfter, skip the marker by using contentStartOffset
+        const actualStart = start + (contentStartOffset ?? 0);
+        // For lineStartsAfter (contentStartOffset set), trim leading whitespace after marker
+        // For other rules, only trim trailing whitespace to preserve intentional leading spaces
+        const sliced = content.slice(actualStart, end);
+        let text = capturedContent?.trim() ?? (contentStartOffset ? sliced.trim() : sliced.replace(/[\s\n]+$/, ''));
         if (!text) {
             return null;
         }
         if (!capturedContent) {
-            text = convertPageBreaks(text, start, pageMap.pageBreaks);
+            text = convertPageBreaks(text, actualStart, pageMap.pageBreaks);
         }
-        const from = pageMap.getId(start);
-        const to = capturedContent ? pageMap.getId(end - 1) : pageMap.getId(start + text.length - 1);
+        const from = pageMap.getId(actualStart);
+        const to = capturedContent ? pageMap.getId(end - 1) : pageMap.getId(actualStart + text.length - 1);
         const seg: Segment = { content: text, from };
         if (to !== from) {
             seg.to = to;
@@ -535,14 +591,15 @@ const buildSegments = (splitPoints: SplitPoint[], content: string, pageMap: Page
     const createSegmentsFromSplitPoints = (): Segment[] => {
         const result: Segment[] = [];
         for (let i = 0; i < splitPoints.length; i++) {
-            const start = splitPoints[i].index;
+            const sp = splitPoints[i];
             const end = i < splitPoints.length - 1 ? splitPoints[i + 1].index : content.length;
             const s = createSegment(
-                start,
+                sp.index,
                 end,
-                splitPoints[i].meta,
-                splitPoints[i].capturedContent,
-                splitPoints[i].namedCaptures,
+                sp.meta,
+                sp.capturedContent,
+                sp.namedCaptures,
+                sp.contentStartOffset,
             );
             if (s) {
                 result.push(s);
