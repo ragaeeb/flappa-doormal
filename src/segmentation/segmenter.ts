@@ -460,6 +460,8 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
 
     const { content: matchContent, pageMap } = buildPageMap(pages);
     const splitPoints: SplitPoint[] = [];
+    // Collect fallback splits separately so they don't override other rules at same positions
+    const fallbackSplits: { index: number; meta?: Record<string, unknown> }[] = [];
 
     for (const rule of rules) {
         const { regex, usesCapture, captureNames, usesLineStartsAfter } = buildRuleRegex(rule);
@@ -498,8 +500,8 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
             });
         }
 
-        // Handle fallback: 'page' - add page boundary splits for pages with no matches
-        // With sliding window, a page needs fallback if it's not within maxSpan of any matched page
+        // Handle fallback: 'page' - collect page boundary splits for pages with no matches
+        // These are added AFTER all rules so other rules get priority at same positions
         if (rule.fallback === 'page' && rule.maxSpan !== undefined && rule.maxSpan > 0) {
             // Find which pages had matches
             const matchedPageIds = [...new Set(finalMatches.map((m) => pageMap.getId(m.start)))];
@@ -524,9 +526,9 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
                     return matchedId >= boundary.id && matchedId <= boundary.id + rule.maxSpan!;
                 });
 
-                // If no match covers this page, add a fallback split at page boundary
+                // If no match covers this page, collect fallback split
                 if (!isCoveredByMatch) {
-                    splitPoints.push({
+                    fallbackSplits.push({
                         index: boundary.start,
                         meta: rule.meta,
                     });
@@ -535,15 +537,33 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
         }
     }
 
-    // Deduplicate split points by index using Set for O(1) lookup, then sort
-    const seen = new Set<number>();
-    const unique = splitPoints.filter((p) => {
-        if (seen.has(p.index)) {
-            return false;
+    // Add fallback splits only where no other rule has claimed that position
+    const mainIndices = new Set(splitPoints.map((p) => p.index));
+    for (const fb of fallbackSplits) {
+        if (!mainIndices.has(fb.index)) {
+            splitPoints.push({ index: fb.index, meta: fb.meta });
         }
-        seen.add(p.index);
-        return true;
-    });
+    }
+
+    // Deduplicate split points by index, preferring ones with more information
+    // (contentStartOffset or meta over plain splits)
+    const byIndex = new Map<number, SplitPoint>();
+    for (const p of splitPoints) {
+        const existing = byIndex.get(p.index);
+        if (!existing) {
+            byIndex.set(p.index, p);
+        } else {
+            // Prefer split with contentStartOffset (for lineStartsAfter stripping)
+            // or with meta over one without
+            const hasMoreInfo =
+                (p.contentStartOffset !== undefined && existing.contentStartOffset === undefined) ||
+                (p.meta !== undefined && existing.meta === undefined);
+            if (hasMoreInfo) {
+                byIndex.set(p.index, p);
+            }
+        }
+    }
+    const unique = [...byIndex.values()];
     unique.sort((a, b) => a.index - b.index);
 
     return buildSegments(unique, matchContent, pageMap, rules);

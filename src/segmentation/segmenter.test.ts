@@ -1218,6 +1218,55 @@ describe('segmenter', () => {
             });
         });
 
+        describe('split point priority', () => {
+            it('should prefer split with contentStartOffset when multiple rules match same position', () => {
+                // This tests the fix for: when tarqim (split: 'after') creates a split at position X
+                // and lineStartsAfter (split: 'at') also creates a split at position X,
+                // the lineStartsAfter split should win because it has contentStartOffset for stripping
+                const pages: Page[] = [
+                    { content: 'Content on page one.', id: 1 },
+                    { content: '## Chapter Title\nChapter content.', id: 2 },
+                ];
+
+                const rules: SplitRule[] = [
+                    // Tarqim rule: splits after `.` - creates split at end of page 1 (position 20)
+                    // The `.` followed by `\n` means split point is at position 21 (after .\n)
+                    { split: 'after', template: '{{tarqim}}\\s*' },
+                    // Heading rule: splits at `## ` and strips it - also at position 21
+                    { lineStartsAfter: ['## '], meta: { type: 'chapter' }, split: 'at' },
+                ];
+
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                // First segment from page 1
+                expect(result[0]).toMatchObject({ content: 'Content on page one.', from: 1 });
+                // Second segment: the ## should be stripped, meta should be applied
+                expect(result[1]).toMatchObject({
+                    content: 'Chapter Title\nChapter content.', // ## stripped!
+                    from: 2,
+                    meta: { type: 'chapter' },
+                });
+            });
+
+            it('should prefer split with meta when multiple rules match same position', () => {
+                const pages: Page[] = [{ content: 'First sentence.\nSecond sentence.', id: 1 }];
+
+                const rules: SplitRule[] = [
+                    // First rule: splits after period, no meta
+                    { regex: '\\.\\s*', split: 'after' },
+                    // Second rule: also splits at newline, has meta
+                    { meta: { type: 'part2' }, regex: '^Second', split: 'at' },
+                ];
+
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                // The split at position 16 should use the rule with meta
+                expect(result[1].meta).toMatchObject({ type: 'part2' });
+            });
+        });
+
         describe('error handling', () => {
             it('should throw helpful error for invalid regex patterns', () => {
                 const pages: Page[] = [{ content: 'test content', id: 1 }];

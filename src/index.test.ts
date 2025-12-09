@@ -267,6 +267,15 @@ describe('index', () => {
                 startsWith: 'مسألة؛ قال', // Prefix ## ٢٠٢٧ - str ped
                 to: 7955,
             });
+
+            console.log(segments[16]);
+
+            testSegment(segments[16], {
+                endsWith: 'في اسْتِجْمارهِ.',
+                from: 7957,
+                meta: { type: 'chapter' },
+                startsWith: 'بابُ الاسْتِطابةِ والحَدَثِ',
+            });
         });
     });
 });
