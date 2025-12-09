@@ -39,7 +39,19 @@
  * // Using tokens with named captures
  * { lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '], split: 'at' }
  */
-export const TOKEN_PATTERNS: Record<string, string> = {
+// ─────────────────────────────────────────────────────────────
+// Base tokens - raw regex patterns (no template references)
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Base token definitions mapping human-readable token names to regex patterns.
+ *
+ * These tokens contain raw regex patterns and do not reference other tokens.
+ * For composite tokens that build on these, see `COMPOSITE_TOKENS`.
+ *
+ * @internal
+ */
+const BASE_TOKENS: Record<string, string> = {
     /**
      * Chapter marker - Arabic word for "chapter" (باب).
      *
@@ -49,11 +61,6 @@ export const TOKEN_PATTERNS: Record<string, string> = {
      */
     bab: 'باب',
 
-    // ─────────────────────────────────────────────────────────────
-    // Phrase group tokens (expand to alternations)
-    // These are base forms - use fuzzy: true for diacritic-insensitive matching
-    // ─────────────────────────────────────────────────────────────
-
     /**
      * Basmala pattern - Arabic invocation "In the name of Allah" (بسم الله).
      *
@@ -62,11 +69,7 @@ export const TOKEN_PATTERNS: Record<string, string> = {
      *
      * @example 'بسم الله الرحمن الرحيم' (In the name of Allah, the Most Gracious, the Most Merciful)
      */
-    basmala: 'بسم الله',
-
-    // ─────────────────────────────────────────────────────────────
-    // Character patterns
-    // ─────────────────────────────────────────────────────────────
+    basmala: 'بسم الله|﷽',
 
     /**
      * Bullet point variants - common bullet characters.
@@ -149,6 +152,96 @@ export const TOKEN_PATTERNS: Record<string, string> = {
      * @example '{{raqms}}' matches '٦٦٩٦' in '٦٦٩٦ - حدثنا'
      */
     raqms: '[\\u0660-\\u0669]+',
+
+    /**
+     * Punctuation characters.
+     * Use {{tarqim}} which is especially useful when splitting using split: 'after' on punctuation marks.
+     */
+    tarqim: '[.!?؟؛]',
+};
+
+// ─────────────────────────────────────────────────────────────
+// Composite tokens - templates that reference base tokens
+// These are pre-expanded at module load time for performance
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Composite token definitions using template syntax.
+ *
+ * These tokens reference base tokens using `{{token}}` syntax and are
+ * automatically expanded to their final regex patterns at module load time.
+ *
+ * This provides better abstraction - if base tokens change, composites
+ * automatically update on the next build.
+ *
+ * @internal
+ */
+const COMPOSITE_TOKENS: Record<string, string> = {
+    /**
+     * Numbered hadith marker - common format for hadith numbering.
+     *
+     * Matches patterns like "٢٢ - " (number, space, dash, space).
+     * This is the most common format in hadith collections.
+     *
+     * Use with `lineStartsAfter` to cleanly extract hadith content:
+     * ```typescript
+     * { lineStartsAfter: ['{{numbered}}'], split: 'at' }
+     * ```
+     *
+     * For capturing the hadith number, use explicit capture syntax:
+     * ```typescript
+     * { lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '], split: 'at' }
+     * ```
+     *
+     * @example '٢٢ - حدثنا' matches, content starts after '٢٢ - '
+     * @example '٦٦٩٦ – أخبرنا' matches (with en-dash)
+     */
+    numbered: '{{raqms}} {{dash}} ',
+};
+
+/**
+ * Expands base tokens in a template string.
+ * Used internally to pre-expand composite tokens.
+ *
+ * @param template - Template string with `{{token}}` placeholders
+ * @returns Expanded pattern with base tokens replaced
+ * @internal
+ */
+const expandBaseTokens = (template: string): string => {
+    return template.replace(/\{\{(\w+)\}\}/g, (_, tokenName) => {
+        return BASE_TOKENS[tokenName] ?? `{{${tokenName}}}`;
+    });
+};
+
+/**
+ * Token definitions mapping human-readable token names to regex patterns.
+ *
+ * Tokens are used in template strings with double-brace syntax:
+ * - `{{token}}` - Expands to the pattern (non-capturing in context)
+ * - `{{token:name}}` - Expands to a named capture group `(?<name>pattern)`
+ * - `{{:name}}` - Captures any content with the given name `(?<name>.+)`
+ *
+ * @remarks
+ * These patterns are designed for Arabic text matching. For diacritic-insensitive
+ * matching of Arabic patterns, use the `fuzzy: true` option in split rules,
+ * which applies `makeDiacriticInsensitive()` to the expanded patterns.
+ *
+ * @example
+ * // Using tokens in a split rule
+ * { lineStartsWith: ['{{kitab}}', '{{bab}}'], split: 'at', fuzzy: true }
+ *
+ * @example
+ * // Using tokens with named captures
+ * { lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '], split: 'at' }
+ *
+ * @example
+ * // Using the numbered convenience token
+ * { lineStartsAfter: ['{{numbered}}'], split: 'at' }
+ */
+export const TOKEN_PATTERNS: Record<string, string> = {
+    ...BASE_TOKENS,
+    // Pre-expand composite tokens at module load time
+    ...Object.fromEntries(Object.entries(COMPOSITE_TOKENS).map(([k, v]) => [k, expandBaseTokens(v)])),
 };
 
 /**

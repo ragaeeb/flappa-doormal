@@ -86,10 +86,13 @@ Replace regex with readable tokens:
 
 | Token | Matches | Regex Equivalent |
 |-------|---------|------------------|
-| `{{raqms}}` | Arabic-Indic digits | `[\u0660-\u0669]+` |
-| `{{raqm}}` | Single Arabic digit | `[\u0660-\u0669]` |
+| `{{raqms}}` | Arabic-Indic digits | `[\\u0660-\\u0669]+` |
+| `{{raqm}}` | Single Arabic digit | `[\\u0660-\\u0669]` |
 | `{{dash}}` | Dash variants | `[-–—ـ]` |
 | `{{harf}}` | Arabic letter | `[أ-ي]` |
+| `{{numbered}}` | Hadith numbering `٢٢ - ` | `{{raqms}} {{dash}} ` |
+| `{{fasl}}` | Section markers | `فصل\|مسألة` |
+| `{{tarqim}}` | Punctuation marks | `[.!?؟؛]` |
 | `{{bullet}}` | Bullet points | `[•*°]` |
 | `{{naql}}` | Narrator phrases | `حدثنا\|أخبرنا\|...` |
 | `{{kitab}}` | "كتاب" (book) | `كتاب` |
@@ -168,7 +171,26 @@ Control which matches to use:
 
 ## Use Cases
 
+### Simple Hadith Segmentation
+
+Use `{{numbered}}` for the common "number - content" format:
+
+```typescript
+const segments = segmentPages(pages, {
+  rules: [{
+    lineStartsAfter: ['{{numbered}}'],
+    split: 'at',
+    meta: { type: 'hadith' }
+  }]
+});
+
+// Matches: ٢٢ - حدثنا, ٦٦٩٦ – أخبرنا, etc.
+// Content starts AFTER the number and dash
+```
+
 ### Hadith Segmentation with Number Extraction
+
+For capturing the hadith number, use explicit capture syntax:
 
 ```typescript
 const segments = segmentPages(pages, {

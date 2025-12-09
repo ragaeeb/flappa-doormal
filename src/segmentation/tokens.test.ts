@@ -145,5 +145,35 @@ describe('tokens', () => {
                 expect(typeof TOKEN_PATTERNS[key]).toBe('string');
             }
         });
+
+        it('should include the numbered composite token', () => {
+            expect(TOKEN_PATTERNS.numbered).toBeDefined();
+        });
+
+        it('should expand numbered token to raqms + dash pattern', () => {
+            // numbered is defined as '{{raqms}} {{dash}} ' which should expand to the raw patterns
+            expect(TOKEN_PATTERNS.numbered).toBe('[\\u0660-\\u0669]+ [-–—ـ] ');
+        });
+    });
+
+    describe('numbered token usage', () => {
+        it('should create regex that matches Arabic-Indic numbered pattern', () => {
+            const regex = templateToRegex('^{{numbered}}');
+            expect(regex).toBeInstanceOf(RegExp);
+            expect(regex?.test('٢٢ - حدثنا')).toBeTrue();
+            expect(regex?.test('٦٦٩٦ – أخبرنا')).toBeTrue(); // en-dash
+        });
+
+        it('should not match lines without proper number prefix', () => {
+            const regex = templateToRegex('^{{numbered}}');
+            expect(regex?.test('حدثنا')).toBeFalse();
+            expect(regex?.test('باب الصلاة')).toBeFalse();
+        });
+
+        it('should work in lineStartsAfter pattern expansion', () => {
+            // This simulates what happens in segmenter.ts when using lineStartsAfter
+            const pattern = expandTokens('^(?:{{numbered}})(.*)');
+            expect(pattern).toBe('^(?:[\\u0660-\\u0669]+ [-–—ـ] )(.*)');
+        });
     });
 });
