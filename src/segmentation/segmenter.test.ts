@@ -429,18 +429,21 @@ describe('segmenter', () => {
             expect(result[1].content.trim()).toBe('E4');
         });
 
-        it('should create split points per-page when maxSpan is 1', () => {
-            // occurrence: 'last' with maxSpan: 1 creates one split point per page
+        it('should look ahead maxSpan pages when maxSpan is 1', () => {
+            // With sliding window, maxSpan: 1 means look 1 page ahead from segment start
+            // Window from page 0: pages 0-1, last punct at page 1
+            // Window from page 2: pages 2-3, last punct at page 3
             const rules: SplitRule[] = [{ maxSpan: 1, occurrence: 'last', regex: '\\.', split: 'after' }];
 
             const result = segmentPages(multiPageContent, { rules });
 
-            // 4 entries = 4 split points = 5 segments
-            expect(result.length).toBe(5);
+            // 2 windows = 2 split points = 3 segments
+            expect(result.length).toBe(3);
 
-            // First segment: from start to entry 0's last period
+            // First segment: pages 0+1 (looked ahead 1 page)
             expect(result[0].from).toBe(0);
-            expect(result[0].content).toBe('P1A. P1B.');
+            expect(result[0].content).toContain('P1A');
+            expect(result[0].content).toContain('P2B.');
 
             // Last segment: after entry 3's last period to end
             expect(result[result.length - 1].content.trim()).toBe('E4');
@@ -554,6 +557,179 @@ describe('segmenter', () => {
             expect(result[0].content).toBe('A. B.');
             expect(result[1].from).toBe(1);
             expect(result[1].to).toBe(1000); // Content spans both pages
+        });
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // NEW: Sliding window maxSpan tests (lookahead by page ID difference)
+    // These tests define the NEW behavior where maxSpan is the maximum
+    // page ID difference allowed when looking ahead for the next split
+    // ─────────────────────────────────────────────────────────────
+
+    describe('maxSpan sliding window (lookahead)', () => {
+        it('should prefer longer segments by looking ahead maxSpan pages', () => {
+            // All 3 pages have punctuation at end
+            // With maxSpan=1: can look 1 page ahead from segment start
+            // Segment 1: starts at page 1, looks at pages 1-2, finds last punct at page 2
+            // Segment 2: starts at page 3, looks at page 3...4 (no page 4), finds last punct at page 3
+            const pages: Page[] = [
+                { content: 'Page 1 content.', id: 1 },
+                { content: 'Page 2 content.', id: 2 },
+                { content: 'Page 3 content.', id: 3 },
+            ];
+
+            const rules: SplitRule[] = [{ maxSpan: 1, occurrence: 'last', regex: '\\.', split: 'after' }];
+
+            const result = segmentPages(pages, { rules });
+
+            // Segment 1: pages 1+2 (looked ahead 1 page, found punct at page 2)
+            // Segment 2: page 3 (note: from might show previous page due to newline boundary)
+            expect(result).toHaveLength(2);
+            expect(result[0].from).toBe(1);
+            expect(result[0].to).toBe(2);
+            expect(result[0].content).toContain('Page 1');
+            expect(result[0].content).toContain('Page 2');
+            // Content should be page 3 only (from may be 2 due to newline at end of page 2)
+            expect(result[1].content).toContain('Page 3');
+            expect(result[1].content).not.toContain('Page 2');
+        });
+
+        it('should cut at current page if next page has no punctuation', () => {
+            // Page 1: has punctuation
+            // Page 2: NO punctuation
+            // Page 3: has punctuation
+            // With maxSpan=1: look ahead 1 page
+            // Segment 1: pages 1-2, only page 1 has punct → cut at page 1
+            // Segment 2: pages 2-3, only page 3 has punct → cut at page 3 (spans 2+3)
+            const pages: Page[] = [
+                { content: 'Page 1 content.', id: 1 },
+                { content: 'Page 2 no punctuation', id: 2 },
+                { content: 'Page 3 content.', id: 3 },
+            ];
+
+            const rules: SplitRule[] = [{ maxSpan: 1, occurrence: 'last', regex: '\\.', split: 'after' }];
+
+            const result = segmentPages(pages, { rules });
+
+            // Segment 1: page 1 only (can't find punct in page 2)
+            // Segment 2: pages 2+3 (found punct at page 3)
+            expect(result).toHaveLength(2);
+            expect(result[0].from).toBe(1);
+            expect(result[0].content).toBe('Page 1 content.');
+            // Second segment should contain pages 2+3
+            expect(result[1].content).toContain('Page 2 no punctuation');
+            expect(result[1].content).toContain('Page 3 content.');
+        });
+
+        it('should work with tarqim and fasl rules together', () => {
+            // Page 1: has punctuation at end
+            // Page 2: has fasl marker on new line, NO punctuation before it
+            const pages: Page[] = [
+                { content: 'Page 1 content.', id: 1 },
+                { content: 'Intro text\nفصل: Chapter content', id: 2 }, // fasl on new line
+            ];
+
+            const rules: SplitRule[] = [
+                { maxSpan: 1, occurrence: 'last', regex: '\\.', split: 'after' },
+                { fuzzy: true, lineStartsWith: ['فصل'], split: 'at' },
+            ];
+
+            const result = segmentPages(pages, { rules });
+
+            // Split points: end of "Page 1 content." and at "فصل:"
+            // Segment 1: "Page 1 content."
+            // Segment 2: "Intro text " (between two splits)
+            // Segment 3: "فصل: Chapter content"
+            expect(result).toHaveLength(3);
+            expect(result[0].content).toBe('Page 1 content.');
+            expect(result[1].content.trim()).toBe('Intro text');
+            expect(result[2].content).toContain('فصل');
+        });
+
+        it('should handle non-consecutive page IDs with maxSpan based on ID difference', () => {
+            // Pages with gap: 1, 5 (diff = 4)
+            // With maxSpan=1: page 5 is too far ahead (diff > 1)
+            // With maxSpan=4: page 5 is within range (diff <= 4)
+            const pages: Page[] = [
+                { content: 'Page 1 content.', id: 1 },
+                { content: 'Page 5 content.', id: 5 },
+            ];
+
+            const rulesMaxSpan1: SplitRule[] = [{ maxSpan: 1, occurrence: 'last', regex: '\\.', split: 'after' }];
+
+            const resultMaxSpan1 = segmentPages(pages, { rules: rulesMaxSpan1 });
+
+            // maxSpan=1: page 5 is outside range (5-1=4 > 1), so cut at page 1
+            expect(resultMaxSpan1[0].from).toBe(1);
+            expect(resultMaxSpan1[0].content).toBe('Page 1 content.');
+
+            const rulesMaxSpan4: SplitRule[] = [{ maxSpan: 4, occurrence: 'last', regex: '\\.', split: 'after' }];
+
+            const resultMaxSpan4 = segmentPages(pages, { rules: rulesMaxSpan4 });
+
+            // maxSpan=4: page 5 is within range (5-1=4 <= 4), so can look ahead
+            // Segments span both pages
+            expect(resultMaxSpan4[0].to).toBe(5);
+        });
+
+        it('should use fallback when no punctuation found within maxSpan window', () => {
+            // No pages have punctuation
+            // With fallback: 'page', should create page-boundary splits
+            const pages: Page[] = [
+                { content: 'Page 1 no punct', id: 1 },
+                { content: 'Page 2 no punct', id: 2 },
+                { content: 'Page 3 no punct', id: 3 },
+            ];
+
+            const rules: SplitRule[] = [
+                { fallback: 'page', maxSpan: 1, occurrence: 'last', regex: '\\.', split: 'after' },
+            ];
+
+            const result = segmentPages(pages, { rules });
+
+            // Each page becomes its own segment via fallback
+            expect(result).toHaveLength(3);
+            expect(result[0]).toMatchObject({ content: 'Page 1 no punct', from: 1 });
+            expect(result[1]).toMatchObject({ content: 'Page 2 no punct', from: 2 });
+            expect(result[2]).toMatchObject({ content: 'Page 3 no punct', from: 3 });
+        });
+
+        it('should merge pages when no punctuation and fallback is omitted', () => {
+            // Same as above but without fallback
+            const pages: Page[] = [
+                { content: 'Page 1 no punct', id: 1 },
+                { content: 'Page 2 no punct', id: 2 },
+                { content: 'Page 3 no punct', id: 3 },
+            ];
+
+            const rules: SplitRule[] = [{ maxSpan: 1, occurrence: 'last', regex: '\\.', split: 'after' }];
+
+            const result = segmentPages(pages, { rules });
+
+            // No matches, no fallback → entire content in one segment
+            expect(result).toHaveLength(1);
+            expect(result[0].from).toBe(1);
+            expect(result[0].to).toBe(3);
+        });
+
+        it('should handle maxSpan=2 allowing segments to span 3 pages', () => {
+            // maxSpan=2 means look up to 2 pages ahead (segment can span 3 pages total)
+            const pages: Page[] = [
+                { content: 'Page 1.', id: 1 },
+                { content: 'Page 2.', id: 2 },
+                { content: 'Page 3.', id: 3 },
+                { content: 'Page 4.', id: 4 },
+            ];
+
+            const rules: SplitRule[] = [{ maxSpan: 2, occurrence: 'last', regex: '\\.', split: 'after' }];
+
+            const result = segmentPages(pages, { rules });
+
+            // Segment 1: pages 1-3 (start at 1, look up to page 3)
+            // Segment 2: page 4
+            expect(result.length).toBeLessThanOrEqual(2);
+            expect(result[0].from).toBe(1);
+            expect(result[0].to).toBe(3);
         });
     });
 

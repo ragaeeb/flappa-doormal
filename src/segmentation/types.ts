@@ -147,23 +147,36 @@ type SplitBehavior = {
      * - `'first'`: Only split at the first match
      * - `'last'`: Only split at the last match
      *
-     * When `maxSpan` is set, occurrence filtering is applied per page-group
-     * rather than globally.
+     * When `maxSpan` is set, occurrence filtering is applied per sliding
+     * window rather than globally. With `'last'`, the algorithm prefers
+     * longer segments by looking as far ahead as allowed before selecting
+     * the last match in the window.
      *
      * @default 'all'
      */
     occurrence?: 'first' | 'last' | 'all';
 
     /**
-     * Maximum number of pages a segment can span before forcing a split.
+     * Maximum page ID difference allowed when looking ahead for split points.
      *
-     * When set, occurrence filtering is applied per page-group:
-     * - `maxSpan: 1` = per-page (e.g., last punctuation on EACH page)
-     * - `maxSpan: 2` = at most 2 pages per segment
+     * Uses a sliding window algorithm that prefers longer segments:
+     * 1. Start from the first page of the current segment
+     * 2. Look for matches within pages where `pageId - startPageId <= maxSpan`
+     * 3. Apply occurrence filter (e.g., 'last') to select a match
+     * 4. Next window starts from the page after the match
+     *
+     * Examples:
+     * - `maxSpan: 1` = look 1 page ahead (segments span at most 2 pages)
+     * - `maxSpan: 2` = look 2 pages ahead (segments span at most 3 pages)
      * - `undefined` = no limit (entire content treated as one group)
      *
+     * Note: With non-consecutive page IDs, the algorithm uses actual ID
+     * difference, not array index. Pages 1 and 5 have a difference of 4.
+     *
      * @example
-     * // Split at last period on each page
+     * // Split at last period, looking up to 1 page ahead
+     * // Pages 1,2: split at page 2's last period
+     * // Page 3: split at page 3's last period
      * { lineEndsWith: ['.'], split: 'after', occurrence: 'last', maxSpan: 1 }
      */
     maxSpan?: number;

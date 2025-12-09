@@ -523,19 +523,27 @@ The library concatenates all pages into a single string for pattern matching acr
 
 For typical book processing (up to 6,000 pages), memory usage is well within Node.js defaults. For very large books (40,000+ pages), ensure adequate heap size.
 
-### `maxSpan` Grouping Behavior
+### `maxSpan` Sliding Window Behavior
 
-The `maxSpan` option groups pages by **ID ranges**, not consecutive array indices:
+The `maxSpan` option uses a **sliding window algorithm** based on page ID difference:
 
 ```typescript
-// Pages with IDs [1, 2, 3, 4] and maxSpan: 2
-// Groups: [1, 2] and [3, 4]
+// maxSpan = maximum page ID difference when looking ahead for split points
+// Algorithm prefers LONGER segments by looking as far ahead as allowed
 
-// BUT pages with IDs [1, 5, 10, 100] and maxSpan: 2  
-// Groups: [1] [5] [10] [100] (each in separate groups)
+// Pages [1, 2, 3, 4] with maxSpan: 1, occurrence: 'last'
+// Window from page 1: pages 1-2 (diff <= 1), splits at page 2's last match
+// Window from page 3: pages 3-4 (diff <= 1), splits at page 4's last match
+// Result: 2 segments spanning pages 1-2 and 3-4
+
+// Pages [1, 5, 10] with maxSpan: 1, occurrence: 'last'  
+// Window from page 1: only page 1 (5-1=4 > 1), splits at page 1
+// Window from page 5: only page 5 (10-5=5 > 1), splits at page 5
+// Window from page 10: only page 10, splits at page 10
+// Result: 3 segments (pages too far apart to merge)
 ```
 
-This is intentional for books where page IDs represent actual page numbers. If you need grouping by array position, pre-process pages to assign sequential IDs.
+This is intentional for books where page IDs represent actual page numbers. With `occurrence: 'last'`, the algorithm finds the last match within the lookahead window, creating longer segments where possible.
 
 ## For AI Agents
 

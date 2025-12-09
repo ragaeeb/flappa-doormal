@@ -92,6 +92,39 @@ For patterns like `^٦٦٩٦ - (content)`, the content capture is the *last* pos
 // Solution: Iterate backward from m.length-1 to find last defined capture
 ```
 
+### Sliding Window maxSpan Algorithm
+
+The `maxSpan` option uses a sliding window based on **page ID difference** (not array index):
+
+```
+maxSpan: N means "look up to N pages ahead by page ID"
+
+Example: Pages [1, 2, 3, 4] with maxSpan: 1, occurrence: 'last'
+
+1. Window starts at page 1
+2. Look ahead: pages where (pageId - 1) <= 1 → pages 1, 2
+3. Find ALL matches in window, apply 'last' → select match on page 2
+4. Window advances to page 3 (after match's page)
+5. Repeat: pages 3, 4 → select match on page 4
+6. Result: 2 split points (longer segments preferred)
+```
+
+Key behaviors:
+- **Prefers longer segments**: With `occurrence: 'last'`, looks as far ahead as allowed
+- **Uses page ID difference**: Pages [1, 100] with `maxSpan: 1` are in separate windows (100-1=99 > 1)
+- **Fallback support**: `fallback: 'page'` creates splits when no matches in window
+
+Implementation in `match-utils.ts`:
+```typescript
+export const groupBySpanAndFilter = (
+    matches: MatchResult[],
+    maxSpan: number,
+    occurrence: 'first' | 'last' | 'all' | undefined,
+    getIdForOffset: (offset: number) => number,
+    pageIds: number[] = [],  // Ordered array of all page IDs
+) => { ... }
+```
+
 ## Design Decisions
 
 ### 1. Why `{{double-braces}}`?
@@ -200,6 +233,8 @@ bunx biome lint .
 3. **Alternations need per-alternative fuzzy**: Token `narrated: 'حدثنا|أخبرنا'` requires splitting at `|`, applying fuzzy to each, then rejoining.
 
 4. **Complexity extraction works**: Pulling logic into `match-utils.ts` reduced main function complexity from 37 to 10 and made the code testable.
+
+5. **Rule order matters for specificity**: When multiple rules can match the same position, put specific patterns BEFORE generic ones. Example: `## {{raqms:num}} {{dash}}` must come before `##` to capture the number.
 
 ### Architecture Insights
 

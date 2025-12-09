@@ -207,6 +207,8 @@ type PageMap = {
     boundaries: PageBoundary[];
     /** Sorted array of offsets where page breaks occur (for binary search) */
     pageBreaks: number[];
+    /** Array of all page IDs in order (for sliding window algorithm) */
+    pageIds: number[];
 };
 
 /**
@@ -275,7 +277,12 @@ const buildPageMap = (pages: Page[]): { content: string; pageMap: PageMap } => {
 
     return {
         content: parts.join('\n'),
-        pageMap: { boundaries, getId: (off: number) => findBoundary(off)?.id ?? 0, pageBreaks },
+        pageMap: {
+            boundaries,
+            getId: (off: number) => findBoundary(off)?.id ?? 0,
+            pageBreaks,
+            pageIds: boundaries.map((b) => b.id),
+        },
     };
 };
 
@@ -464,7 +471,13 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
         // Apply occurrence filtering (per-span or global)
         const finalMatches =
             rule.maxSpan !== undefined && rule.maxSpan > 0
-                ? groupBySpanAndFilter(constrainedMatches, rule.maxSpan, rule.occurrence, pageMap.getId)
+                ? groupBySpanAndFilter(
+                      constrainedMatches,
+                      rule.maxSpan,
+                      rule.occurrence,
+                      pageMap.getId,
+                      pageMap.pageIds,
+                  )
                 : filterByOccurrence(constrainedMatches, rule.occurrence);
 
         for (const m of finalMatches) {
@@ -485,36 +498,38 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
             });
         }
 
-        // Handle fallback: 'page' - add page boundary splits for spans with no matches
+        // Handle fallback: 'page' - add page boundary splits for pages with no matches
+        // With sliding window, a page needs fallback if it's not within maxSpan of any matched page
         if (rule.fallback === 'page' && rule.maxSpan !== undefined && rule.maxSpan > 0) {
             // Find which pages had matches
-            const pagesWithMatches = new Set(finalMatches.map((m) => pageMap.getId(m.start)));
+            const matchedPageIds = [...new Set(finalMatches.map((m) => pageMap.getId(m.start)))];
 
-            // For each page boundary, check if its page group had any matches
+            // For each page, check if it's covered by the sliding window of any matched page
             for (const boundary of pageMap.boundaries) {
-                const groupKey = Math.floor(boundary.id / rule.maxSpan);
-
-                // Check if any page in this group had matches
-                let groupHasMatch = false;
-                for (const pageId of pagesWithMatches) {
-                    if (Math.floor(pageId / rule.maxSpan) === groupKey) {
-                        groupHasMatch = true;
-                        break;
-                    }
+                // Check constraints first
+                if (
+                    (rule.min !== undefined && boundary.id < rule.min) ||
+                    (rule.max !== undefined && boundary.id > rule.max)
+                ) {
+                    continue;
                 }
 
-                // If no matches in this group, add a split at page boundary
-                if (!groupHasMatch) {
-                    // Check constraints
-                    if (
-                        (rule.min === undefined || boundary.id >= rule.min) &&
-                        (rule.max === undefined || boundary.id <= rule.max)
-                    ) {
-                        splitPoints.push({
-                            index: boundary.start,
-                            meta: rule.meta,
-                        });
-                    }
+                // Check if this page is within maxSpan of any matched page (looking back)
+                // A page is "covered" if there's a matched page within maxSpan distance before it
+                const isCoveredByMatch = matchedPageIds.some((matchedId) => {
+                    // The matched page's window covers this page if:
+                    // boundary.id is within [matchedId - maxSpan, matchedId + maxSpan]
+                    // But for "last" occurrence, we only care about matchedId >= boundary.id - maxSpan
+                    // and matchedId is a page before or at this boundary that would include this page in its window
+                    return matchedId >= boundary.id && matchedId <= boundary.id + rule.maxSpan!;
+                });
+
+                // If no match covers this page, add a fallback split at page boundary
+                if (!isCoveredByMatch) {
+                    splitPoints.push({
+                        index: boundary.start,
+                        meta: rule.meta,
+                    });
                 }
             }
         }

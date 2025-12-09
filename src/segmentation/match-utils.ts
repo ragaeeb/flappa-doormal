@@ -205,60 +205,81 @@ export const filterByOccurrence = (matches: MatchResult[], occurrence?: 'first' 
 };
 
 /**
- * Groups matches by page span and applies occurrence filter to each group.
+ * Groups matches using a sliding window approach based on page ID difference.
  *
- * Used when `maxSpan` is set to apply occurrence filtering per page-group
- * rather than globally. This enables patterns like "last match on each page"
- * by setting `maxSpan: 1, occurrence: 'last'`.
+ * Uses a lookahead algorithm where `maxSpan` is the maximum page ID difference
+ * allowed when looking ahead for the next split point. This prefers longer
+ * segments by looking as far ahead as allowed before selecting a match.
  *
- * Page groups are calculated as `Math.floor(pageId / maxSpan)`, so:
- * - `maxSpan: 1` creates one group per page
- * - `maxSpan: 2` groups pages 0-1, 2-3, 4-5, etc.
- * - `maxSpan: 5` groups pages 0-4, 5-9, 10-14, etc.
+ * Algorithm:
+ * 1. Start from the first page in the pages list
+ * 2. Look for matches within `maxSpan` page IDs ahead
+ * 3. Apply occurrence filter (e.g., 'last') to select a match
+ * 4. If match found, add it; move window to start from the next page after the match
+ * 5. If no match in window, skip to the next page and repeat
  *
- * @param matches - Array of match results to group and filter
- * @param maxSpan - Maximum pages per group (determines grouping)
- * @param occurrence - Which occurrence(s) to keep within each group
+ * @param matches - Array of match results (must be sorted by start position)
+ * @param maxSpan - Maximum page ID difference allowed when looking ahead
+ * @param occurrence - Which occurrence(s) to keep within each window
  * @param getId - Function that returns the page ID for a given offset
- * @returns Filtered array with occurrence filter applied per group
+ * @param pageIds - Sorted array of all page IDs in the content
+ * @returns Filtered array with sliding window and occurrence filter applied
  *
  * @example
- * // Get last match on each page
- * const matches = [
- *   { start: 0 },   // Page 1
- *   { start: 10 },  // Page 1
- *   { start: 100 }, // Page 2
- *   { start: 110 }, // Page 2
- * ];
- * groupBySpanAndFilter(matches, 1, 'last', getId)
- * // → [{ start: 10 }, { start: 110 }] (last from each page)
- *
- * @example
- * // Get first match per 2-page group
- * groupBySpanAndFilter(matches, 2, 'first', getId)
- * // → [{ start: 0 }] (first from pages 1-2 group)
+ * // Pages: [1, 2, 3], maxSpan=1, occurrence='last'
+ * // Window from page 1: pages 1-2 (diff <= 1)
+ * // Finds last match in pages 1-2, adds it
+ * // Next window from page 3: just page 3
+ * // Result: segments span pages 1-2 and page 3
  */
 export const groupBySpanAndFilter = (
     matches: MatchResult[],
     maxSpan: number,
     occurrence: 'first' | 'last' | 'all' | undefined,
     getId: (offset: number) => number,
+    pageIds?: number[],
 ): MatchResult[] => {
-    const matchesByGroup = new Map<number, MatchResult[]>();
+    if (!matches.length) {
+        return [];
+    }
 
-    for (const m of matches) {
-        const id = getId(m.start);
-        const groupKey = Math.floor(id / maxSpan);
-        if (!matchesByGroup.has(groupKey)) {
-            matchesByGroup.set(groupKey, []);
-        }
-        matchesByGroup.get(groupKey)!.push(m);
+    // If no pageIds provided, fall back to unique page IDs from matches
+    const uniquePageIds = pageIds ?? [...new Set(matches.map((m) => getId(m.start)))].sort((a, b) => a - b);
+
+    if (!uniquePageIds.length) {
+        return filterByOccurrence(matches, occurrence);
     }
 
     const result: MatchResult[] = [];
-    for (const groupMatches of matchesByGroup.values()) {
-        result.push(...filterByOccurrence(groupMatches, occurrence));
+    let windowStartIdx = 0; // Index into uniquePageIds
+
+    while (windowStartIdx < uniquePageIds.length) {
+        const windowStartPageId = uniquePageIds[windowStartIdx];
+
+        // Find all matches within the lookahead window (page ID difference <= maxSpan)
+        const windowMatches = matches.filter((m) => {
+            const matchPageId = getId(m.start);
+            return matchPageId >= windowStartPageId && matchPageId <= windowStartPageId + maxSpan;
+        });
+
+        if (windowMatches.length > 0) {
+            // Apply occurrence filter to matches in this window
+            const selectedMatches = filterByOccurrence(windowMatches, occurrence);
+            result.push(...selectedMatches);
+
+            // Move window to start after the last selected match's page
+            const lastMatchPageId = getId(selectedMatches[selectedMatches.length - 1].start);
+            // Find the next page index after the last match's page
+            windowStartIdx = uniquePageIds.findIndex((id) => id > lastMatchPageId);
+            if (windowStartIdx === -1) {
+                break; // No more pages
+            }
+        } else {
+            // No matches in this window, move to next page
+            windowStartIdx++;
+        }
     }
+
     return result;
 };
 
