@@ -207,6 +207,55 @@ export const findActualEndPage = (
     return currentFromIdx;
 };
 
+/**
+ * Finds the actual starting page index by searching forwards for page content prefix.
+ * Used to determine which page content actually starts from based on content matching.
+ *
+ * This is the counterpart to findActualEndPage - it searches forward to find which
+ * page the content starts on, rather than which page it ends on.
+ *
+ * @param pieceContent - Content of the segment piece
+ * @param currentFromIdx - Current starting index in pageIds
+ * @param toIdx - Maximum ending index to search
+ * @param pageIds - Array of page IDs
+ * @param normalizedPages - Map of page ID to normalized content
+ * @returns The actual starting page index
+ */
+export const findActualStartPage = (
+    pieceContent: string,
+    currentFromIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+): number => {
+    const trimmedPiece = pieceContent.trimStart();
+    if (!trimmedPiece) {
+        return currentFromIdx;
+    }
+
+    // Search forward from currentFromIdx to find which page the content starts on
+    for (let pi = currentFromIdx; pi <= toIdx; pi++) {
+        const pageData = normalizedPages.get(pageIds[pi]);
+        if (pageData) {
+            const pagePrefix = pageData.content.slice(0, Math.min(30, pageData.length)).trim();
+            const piecePrefix = trimmedPiece.slice(0, Math.min(30, trimmedPiece.length));
+
+            // Check both directions:
+            // 1. pieceContent starts with page prefix (page content is longer)
+            // 2. page content starts with pieceContent prefix (pieceContent is shorter)
+            if (pagePrefix.length > 0) {
+                if (trimmedPiece.startsWith(pagePrefix)) {
+                    return pi;
+                }
+                if (pageData.content.trimStart().startsWith(piecePrefix)) {
+                    return pi;
+                }
+            }
+        }
+    }
+    return currentFromIdx;
+};
+
 /** Context required for finding break positions */
 export type BreakpointContext = {
     pageIds: number[];
@@ -311,8 +360,8 @@ export const findBreakPosition = (
             continue;
         }
 
-        // Check if ANY page in the remaining segment is excluded
-        if (hasExcludedPageInRange(excludeSet, pageIds, currentFromIdx, toIdx)) {
+        // Check if ANY page in the current WINDOW is excluded (not the entire segment)
+        if (hasExcludedPageInRange(excludeSet, pageIds, currentFromIdx, windowEndIdx)) {
             continue;
         }
 

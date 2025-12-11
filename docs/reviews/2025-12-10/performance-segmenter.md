@@ -22,34 +22,34 @@ Reviewed the segmentation engine for performance bottlenecks. The file is ~967 l
 
 ## Function-by-Function Analysis
 
-### 1. [buildPageMap](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#213-287) (lines 233-286) ✅ **O(P)** - Efficient
+### 1. [buildPageMap](../src/segmentation/segmenter.ts#213-287) (lines 233-286) ✅ **O(P)** - Efficient
 - Single loop over pages
 - Binary search for ID lookup: **O(log P)**
 - Well-optimized
 
-### 2. [findMatches](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#309-344) (lines 318-343) ✅ **O(M)** - Efficient
+### 2. [findMatches](../src/segmentation/segmenter.ts#309-344) (lines 318-343) ✅ **O(M)** - Efficient
 - Linear in number of regex matches
 
-### 3. [findBreaksInRange](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#345-378) (lines 354-377) ✅ **O(log P + k)** - Efficient
+### 3. [findBreaksInRange](../src/segmentation/segmenter.ts#345-378) (lines 354-377) ✅ **O(log P + k)** - Efficient
 - Uses binary search
 
-### 4. [convertPageBreaks](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#379-411) (lines 393-410) ⚠️ **O(C)** - Could be optimized
+### 4. [convertPageBreaks](../src/segmentation/segmenter.ts#379-411) (lines 393-410) ⚠️ **O(C)** - Could be optimized
 - `Array.from(content)` creates full character array
 - Consider using `replaceAll` with positions instead
 
-### 5. [segmentPages](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#734-864) (lines 776-863) ⚠️ **O(R × M)** - Moderate
+### 5. [segmentPages](../src/segmentation/segmenter.ts#734-864) (lines 776-863) ⚠️ **O(R × M)** - Moderate
 ```
 for each rule:          O(R)
   for each match:       O(M)
     push to splitPoints
 ```
 
-### 6. [buildSegments](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#818-920) (lines 880-966) ✅ **O(S)** - Efficient
+### 6. [buildSegments](../src/segmentation/segmenter.ts#818-920) (lines 880-966) ✅ **O(S)** - Efficient
 - Linear in split points
 
 ---
 
-## 🔴 CRITICAL: [applyBreakpoints](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#412-733) (lines 426-732)
+## 🔴 CRITICAL: [applyBreakpoints](../src/segmentation/segmenter.ts#412-733) (lines 426-732)
 
 **Current Complexity: O(S × P × B × C)**
 
@@ -150,7 +150,7 @@ for (const item of rule.exclude || []) {
 
 ### Priority 4: Early Exit Optimizations
 
-- Cache [isInBreakpointRange](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#463-480) results per page
+- Cache [isInBreakpointRange](../src/segmentation/segmenter.ts#463-480) results per page
 - Skip breakpoint patterns that don't apply to any page in range
 
 ---
@@ -168,7 +168,7 @@ for (const item of rule.exclude || []) {
 
 ## Refactoring Suggestions
 
-Consider extracting [applyBreakpoints](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#412-733) into a class:
+Consider extracting [applyBreakpoints](../src/segmentation/segmenter.ts#412-733) into a class:
 
 ```typescript
 class BreakpointProcessor {

@@ -13,7 +13,9 @@ import {
     createSegment,
     expandBreakpoints,
     findActualEndPage,
+    findActualStartPage,
     findBreakPosition,
+    hasExcludedPageInRange,
     type NormalizedPage,
 } from './breakpoint-utils.js';
 import { makeDiacriticInsensitive } from './fuzzy.js';
@@ -476,8 +478,14 @@ const applyBreakpoints = (
         const fromIdx = pageIdToIndex.get(segment.from) ?? -1;
         const toIdx = segment.to !== undefined ? (pageIdToIndex.get(segment.to) ?? fromIdx) : fromIdx;
 
-        // If segment is within limit, keep as-is
-        if (toIdx - fromIdx + 1 <= maxPages) {
+        // Calculate span using actual page IDs (not array indices)
+        const segmentSpan = (segment.to ?? segment.from) - segment.from;
+        // If segment span is within limit AND no pages are excluded, keep as-is
+        // Check if any page in this segment is excluded by any breakpoint
+        const hasExclusions = expandedBreakpoints.some((bp) =>
+            hasExcludedPageInRange(bp.excludeSet, pageIds, fromIdx, toIdx),
+        );
+        if (segmentSpan <= maxPages && !hasExclusions) {
             result.push(segment);
             continue;
         }
@@ -491,10 +499,16 @@ const applyBreakpoints = (
         let isFirstPiece = true;
 
         while (currentFromIdx <= toIdx) {
-            const remainingPages = toIdx - currentFromIdx + 1;
+            // Calculate remaining span using actual page IDs (not array indices)
+            const remainingSpan = pageIds[toIdx] - pageIds[currentFromIdx];
 
-            // If remaining is within limit, output and done
-            if (remainingPages <= maxPages) {
+            // Check if any page in remaining segment is excluded
+            const remainingHasExclusions = expandedBreakpoints.some((bp) =>
+                hasExcludedPageInRange(bp.excludeSet, pageIds, currentFromIdx, toIdx),
+            );
+
+            // If remaining span is within limit AND no exclusions, output and done
+            if (remainingSpan <= maxPages && !remainingHasExclusions) {
                 const finalSeg = createSegment(
                     remainingContent,
                     pageIds[currentFromIdx],
@@ -507,48 +521,108 @@ const applyBreakpoints = (
                 break;
             }
 
-            // Need to break within maxPages window
-            const windowEndIdx = Math.min(currentFromIdx + maxPages - 1, toIdx);
+            // Need to break within maxPages window (based on page IDs, not indices)
+            // Find the last page index where pageId <= currentPageId + maxPages
+            const currentPageId = pageIds[currentFromIdx];
+            const maxWindowPageId = currentPageId + maxPages;
+            let windowEndIdx = currentFromIdx;
+            for (let i = currentFromIdx; i <= toIdx; i++) {
+                if (pageIds[i] <= maxWindowPageId) {
+                    windowEndIdx = i;
+                } else {
+                    break;
+                }
+            }
 
-            // Use extracted helper to find break position
-            const breakpointCtx: BreakpointContext = {
-                cumulativeOffsets,
-                expandedBreakpoints,
-                normalizedPages,
-                pageIds,
-                prefer,
-                processPattern: patternProcessor,
-            };
-            const breakPosition = findBreakPosition(
-                remainingContent,
-                currentFromIdx,
-                toIdx,
-                windowEndIdx,
-                breakpointCtx,
+            // Special case: if we have exclusions IN THE CURRENT WINDOW, handle them
+            // Check if any page in the WINDOW (not entire segment) is excluded
+            const windowHasExclusions = expandedBreakpoints.some((bp) =>
+                hasExcludedPageInRange(bp.excludeSet, pageIds, currentFromIdx, windowEndIdx),
             );
+            let breakPosition = -1;
+            if (windowHasExclusions) {
+                // Check if the CURRENT starting page is excluded - if so, output just this page
+                const startingPageExcluded = expandedBreakpoints.some((bp) =>
+                    bp.excludeSet.has(pageIds[currentFromIdx]),
+                );
+                if (startingPageExcluded && currentFromIdx < toIdx) {
+                    // Output just this one page as a segment (break at next page boundary)
+                    breakPosition = cumulativeOffsets[currentFromIdx + 1] - cumulativeOffsets[currentFromIdx];
+                } else {
+                    // Find the first excluded page AFTER the starting page (within window) and split BEFORE it
+                    for (let pageIdx = currentFromIdx + 1; pageIdx <= windowEndIdx; pageIdx++) {
+                        const pageId = pageIds[pageIdx];
+                        const isExcluded = expandedBreakpoints.some((bp) => bp.excludeSet.has(pageId));
+                        if (isExcluded) {
+                            // Found an excluded page - split BEFORE it
+                            breakPosition = cumulativeOffsets[pageIdx] - cumulativeOffsets[currentFromIdx];
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // If no exclusion-based split found, use normal breakpoint finding
+            if (breakPosition <= 0) {
+                // Use extracted helper to find break position
+                const breakpointCtx: BreakpointContext = {
+                    cumulativeOffsets,
+                    expandedBreakpoints,
+                    normalizedPages,
+                    pageIds,
+                    prefer,
+                    processPattern: patternProcessor,
+                };
+                breakPosition = findBreakPosition(remainingContent, currentFromIdx, toIdx, windowEndIdx, breakpointCtx);
+            }
 
             if (breakPosition <= 0) {
-                // No pattern matched, output rest as single segment
-                const finalSeg = createSegment(
-                    remainingContent,
-                    pageIds[currentFromIdx],
-                    currentFromIdx !== toIdx ? pageIds[toIdx] : undefined,
-                    isFirstPiece ? segment.meta : undefined,
-                );
-                if (finalSeg) {
-                    result.push(finalSeg);
+                // No pattern matched - fallback to page boundary split
+                // If only one page in window, output it and continue to next page
+                if (windowEndIdx === currentFromIdx) {
+                    // Output this single page as a segment
+                    const pageContent =
+                        cumulativeOffsets[currentFromIdx + 1] !== undefined
+                            ? remainingContent.slice(
+                                  0,
+                                  cumulativeOffsets[currentFromIdx + 1] - cumulativeOffsets[currentFromIdx],
+                              )
+                            : remainingContent;
+                    const pageSeg = createSegment(
+                        pageContent.trim(),
+                        pageIds[currentFromIdx],
+                        undefined,
+                        isFirstPiece ? segment.meta : undefined,
+                    );
+                    if (pageSeg) {
+                        result.push(pageSeg);
+                    }
+                    // Move to next page
+                    remainingContent = remainingContent.slice(pageContent.length).trim();
+                    currentFromIdx++;
+                    isFirstPiece = false;
+                    continue;
                 }
-                break;
+                // Multi-page window with no pattern match - output entire window and continue
+                breakPosition = cumulativeOffsets[windowEndIdx + 1] - cumulativeOffsets[currentFromIdx];
             }
 
             const pieceContent = remainingContent.slice(0, breakPosition).trim();
+
+            // Find the actual starting and ending pages for this piece content
+            // currentFromIdx might not be the actual starting page if content was split across pages
+            const actualStartIdx = pieceContent
+                ? findActualStartPage(pieceContent, currentFromIdx, toIdx, pageIds, normalizedPages)
+                : currentFromIdx;
+            const actualEndIdx = pieceContent
+                ? findActualEndPage(pieceContent, actualStartIdx, windowEndIdx, pageIds, normalizedPages)
+                : currentFromIdx;
+
             if (pieceContent) {
-                // Find the actual ending page using extracted helper
-                const actualEndIdx = findActualEndPage(pieceContent, currentFromIdx, toIdx, pageIds, normalizedPages);
                 const pieceSeg = createSegment(
                     pieceContent,
-                    pageIds[currentFromIdx],
-                    actualEndIdx > currentFromIdx ? pageIds[actualEndIdx] : undefined,
+                    pageIds[actualStartIdx],
+                    actualEndIdx > actualStartIdx ? pageIds[actualEndIdx] : undefined,
                     isFirstPiece ? segment.meta : undefined,
                 );
                 if (pieceSeg) {
@@ -558,8 +632,23 @@ const applyBreakpoints = (
 
             // Update for next iteration
             remainingContent = remainingContent.slice(breakPosition).trim();
-            // Move to next page window
-            currentFromIdx = windowEndIdx + 1;
+
+            // Find which page the remaining content actually starts on
+            // The next piece starts from actualEndIdx OR the next page if the break was at a page boundary
+            let nextFromIdx = actualEndIdx;
+
+            // Check if remaining content starts with content from the next page
+            if (remainingContent && actualEndIdx + 1 <= toIdx) {
+                const nextPageData = normalizedPages.get(pageIds[actualEndIdx + 1]);
+                if (nextPageData) {
+                    const nextPrefix = nextPageData.content.slice(0, Math.min(30, nextPageData.length));
+                    if (nextPrefix && remainingContent.startsWith(nextPrefix)) {
+                        nextFromIdx = actualEndIdx + 1;
+                    }
+                }
+            }
+
+            currentFromIdx = nextFromIdx;
             isFirstPiece = false;
         }
     }
@@ -691,7 +780,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
     }
 
     // Apply breakpoints post-processing for oversized segments
-    if (maxPages !== undefined && maxPages > 0 && breakpoints?.length) {
+    if (maxPages !== undefined && maxPages >= 0 && breakpoints?.length) {
         return applyBreakpoints(segments, pages, normalizedContent, maxPages, breakpoints, prefer);
     }
 

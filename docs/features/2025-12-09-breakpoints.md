@@ -57,25 +57,25 @@ interface SegmentationOptions {
 
 ## Proposed Changes
 
-### [DELETE] Remove from [types.ts](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/types.ts)
+### [DELETE] Remove from [types.ts](../src/segmentation/types.ts)
 - `maxSpan` property
 - `fallback` property  
 - `occurrence` property (if only used for maxSpan)
 
-### [MODIFY] [types.ts](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/types.ts)
-Add to [SegmentationOptions](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/types.ts#333-343):
+### [MODIFY] [types.ts](../src/segmentation/types.ts)
+Add to [SegmentationOptions](../src/segmentation/types.ts#333-343):
 ```typescript
 maxPages?: number;
 breakpoints?: string[];
 prefer?: 'longer' | 'shorter';
 ```
 
-### [DELETE] Remove from [match-utils.ts](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/match-utils.ts)
-- [groupBySpanAndFilter()](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/match-utils.ts#207-264) function
+### [DELETE] Remove from [match-utils.ts](../src/segmentation/match-utils.ts)
+- [groupBySpanAndFilter()](../src/segmentation/match-utils.ts#207-264) function
 
-### [MODIFY] [segmenter.ts](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts)
+### [MODIFY] [segmenter.ts](../src/segmentation/segmenter.ts)
 - Remove maxSpan/fallback logic from main loop
-- Add post-processing step after [buildSegments()](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#572-674)
+- Add post-processing step after [buildSegments()](../src/segmentation/segmenter.ts#572-674)
 - Create `applyBreakpoints()` function
 
 ---
@@ -93,26 +93,26 @@ prefer?: 'longer' | 'shorter';
 # Breakpoints Segmentation Feature - Walkthrough
 
 ## Summary
-Successfully implemented the new **breakpoints** post-processing feature to replace the deprecated `maxSpan` functionality in [src/segmentation/segmenter.ts](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts).
+Successfully implemented the new **breakpoints** post-processing feature to replace the deprecated `maxSpan` functionality in [src/segmentation/segmenter.ts](../src/segmentation/segmenter.ts).
 
 ## What Changed
 
-### New API Properties ([SegmentationOptions](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/types.ts#343-398))
+### New API Properties ([SegmentationOptions](../src/segmentation/types.ts#343-398))
 - `maxPages?: number` - Maximum pages a segment can span before breakpoints apply
 - `breakpoints?: string[]` - Ordered array of regex patterns to try for splitting oversized segments
 - `prefer?: 'longer' | 'shorter'` - Whether to select last or first match within window
 
 ### Implementation
-- **[applyBreakpoints()](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#412-592) function** added to [segmenter.ts](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts) (lines 432-576)
+- **[applyBreakpoints()](../src/segmentation/segmenter.ts#412-592) function** added to [segmenter.ts](../src/segmentation/segmenter.ts) (lines 432-576)
   - Post-processes segments exceeding `maxPages`
   - Tries each breakpoint pattern in order
   - Supports token expansion (`{{tarqim}}`, etc.)
   - Falls back to page boundaries when `""` is in breakpoints array
 
 ### Removed Legacy Code
-- Removed `maxSpan` property from [SplitRule](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/types.ts#286-287) (deprecated)
-- Removed `fallback` property from [SplitRule](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/types.ts#286-287) (deprecated)
-- Removed [groupBySpanAndFilter](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/match-utils.ts#207-264) utility and its usage
+- Removed `maxSpan` property from [SplitRule](../src/segmentation/types.ts#286-287) (deprecated)
+- Removed `fallback` property from [SplitRule](../src/segmentation/types.ts#286-287) (deprecated)
+- Removed [groupBySpanAndFilter](../src/segmentation/match-utils.ts#207-264) utility and its usage
 - Removed all maxSpan/fallback-related tests
 
 ### Test Changes
@@ -131,16 +131,16 @@ bun test
 ```
 
 ## Files Modified
-- [src/segmentation/segmenter.ts](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts) - Added [applyBreakpoints()](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#412-592), removed maxSpan logic
-- [src/segmentation/types.ts](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/types.ts) - Added new options
-- [src/segmentation/segmenter.test.ts](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.test.ts) - Removed ~400 lines of maxSpan tests, added 13 breakpoints tests
-- [src/index.test.ts](file:///Users/rhaq/workspace/flappa-doormal/src/index.test.ts) - Simplified integration tests
+- [src/segmentation/segmenter.ts](../src/segmentation/segmenter.ts) - Added [applyBreakpoints()](../src/segmentation/segmenter.ts#412-592), removed maxSpan logic
+- [src/segmentation/types.ts](../src/segmentation/types.ts) - Added new options
+- [src/segmentation/segmenter.test.ts](../src/segmentation/segmenter.test.ts) - Removed ~400 lines of maxSpan tests, added 13 breakpoints tests
+- [src/index.test.ts](../src/index.test.ts) - Simplified integration tests
 - [test/2576.json](file:///Users/rhaq/workspace/flappa-doormal/test/2576.json) - Removed deprecated `maxSpan` from rules
 - [test/2588.json](file:///Users/rhaq/workspace/flappa-doormal/test/2588.json) - Removed deprecated `maxSpan` from rules
 
 ## Known Lint Warnings
-Two "excessive complexity" warnings remain in [segmenter.ts](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts):
-- [applyBreakpoints](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#412-592) function (complexity: 73)
-- [segmentPages](file:///Users/rhaq/workspace/flappa-doormal/src/segmentation/segmenter.ts#593-723) function (complexity: 35)
+Two "excessive complexity" warnings remain in [segmenter.ts](../src/segmentation/segmenter.ts):
+- [applyBreakpoints](../src/segmentation/segmenter.ts#412-592) function (complexity: 73)
+- [segmentPages](../src/segmentation/segmenter.ts#593-723) function (complexity: 35)
 
 These are acceptable for now as the functions handle inherently complex segmentation logic.

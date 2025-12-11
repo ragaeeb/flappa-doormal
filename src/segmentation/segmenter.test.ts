@@ -931,7 +931,7 @@ describe('segmenter', () => {
 
                     const result = segmentPages(pages, {
                         breakpoints: ['.\\s*'],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'longer',
                         rules: [],
                     });
@@ -948,7 +948,7 @@ describe('segmenter', () => {
 
                     const result = segmentPages(pages, {
                         breakpoints: ['.', '\\n', ''], // Try period, then newline, then page boundary
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'longer',
                         rules: [],
                     });
@@ -965,7 +965,7 @@ describe('segmenter', () => {
 
                     const result = segmentPages(pages, {
                         breakpoints: ['.', ''], // Period, then page boundary
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'longer',
                         rules: [],
                     });
@@ -984,7 +984,7 @@ describe('segmenter', () => {
 
                     const result = segmentPages(pages, {
                         breakpoints: ['.\\s*'],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'longer',
                         rules: [],
                     });
@@ -1001,7 +1001,7 @@ describe('segmenter', () => {
 
                     const result = segmentPages(pages, {
                         breakpoints: ['\\.\\s*'],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'shorter',
                         rules: [],
                     });
@@ -1021,7 +1021,7 @@ describe('segmenter', () => {
 
                     const result = segmentPages(pages, {
                         breakpoints: ['\\.\\s*'],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'longer',
                         rules: [{ lineStartsWith: ['فصل:'], split: 'at' }],
                     });
@@ -1098,7 +1098,7 @@ describe('segmenter', () => {
 
                     const result = segmentPages(pages, {
                         breakpoints: ['{{tarqim}}', '\\n', ''], // Punctuation, then newline, then page
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'longer',
                         rules: [],
                     });
@@ -1118,7 +1118,7 @@ describe('segmenter', () => {
 
                     const result = segmentPages(pages, {
                         breakpoints: ['{{tarqim}}', '\\n', ''],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'longer',
                         rules: [],
                     });
@@ -1137,7 +1137,7 @@ describe('segmenter', () => {
 
                     const result = segmentPages(pages, {
                         breakpoints: ['{{tarqim}}\\s*'],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'shorter', // Use 'shorter' to break at first punctuation (؛)
                         rules: [],
                     });
@@ -1162,7 +1162,7 @@ describe('segmenter', () => {
                             { min: 3, pattern: '\\.\\s*' }, // Only applies to pages 3+
                             '', // Fallback to page boundary for pages 1-2
                         ],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'shorter',
                         rules: [],
                     });
@@ -1184,7 +1184,7 @@ describe('segmenter', () => {
                             { max: 2, pattern: '\\.\\s*' }, // Only applies to pages 1-2
                             '', // Fallback to page boundary for page 3
                         ],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'shorter',
                         rules: [],
                     });
@@ -1206,7 +1206,7 @@ describe('segmenter', () => {
                             { max: 3, min: 2, pattern: '\\.\\s*' }, // Only applies to pages 2-3
                             '', // Fallback for pages 1 and 4
                         ],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'shorter',
                         rules: [],
                     });
@@ -1225,7 +1225,7 @@ describe('segmenter', () => {
                         breakpoints: [
                             '\\.\\s*', // Simple string (applies everywhere)
                         ],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'longer',
                         rules: [],
                     });
@@ -1248,7 +1248,7 @@ describe('segmenter', () => {
                             { min: 3, pattern: '\\.\\s*' }, // Only from page 3+
                             '', // Empty string fallback for pages 1-2
                         ],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'longer',
                         rules: [],
                     });
@@ -1277,7 +1277,7 @@ describe('segmenter', () => {
                     // WITHOUT skipWhen - would split at period on page 1
                     const resultWithout = segmentPages(pages, {
                         breakpoints: ['\\.\\s*'],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'shorter',
                         rules: [],
                     });
@@ -1288,7 +1288,7 @@ describe('segmenter', () => {
                             { pattern: '\\.\\s*', skipWhen: '^.{1,10}$' }, // Skip for content <= 10 chars
                             '', // Fallback to page boundary
                         ],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'shorter',
                         rules: [],
                     });
@@ -1315,7 +1315,7 @@ describe('segmenter', () => {
                             // Skip only for very short content (< 10 chars)
                             { pattern: '\\.\\s*', skipWhen: '^.{1,10}$' },
                         ],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'longer',
                         rules: [],
                     });
@@ -1337,7 +1337,7 @@ describe('segmenter', () => {
                             { pattern: '\\.\\s*', skipWhen: '{{kitab}}' },
                             '', // Fallback
                         ],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'longer',
                         rules: [],
                     });
@@ -1359,7 +1359,7 @@ describe('segmenter', () => {
                             { min: 2, pattern: '\\.\\s*', skipWhen: '^.{1,15}$' },
                             '', // Fallback
                         ],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'longer',
                         rules: [],
                     });
@@ -1382,7 +1382,7 @@ describe('segmenter', () => {
                             { exclude: [1, 2], pattern: '\\.\\s*' }, // Exclude pages 1 and 2
                             '', // Fallback
                         ],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'shorter',
                         rules: [],
                     });
@@ -1405,7 +1405,7 @@ describe('segmenter', () => {
                             { exclude: [[1, 3]], pattern: '\\.\\s*' }, // Exclude pages 1-3
                             '', // Fallback
                         ],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'shorter',
                         rules: [],
                     });
@@ -1429,7 +1429,7 @@ describe('segmenter', () => {
                             { exclude: [1, [2, 3], 50], pattern: '\\.\\s*' },
                             '', // Fallback
                         ],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'shorter',
                         rules: [],
                     });
@@ -1452,7 +1452,7 @@ describe('segmenter', () => {
                             { exclude: [10], min: 5, pattern: '\\.\\s*' },
                             '', // Fallback
                         ],
-                        maxPages: 1,
+                        maxPages: 0,
                         prefer: 'shorter',
                         rules: [],
                     });
@@ -1481,6 +1481,57 @@ describe('segmenter', () => {
 
                 expect(() => segmentPages(pages, { rules })).toThrow(/must specify exactly one pattern type/);
             });
+        });
+    });
+
+    describe('page-ID tracking with non-consecutive IDs', () => {
+        it('should correctly track from page ID when pages have large ID gaps', () => {
+            // Bug repro: content from page 229 incorrectly shows from:59
+            // This happens when pages have non-consecutive IDs and breakpoints split content
+            const pages: Page[] = [
+                { content: 'Page 59 content. Has period.', id: 59 },
+                { content: 'Page 229 content. Also has period.', id: 229 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: '\\.\\s*' }, ''],
+                maxPages: 1,
+                prefer: 'longer',
+                rules: [],
+            });
+
+            // With maxPages:1 (page-ID span), pages 59 and 229 should NOT merge (229-59=170 > 1)
+            // Each page should produce at least one segment, and the from should match the actual page ID
+            expect(result.length).toBeGreaterThanOrEqual(2);
+
+            // Find segment(s) from page 229
+            const page229Segments = result.filter((s) => s.content.includes('Page 229'));
+            expect(page229Segments.length).toBeGreaterThanOrEqual(1);
+            expect(page229Segments[0].from).toBe(229); // This is the bug - it was showing 59
+        });
+
+        it('should track correct from page ID when structural rules combine pages that are then split by breakpoints', () => {
+            // More complex scenario matching 2588: basmalah and fasl structural rules
+            // Page 59 has basmalah, page 229 continues with fasl pattern
+            const pages: Page[] = [
+                { content: 'بِسْمِ اللَّهِ الرَّحْمَنِ الرَّحِيمِ\nFirst content. More text here.', id: 59 },
+                { content: 'إلى هذا الطَّرْفِ.\n\nفصل: وإنْ خُلِقَ content here.', id: 229 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: '\\.\\s*' }, ''],
+                maxPages: 1,
+                prefer: 'longer',
+                rules: [
+                    { fuzzy: true, lineStartsWith: ['{{basmalah}}'], split: 'at' },
+                    { fuzzy: true, lineStartsWith: ['{{fasl}}'], split: 'at' },
+                ],
+            });
+
+            // The segment containing 'إلى هذا الطَّرْفِ' should have from: 229, not from: 59
+            const page229Segment = result.find((s) => s.content.includes('إلى هذا'));
+            expect(page229Segment).toBeDefined();
+            expect(page229Segment?.from).toBe(229);
         });
     });
 });
