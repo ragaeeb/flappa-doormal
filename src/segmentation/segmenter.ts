@@ -8,6 +8,14 @@
  * @module segmenter
  */
 
+import {
+    type BreakpointContext,
+    createSegment,
+    expandBreakpoints,
+    findActualEndPage,
+    findBreakPosition,
+    type NormalizedPage,
+} from './breakpoint-utils.js';
 import { makeDiacriticInsensitive } from './fuzzy.js';
 import {
     anyRuleAllowsId,
@@ -19,7 +27,7 @@ import {
 } from './match-utils.js';
 import { normalizeLineEndings } from './textUtils.js';
 import { expandTokensWithCaptures } from './tokens.js';
-import type { Breakpoint, BreakpointRule, Page, PageRange, Segment, SegmentationOptions, SplitRule } from './types.js';
+import type { Breakpoint, Page, Segment, SegmentationOptions, SplitRule } from './types.js';
 
 /**
  * Checks if a regex pattern contains standard (anonymous) capturing groups.
@@ -411,228 +419,6 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
 };
 
 /**
- * Normalizes a breakpoint to the object form.
- * Strings are converted to { pattern: str } with no constraints.
- */
-const normalizeBreakpoint = (bp: Breakpoint): BreakpointRule => (typeof bp === 'string' ? { pattern: bp } : bp);
-
-/**
- * Checks if a page ID is in an excluded list (single pages or ranges).
- */
-const isPageExcluded = (pageId: number, excludeList: PageRange[] | undefined): boolean => {
-    if (!excludeList || excludeList.length === 0) {
-        return false;
-    }
-    for (const item of excludeList) {
-        if (typeof item === 'number') {
-            if (pageId === item) {
-                return true;
-            }
-        } else {
-            const [from, to] = item;
-            if (pageId >= from && pageId <= to) {
-                return true;
-            }
-        }
-    }
-    return false;
-};
-
-/**
- * Checks if a page ID is within a breakpoint's min/max range and not excluded.
- */
-const isInBreakpointRange = (pageId: number, rule: BreakpointRule): boolean => {
-    if (rule.min !== undefined && pageId < rule.min) {
-        return false;
-    }
-    if (rule.max !== undefined && pageId > rule.max) {
-        return false;
-    }
-    if (isPageExcluded(pageId, rule.exclude)) {
-        return false;
-    }
-    return true;
-};
-
-/**
- * Builds an exclude set from a PageRange array for O(1) lookups.
- */
-const buildExcludeSet = (excludeList: PageRange[] | undefined): Set<number> => {
-    const excludeSet = new Set<number>();
-    for (const item of excludeList || []) {
-        if (typeof item === 'number') {
-            excludeSet.add(item);
-        } else {
-            for (let i = item[0]; i <= item[1]; i++) {
-                excludeSet.add(i);
-            }
-        }
-    }
-    return excludeSet;
-};
-
-/**
- * Creates a segment with optional to and meta fields.
- */
-const createSegment = (
-    content: string,
-    fromPageId: number,
-    toPageId: number | undefined,
-    meta: Record<string, unknown> | undefined,
-): Segment | null => {
-    const trimmed = content.trim();
-    if (!trimmed) {
-        return null;
-    }
-    const seg: Segment = { content: trimmed, from: fromPageId };
-    if (toPageId !== undefined && toPageId !== fromPageId) {
-        seg.to = toPageId;
-    }
-    if (meta) {
-        seg.meta = meta;
-    }
-    return seg;
-};
-
-/** Expanded breakpoint with pre-compiled regex and exclude set */
-type ExpandedBreakpoint = {
-    rule: BreakpointRule;
-    regex: RegExp | null;
-    excludeSet: Set<number>;
-};
-
-/**
- * Expands breakpoint patterns and pre-computes exclude sets.
- */
-const expandBreakpoints = (breakpoints: Breakpoint[]): ExpandedBreakpoint[] =>
-    breakpoints.map((bp) => {
-        const rule = normalizeBreakpoint(bp);
-        const excludeSet = buildExcludeSet(rule.exclude);
-        if (rule.pattern === '') {
-            return { excludeSet, regex: null, rule };
-        }
-        const { pattern } = processPattern(rule.pattern, false);
-        return { excludeSet, regex: new RegExp(pattern, 'g'), rule };
-    });
-
-/** Normalized page data for efficient lookups */
-type NormalizedPage = { content: string; length: number; index: number };
-
-/**
- * Finds the actual ending page index by searching backwards for page content in a piece.
- */
-const findActualEndPage = (
-    pieceContent: string,
-    currentFromIdx: number,
-    toIdx: number,
-    pageIds: number[],
-    normalizedPages: Map<number, NormalizedPage>,
-): number => {
-    for (let pi = toIdx; pi > currentFromIdx; pi--) {
-        const pageData = normalizedPages.get(pageIds[pi]);
-        if (pageData) {
-            const checkPortion = pageData.content.slice(0, Math.min(30, pageData.length));
-            if (checkPortion.length > 0 && pieceContent.indexOf(checkPortion) > 0) {
-                return pi;
-            }
-        }
-    }
-    return currentFromIdx;
-};
-
-/** Context required for finding break positions */
-type BreakpointContext = {
-    pageIds: number[];
-    normalizedPages: Map<number, NormalizedPage>;
-    cumulativeOffsets: number[];
-    expandedBreakpoints: ExpandedBreakpoint[];
-    prefer: 'longer' | 'shorter';
-};
-
-/**
- * Tries to find a break position within the current window using breakpoint patterns.
- * Returns the break position or -1 if no suitable break was found.
- */
-const findBreakPosition = (
-    remainingContent: string,
-    currentFromIdx: number,
-    toIdx: number,
-    windowEndIdx: number,
-    ctx: BreakpointContext,
-): number => {
-    const { pageIds, normalizedPages, cumulativeOffsets, expandedBreakpoints, prefer } = ctx;
-
-    for (const { rule, regex, excludeSet } of expandedBreakpoints) {
-        // Check if this breakpoint applies to the current segment's starting page
-        if (!isInBreakpointRange(pageIds[currentFromIdx], rule)) {
-            continue;
-        }
-
-        // Check if ANY page in the remaining segment is excluded
-        if (excludeSet.size > 0) {
-            let hasExcludedPage = false;
-            for (let pageIdx = currentFromIdx; pageIdx <= toIdx; pageIdx++) {
-                if (excludeSet.has(pageIds[pageIdx])) {
-                    hasExcludedPage = true;
-                    break;
-                }
-            }
-            if (hasExcludedPage) {
-                continue;
-            }
-        }
-
-        // Check if content matches skipWhen pattern
-        if (rule.skipWhen) {
-            const { pattern: skipPattern } = processPattern(rule.skipWhen, false);
-            if (new RegExp(skipPattern).test(remainingContent)) {
-                continue;
-            }
-        }
-
-        // Handle page boundary (empty pattern)
-        if (regex === null) {
-            const nextPageIdx = windowEndIdx + 1;
-            if (nextPageIdx <= toIdx) {
-                const nextPageData = normalizedPages.get(pageIds[nextPageIdx]);
-                if (nextPageData) {
-                    const searchPrefix = nextPageData.content.trim().slice(0, Math.min(30, nextPageData.length));
-                    if (searchPrefix.length > 0) {
-                        const nextPageStart = remainingContent.indexOf(searchPrefix);
-                        if (nextPageStart > 0) {
-                            return nextPageStart;
-                        }
-                    }
-                }
-            }
-            // Fallback to cumulative offsets
-            return Math.min(
-                cumulativeOffsets[windowEndIdx + 1] - cumulativeOffsets[currentFromIdx],
-                remainingContent.length,
-            );
-        }
-
-        // Find matches within window
-        const windowEndPosition = Math.min(
-            cumulativeOffsets[windowEndIdx + 1] - cumulativeOffsets[currentFromIdx],
-            remainingContent.length,
-        );
-        const windowContent = remainingContent.slice(0, windowEndPosition);
-        const matches: { index: number; length: number }[] = [];
-        for (const m of windowContent.matchAll(regex)) {
-            matches.push({ index: m.index, length: m[0].length });
-        }
-
-        if (matches.length > 0) {
-            const selected = prefer === 'longer' ? matches[matches.length - 1] : matches[0];
-            return selected.index + selected.length;
-        }
-    }
-
-    return -1;
-};
-
-/**
  * Applies breakpoints to oversized segments.
  *
  * For each segment that spans more than maxPages, tries the breakpoint patterns
@@ -680,7 +466,9 @@ const applyBreakpoints = (
     }
 
     // Use extracted helper to expand breakpoints
-    const expandedBreakpoints = expandBreakpoints(breakpoints);
+    // Create pattern processor function for breakpoint-utils
+    const patternProcessor = (p: string) => processPattern(p, false).pattern;
+    const expandedBreakpoints = expandBreakpoints(breakpoints, patternProcessor);
 
     const result: Segment[] = [];
 
@@ -729,6 +517,7 @@ const applyBreakpoints = (
                 normalizedPages,
                 pageIds,
                 prefer,
+                processPattern: patternProcessor,
             };
             const breakPosition = findBreakPosition(
                 remainingContent,
