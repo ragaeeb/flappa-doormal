@@ -130,11 +130,11 @@ export const getLastPositionalCapture = (match: RegExpExecArray): string | undef
 /**
  * Filters matches to only include those within page ID constraints.
  *
- * Applies the `min` and `max` constraints from a rule to filter out
- * matches that occur on pages outside the allowed range.
+ * Applies the `min`, `max`, and `exclude` constraints from a rule to filter out
+ * matches that occur on pages outside the allowed range or explicitly excluded.
  *
  * @param matches - Array of match results to filter
- * @param rule - Rule containing `min` and/or `max` page constraints
+ * @param rule - Rule containing `min`, `max`, and/or `exclude` page constraints
  * @param getId - Function that returns the page ID for a given offset
  * @returns Filtered array containing only matches within constraints
  *
@@ -149,15 +149,42 @@ export const getLastPositionalCapture = (match: RegExpExecArray): string | undef
  */
 export const filterByConstraints = (
     matches: MatchResult[],
-    rule: Pick<SplitRule, 'min' | 'max'>,
+    rule: Pick<SplitRule, 'min' | 'max' | 'exclude'>,
     getId: (offset: number) => number,
 ): MatchResult[] => {
+    /**
+     * Checks if a page ID is in an excluded list (single pages or ranges).
+     */
+    const isPageExcluded = (pageId: number, excludeList: SplitRule['exclude']): boolean => {
+        if (!excludeList || excludeList.length === 0) {
+            return false;
+        }
+        for (const item of excludeList) {
+            if (typeof item === 'number') {
+                // Single page exclusion
+                if (pageId === item) {
+                    return true;
+                }
+            } else {
+                // Range exclusion [from, to] inclusive
+                const [from, to] = item;
+                if (pageId >= from && pageId <= to) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
     return matches.filter((m) => {
         const id = getId(m.start);
         if (rule.min !== undefined && id < rule.min) {
             return false;
         }
         if (rule.max !== undefined && id > rule.max) {
+            return false;
+        }
+        if (isPageExcluded(id, rule.exclude)) {
             return false;
         }
         return true;

@@ -1,4 +1,6 @@
 {
+    "breakpoints": [{ "pattern": "{{tarqim}}\\s*" }, ""],
+    "maxPages": 1,
     "pages": [
         {
             "content": "舄<span data-type=\"title\">(هذا نص التقرير) </span>\rالوارد من حضرة صاحب الفضيلة الأستاذ الأكبر الشيخ حسونة النواوي شيخ الجامع الأزهر - حفظه الله",
@@ -65,16 +67,10 @@
             "id": 11208
         }
     ],
+    "prefer": "longer",
     "rules": [
         {
-            "comments": "Split on last punctuation marks for the forewords.",
-            "max": 8,
-            "maxSpan": 1,
-            "occurrence": "last",
-            "split": "after",
-            "template": "{{tarqim}}\\s*"
-        },
-        {
+            "fuzzy": true,
             "lineStartsWith": ["{{basmalah}}"],
             "split": "at"
         },
@@ -99,6 +95,5 @@
             "lineStartsAfter": ["{{raqms:num}} {{dash}}"],
             "split": "at"
         }
-    ],
-    "titles": []
+    ]
 }

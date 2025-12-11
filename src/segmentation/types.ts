@@ -198,6 +198,22 @@ type SplitBehavior = {
 };
 
 // ─────────────────────────────────────────────────────────────
+// Page Range Types
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * A single page ID or a range of page IDs.
+ *
+ * - `number`: A single page ID
+ * - `[number, number]`: A range from first to second (inclusive)
+ *
+ * @example
+ * 5           // Single page 5
+ * [10, 20]    // Pages 10 through 20 (inclusive)
+ */
+export type PageRange = number | [number, number];
+
+// ─────────────────────────────────────────────────────────────
 // Constraints & Metadata
 // ─────────────────────────────────────────────────────────────
 
@@ -229,6 +245,26 @@ type RuleConstraints = {
      * { max: 100, lineStartsWith: ['##'], split: 'before' }
      */
     max?: number;
+
+    /**
+     * Specific pages or page ranges to exclude from this rule.
+     *
+     * Use this to skip the rule for specific pages without needing
+     * to repeat the rule with different min/max values.
+     *
+     * @example
+     * // Exclude specific pages
+     * { exclude: [1, 2, 5] }
+     *
+     * @example
+     * // Exclude page ranges
+     * { exclude: [[1, 10], [50, 100]] }
+     *
+     * @example
+     * // Mix single pages and ranges
+     * { exclude: [1, [5, 10], 50] }
+     */
+    exclude?: PageRange[];
 
     /**
      * Arbitrary metadata attached to segments matching this rule.
@@ -319,15 +355,120 @@ export type Page = {
     content: string;
 };
 
+// ─────────────────────────────────────────────────────────────
+// Breakpoint Types
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * A breakpoint pattern with optional page constraints.
+ *
+ * Use this to control which pages a breakpoint pattern applies to.
+ * Patterns outside the specified range are skipped, allowing
+ * the next breakpoint pattern (or fallback) to be tried.
+ *
+ * @example
+ * // Only apply punctuation-based breaking from page 10 onwards
+ * { pattern: '{{tarqim}}\\s*', min: 10 }
+ *
+ * @example
+ * // Apply to specific page range (pages 10-50)
+ * { pattern: '{{tarqim}}\\s*', min: 10, max: 50 }
+ */
+export type BreakpointRule = {
+    /**
+     * Regex pattern for breaking (supports token expansion).
+     * Empty string `''` means fall back to page boundary.
+     */
+    pattern: string;
+
+    /**
+     * Minimum page ID for this breakpoint to apply.
+     * Segments starting before this page skip this pattern.
+     */
+    min?: number;
+
+    /**
+     * Maximum page ID for this breakpoint to apply.
+     * Segments starting after this page skip this pattern.
+     */
+    max?: number;
+
+    /**
+     * Specific pages or page ranges to exclude from this breakpoint.
+     *
+     * Use this to skip the breakpoint for specific pages without needing
+     * to repeat the breakpoint with different min/max values.
+     *
+     * @example
+     * // Exclude specific pages
+     * { pattern: '\\.\\s*', exclude: [1, 2, 5] }
+     *
+     * @example
+     * // Exclude page ranges (front matter pages 1-10)
+     * { pattern: '{{tarqim}}\\s*', exclude: [[1, 10]] }
+     *
+     * @example
+     * // Mix single pages and ranges
+     * { pattern: '\\.\\s*', exclude: [1, [5, 10], 50] }
+     */
+    exclude?: PageRange[];
+
+    /**
+     * Skip this breakpoint if the segment content matches this pattern.
+     *
+     * Supports token expansion (e.g., `{{kitab}}`). When the segment's
+     * remaining content matches this regex, the breakpoint pattern is
+     * skipped and the next breakpoint in the array is tried.
+     *
+     * Useful for excluding title pages or front matter without needing
+     * to specify explicit page ranges.
+     *
+     * @example
+     * // Skip punctuation breakpoint for short content (likely titles)
+     * { pattern: '{{tarqim}}\\s*', skipWhen: '^.{1,20}$' }
+     *
+     * @example
+     * // Skip for content containing "kitab" (book) marker
+     * { pattern: '\\.\\s*', skipWhen: '{{kitab}}' }
+     */
+    skipWhen?: string;
+};
+
+/**
+ * A breakpoint can be a simple string pattern or an object with constraints.
+ *
+ * String breakpoints apply to all pages. Object breakpoints can specify
+ * `min`/`max` to limit which pages they apply to.
+ *
+ * @example
+ * // String (applies everywhere)
+ * '{{tarqim}}\\s*'
+ *
+ * @example
+ * // Object with constraints (only from page 10+)
+ * { pattern: '{{tarqim}}\\s*', min: 10 }
+ */
+export type Breakpoint = string | BreakpointRule;
+
 /**
  * Segmentation options controlling how pages are split.
  *
  * @example
+ * // Basic structural rules only
  * const options: SegmentationOptions = {
  *   rules: [
  *     { lineStartsWith: ['## '], split: 'at', meta: { type: 'chapter' } },
  *     { lineStartsWith: ['### '], split: 'at', meta: { type: 'section' } },
  *   ]
+ * };
+ *
+ * @example
+ * // With breakpoints for oversized segments
+ * const options: SegmentationOptions = {
+ *   rules: [{ lineStartsWith: ['{{fasl}}'], split: 'at' }],
+ *   maxPages: 2,
+ *   breakpoints: ['{{tarqim}}\\s*', '\\n', ''],
+ *   prefer: 'longer'
  * };
  */
 export type SegmentationOptions = {
@@ -338,7 +479,62 @@ export type SegmentationOptions = {
      * are combined to determine final split points. The first matching
      * rule's metadata is used for each segment.
      */
-    rules: SplitRule[];
+    rules?: SplitRule[];
+
+    /**
+     * Maximum pages per segment before breakpoints are applied.
+     *
+     * When a segment spans more pages than this limit, the `breakpoints`
+     * patterns are tried (in order) to find a suitable break point within
+     * the allowed window.
+     *
+     * Structural markers (from rules) always take precedence - segments
+     * are only broken within their rule-defined boundaries, never across them.
+     *
+     * @example
+     * // Break segments that exceed 2 pages
+     * { maxPages: 2, breakpoints: ['{{tarqim}}', ''] }
+     */
+    maxPages?: number;
+
+    /**
+     * Patterns tried in order to break oversized segments.
+     *
+     * Each pattern is tried until one matches within the allowed page window.
+     * Supports token expansion (e.g., `{{tarqim}}`). An empty string `''`
+     * matches the page boundary (always succeeds as ultimate fallback).
+     *
+     * Patterns can be simple strings (apply everywhere) or objects with
+     * `min`/`max` constraints to limit which pages they apply to.
+     *
+     * Patterns are checked in order - put preferred break styles first:
+     * - `{{tarqim}}\\s*` - Break at sentence-ending punctuation
+     * - `\\n` - Break at line breaks (useful for OCR content)
+     * - `''` - Break at page boundary (always works)
+     *
+     * Only applied to segments exceeding `maxPages`.
+     *
+     * @example
+     * // Simple patterns (backward compatible)
+     * breakpoints: ['{{tarqim}}\\s*', '\\n', '']
+     *
+     * @example
+     * // Object patterns with page constraints
+     * breakpoints: [
+     *   { pattern: '{{tarqim}}\\s*', min: 10 },  // Only from page 10+
+     *   ''  // Fallback for pages 1-9
+     * ]
+     */
+    breakpoints?: Breakpoint[];
+
+    /**
+     * When multiple matches exist for a breakpoint pattern, select:
+     * - `'longer'` - Last match in window (prefers longer segments)
+     * - `'shorter'` - First match in window (prefers shorter segments)
+     *
+     * @default 'longer'
+     */
+    prefer?: 'longer' | 'shorter';
 };
 
 /**

@@ -49,4 +49,12 @@ export {
 } from './segmentation/tokens.js';
 
 // Type definitions
-export type { Page, Segment, SegmentationOptions, SplitRule } from './segmentation/types.js';
+export type {
+    Breakpoint,
+    BreakpointRule,
+    Page,
+    PageRange,
+    Segment,
+    SegmentationOptions,
+    SplitRule,
+} from './segmentation/types.js';

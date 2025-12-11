@@ -28,14 +28,26 @@ src/
 ├── index.ts                    # Main entry point and exports
 └── segmentation/
     ├── types.ts                # TypeScript type definitions for rules/segments
-    ├── segmenter.ts            # Core segmentation engine (segmentPages)
-    ├── tokens.ts               # Token definitions and expansion logic
+    ├── segmenter.ts            # Core segmentation engine (segmentPages, applyBreakpoints)
+    ├── tokens.ts               # Token definitions and expansion logic  
     ├── fuzzy.ts                # Diacritic-insensitive matching utilities
     ├── html.ts                 # HTML utilities (stripHtmlTags)
+    ├── textUtils.ts            # Text processing utilities
     ├── match-utils.ts          # Extracted match processing utilities
-    ├── segmenter.test.ts       # Core test suite (66 tests)
+    ├── segmenter.test.ts       # Core test suite (150+ tests including breakpoints)
     ├── segmenter.bukhari.test.ts # Real-world test cases
-    └── match-utils.test.ts     # Utility function tests (30 tests)
+    ├── tokens.test.ts          # Token expansion tests
+    ├── fuzzy.test.ts           # Fuzzy matching tests
+    ├── textUtils.test.ts       # Text utility tests
+    └── match-utils.test.ts     # Utility function tests
+
+test/
+├── 2576.json                   # Test data for book 2576 (Sahih Bukhari)
+└── 2588.json                   # Test data for book 2588 (Al-Mughni)
+
+docs/
+└── checkpoints/
+    └── 2025-12-09-handoff.md   # AI agent handoff documentation
 ```
 
 ### Core Components
@@ -52,7 +64,6 @@ src/
 3. **`match-utils.ts`** - Extracted utilities (for testability)
    - `extractNamedCaptures()` - Get named groups from regex match
    - `filterByConstraints()` - Apply min/max page filters
-   - `groupBySpanAndFilter()` - Handle maxSpan grouping
    - `anyRuleAllowsId()` - Check if page passes rule constraints
 
 4. **`fuzzy.ts`** - Arabic text normalization
@@ -92,38 +103,46 @@ For patterns like `^٦٦٩٦ - (content)`, the content capture is the *last* pos
 // Solution: Iterate backward from m.length-1 to find last defined capture
 ```
 
-### Sliding Window maxSpan Algorithm
+### Breakpoints Post-Processing Algorithm
 
-The `maxSpan` option uses a sliding window based on **page ID difference** (not array index):
+The `breakpoints` option provides a post-processing mechanism for limiting segment size. Unlike the deprecated `maxSpan` (which was per-rule), breakpoints runs AFTER all structural rules.
 
-```
-maxSpan: N means "look up to N pages ahead by page ID"
-
-Example: Pages [1, 2, 3, 4] with maxSpan: 1, occurrence: 'last'
-
-1. Window starts at page 1
-2. Look ahead: pages where (pageId - 1) <= 1 → pages 1, 2
-3. Find ALL matches in window, apply 'last' → select match on page 2
-4. Window advances to page 3 (after match's page)
-5. Repeat: pages 3, 4 → select match on page 4
-6. Result: 2 split points (longer segments preferred)
-```
-
-Key behaviors:
-- **Prefers longer segments**: With `occurrence: 'last'`, looks as far ahead as allowed
-- **Uses page ID difference**: Pages [1, 100] with `maxSpan: 1` are in separate windows (100-1=99 > 1)
-- **Fallback support**: `fallback: 'page'` creates splits when no matches in window
-
-Implementation in `match-utils.ts`:
+**API Options:**
 ```typescript
-export const groupBySpanAndFilter = (
-    matches: MatchResult[],
-    maxSpan: number,
-    occurrence: 'first' | 'last' | 'all' | undefined,
-    getIdForOffset: (offset: number) => number,
-    pageIds: number[] = [],  // Ordered array of all page IDs
-) => { ... }
+interface SegmentationOptions {
+  rules: SplitRule[];
+  maxPages?: number;           // Maximum pages a segment can span
+  breakpoints?: string[];      // Ordered array of regex patterns (supports token expansion)
+  prefer?: 'longer' | 'shorter'; // Select last or first match within window
+}
 ```
+
+**How it works:**
+1. Structural rules run first, creating initial segments
+2. Breakpoints then processes any segment exceeding `maxPages`
+3. Patterns are tried in order until one matches
+4. Empty string `''` means "fall back to page boundary"
+
+**Example:**
+```typescript
+segmentPages(pages, {
+  rules: [
+    { lineStartsWith: ['{{basmalah}}'], split: 'at' },
+    { lineStartsWith: ['{{bab}}'], split: 'at', meta: { type: 'chapter' } },
+  ],
+  maxPages: 2,
+  breakpoints: ['{{tarqim}}\\s*', '\\n', ''],  // Try: punctuation → newline → page boundary
+  prefer: 'longer',  // Greedy: make segments as large as possible
+});
+```
+
+**Key behaviors:**
+- **Pattern order matters**: First matching pattern wins
+- **`prefer: 'longer'`**: Finds LAST match in window (greedy)
+- **`prefer: 'shorter'`**: Finds FIRST match (conservative)
+- **Recursive**: If split result still exceeds `maxPages`, breakpoints runs again
+
+> **Note**: The old `maxSpan` and `fallback` properties on `SplitRule` are deprecated and removed.
 
 ## Design Decisions
 
@@ -188,9 +207,9 @@ The original `segmentPages` had complexity 37 (max: 15). Extraction:
 ## Code Quality Standards
 
 1. **TypeScript strict mode** - No `any` types
-2. **Biome linting** - Max complexity 15 per function
+2. **Biome linting** - Max complexity 15 per function (some exceptions exist)
 3. **JSDoc comments** - All exported functions documented
-4. **Test coverage** - 96 tests, all passing
+4. **Test coverage** - 165 tests across 6 files
 
 ## Dependencies
 
@@ -236,8 +255,39 @@ bunx biome lint .
 
 5. **Rule order matters for specificity**: When multiple rules can match the same position, put specific patterns BEFORE generic ones. Example: `## {{raqms:num}} {{dash}}` must come before `##` to capture the number.
 
+6. **Post-processing beats per-rule limits**: The `maxSpan` approach (per-rule page limits) caused premature splits. Moving to post-processing `breakpoints` preserves structural integrity while still limiting segment size.
+
+7. **Window padding matters**: When calculating approximate content windows, 50% padding is needed (not 20%) to ensure enough content is captured for `prefer: 'longer'` scenarios.
+
+8. **Escaping in tests requires care**: TypeScript string `'\\.'` creates regex `\.`, but regex literal `/\./` is already escaped. Double-backslash in strings, single in literals.
+
 ### Architecture Insights
 
 - **Declarative > Imperative**: Users describe patterns, library handles regex
 - **Composability**: Tokens can be combined freely with `:name` captures
 - **Fail gracefully**: Unknown tokens are left as-is, allowing partial templates
+- **Post-process > Inline**: Breakpoints runs after rules, avoiding conflicts
+
+---
+
+## Token Reference
+
+| Token | Pattern Description | Example Match |
+|-------|---------------------|---------------|
+| `{{tarqim}}` | Arabic punctuation (. , ; ? ! ( ) etc.) | `؛` `،` `.` |
+| `{{basmalah}}` | "بِسْمِ اللَّهِ" patterns | بِسْمِ اللَّهِ الرَّحْمَنِ |
+| `{{bab}}` | "باب" (chapter) | بَابُ الإيمان |
+| `{{fasl}}` | "فصل" (section) | فصل: في الطهارة |
+| `{{kitab}}` | "كتاب" (book) | كتاب الصلاة |
+| `{{raqm}}` | Single Arabic-Indic numeral | ٥ |
+| `{{raqms}}` | Multiple Arabic-Indic numerals | ٧٥٦٣ |
+| `{{raqms:num}}` | Numerals with named capture | `meta.num = "٧٥٦٣"` |
+| `{{dash}}` | Various dash characters | - – — ـ |
+| `{{numbered}}` | Composite: `{{raqms}} {{dash}}` | ٧٥٦٣ - |
+
+**Named captures**: Add `:name` suffix to capture into `meta`:
+```typescript
+'{{raqms:hadithNum}} {{dash}}' 
+// → segment.meta.hadithNum = "٧٥٦٣"
+```
+

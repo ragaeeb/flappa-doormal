@@ -15,12 +15,11 @@ import {
     filterByConstraints,
     filterByOccurrence,
     getLastPositionalCapture,
-    groupBySpanAndFilter,
     type MatchResult,
 } from './match-utils.js';
 import { normalizeLineEndings } from './textUtils.js';
 import { expandTokensWithCaptures } from './tokens.js';
-import type { Page, Segment, SegmentationOptions, SplitRule } from './types.js';
+import type { Breakpoint, BreakpointRule, Page, PageRange, Segment, SegmentationOptions, SplitRule } from './types.js';
 
 /**
  * Checks if a regex pattern contains standard (anonymous) capturing groups.
@@ -411,6 +410,306 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
 };
 
 /**
+ * Applies breakpoints to oversized segments.
+ *
+ * For each segment that spans more than maxPages, tries the breakpoint patterns
+ * in order to find a suitable split point. Structural markers (from rules) are
+ * always respected - segments are only broken within their boundaries.
+ *
+ * @param segments - Initial segments from rule processing
+ * @param pages - Original pages for page lookup
+ * @param maxPages - Maximum pages before breakpoints apply
+ * @param breakpoints - Patterns to try in order (tokens supported)
+ * @param prefer - 'longer' for last match, 'shorter' for first match
+ * @returns Processed segments with oversized ones broken up
+ */
+const applyBreakpoints = (
+    segments: Segment[],
+    pages: Page[],
+    maxPages: number,
+    breakpoints: Breakpoint[],
+    prefer: 'longer' | 'shorter',
+): Segment[] => {
+    /**
+     * Normalizes a breakpoint to the object form.
+     * Strings are converted to { pattern: str } with no constraints.
+     */
+    const normalizeBreakpoint = (bp: Breakpoint): BreakpointRule => (typeof bp === 'string' ? { pattern: bp } : bp);
+
+    /**
+     * Checks if a page ID is in an excluded list (single pages or ranges).
+     */
+    const isPageExcluded = (pageId: number, excludeList: PageRange[] | undefined): boolean => {
+        if (!excludeList || excludeList.length === 0) {
+            return false;
+        }
+        for (const item of excludeList) {
+            if (typeof item === 'number') {
+                // Single page exclusion
+                if (pageId === item) {
+                    return true;
+                }
+            } else {
+                // Range exclusion [from, to] inclusive
+                const [from, to] = item;
+                if (pageId >= from && pageId <= to) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    /**
+     * Checks if a page ID is within a breakpoint's min/max range and not excluded.
+     * Returns true if constraints pass and page is not excluded.
+     */
+    const isInBreakpointRange = (pageId: number, rule: BreakpointRule): boolean => {
+        if (rule.min !== undefined && pageId < rule.min) {
+            return false;
+        }
+        if (rule.max !== undefined && pageId > rule.max) {
+            return false;
+        }
+        // Check exclude list
+        if (isPageExcluded(pageId, rule.exclude)) {
+            return false;
+        }
+        return true;
+    };
+    // Build page ID to content map
+    const pageContentMap = new Map<number, { content: string; index: number }>();
+    for (let i = 0; i < pages.length; i++) {
+        pageContentMap.set(pages[i].id, { content: pages[i].content, index: i });
+    }
+
+    // Get page IDs in order
+    const pageIds = pages.map((p) => p.id);
+
+    // Normalize and expand tokens in breakpoint patterns
+    type ExpandedBreakpoint = {
+        rule: BreakpointRule;
+        regex: RegExp | null; // null = page boundary fallback
+    };
+    const expandedBreakpoints: ExpandedBreakpoint[] = breakpoints.map((bp) => {
+        const rule = normalizeBreakpoint(bp);
+        if (rule.pattern === '') {
+            return { regex: null, rule }; // Empty string = page boundary
+        }
+        const { pattern } = processPattern(rule.pattern, false);
+        return { regex: new RegExp(pattern, 'g'), rule };
+    });
+
+    const result: Segment[] = [];
+
+    for (const segment of segments) {
+        const fromIdx = pageIds.indexOf(segment.from);
+        const toIdx = segment.to !== undefined ? pageIds.indexOf(segment.to) : fromIdx;
+
+        // If segment is within limit, keep as-is
+        if (toIdx - fromIdx + 1 <= maxPages) {
+            result.push(segment);
+            continue;
+        }
+
+        // Rebuild content for this segment from individual pages
+        // We need to work with the actual page content, not the merged segment content
+
+        // Process this segment, potentially breaking it into multiple
+        let remainingContent = segment.content;
+        let currentFromIdx = fromIdx;
+        let isFirstPiece = true;
+
+        while (currentFromIdx <= toIdx) {
+            const remainingPages = toIdx - currentFromIdx + 1;
+
+            // If remaining is within limit, output and done
+            if (remainingPages <= maxPages) {
+                const finalSeg: Segment = {
+                    content: remainingContent.trim(),
+                    from: pageIds[currentFromIdx],
+                };
+                if (currentFromIdx !== toIdx) {
+                    finalSeg.to = pageIds[toIdx];
+                }
+                // Preserve meta only on first piece
+                if (isFirstPiece && segment.meta) {
+                    finalSeg.meta = segment.meta;
+                }
+                if (finalSeg.content) {
+                    result.push(finalSeg);
+                }
+                break;
+            }
+
+            // Need to break within maxPages window
+            const windowEndIdx = Math.min(currentFromIdx + maxPages - 1, toIdx);
+
+            // Calculate how much content is in the window (rough estimate)
+            // We'll search for patterns within the available content
+            let breakFound = false;
+            let breakPosition = -1;
+
+            // Try each breakpoint pattern in order
+            for (let pi = 0; pi < expandedBreakpoints.length; pi++) {
+                const { rule, regex } = expandedBreakpoints[pi];
+
+                // Check if this breakpoint applies to the current segment's starting page
+                const segmentStartPage = pageIds[currentFromIdx];
+                if (!isInBreakpointRange(segmentStartPage, rule)) {
+                    // Skip this pattern - segment's starting page is outside its range
+                    continue;
+                }
+
+                // Check if ANY page in the remaining segment is in the exclude list
+                // If so, skip this pattern to avoid splitting content that includes excluded pages
+                let hasExcludedPage = false;
+                for (let pageIdx = currentFromIdx; pageIdx <= toIdx; pageIdx++) {
+                    if (isPageExcluded(pageIds[pageIdx], rule.exclude)) {
+                        hasExcludedPage = true;
+                        break;
+                    }
+                }
+                if (hasExcludedPage) {
+                    // Skip this pattern - segment includes an excluded page
+                    continue;
+                }
+
+                // Check if content matches skipWhen pattern (content-based exclusion)
+                if (rule.skipWhen) {
+                    const { pattern: skipPattern } = processPattern(rule.skipWhen, false);
+                    const skipRegex = new RegExp(skipPattern);
+                    if (skipRegex.test(remainingContent)) {
+                        // Skip this pattern - content matches skipWhen exclusion
+                        continue;
+                    }
+                }
+
+                if (regex === null) {
+                    // Empty string = page boundary - find where the NEXT page's content starts
+                    // This handles cases where segment content was modified during initial segmentation
+                    const nextPageIdx = windowEndIdx + 1;
+                    if (nextPageIdx <= toIdx) {
+                        // Find the start of the next page's content within remainingContent
+                        const nextPageId = pageIds[nextPageIdx];
+                        const nextPageData = pageContentMap.get(nextPageId);
+                        if (nextPageData) {
+                            // Normalize the next page's content the same way segment content was normalized
+                            const normalizedNextContent = nextPageData.content.replace(/\r\n?/g, '\n').trim();
+                            // Take a meaningful prefix to search for (avoid matching common short strings)
+                            const searchPrefix = normalizedNextContent.slice(
+                                0,
+                                Math.min(30, normalizedNextContent.length),
+                            );
+                            if (searchPrefix.length > 0) {
+                                const nextPageStart = remainingContent.indexOf(searchPrefix);
+                                if (nextPageStart > 0) {
+                                    // Found the next page - break just before it
+                                    breakPosition = nextPageStart;
+                                    breakFound = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    // Fallback: No next page to find, or couldn't find it - use length-based estimate
+                    let estimatedBreakPosition = 0;
+                    for (let pi = currentFromIdx; pi <= windowEndIdx; pi++) {
+                        const pageId = pageIds[pi];
+                        const pageData = pageContentMap.get(pageId);
+                        if (pageData) {
+                            // Use normalized length (carriage returns become newlines)
+                            estimatedBreakPosition += pageData.content.replace(/\r\n?/g, '\n').length;
+                            // Add 1 for the space separator between pages (converted from newline)
+                            if (pi < toIdx) {
+                                estimatedBreakPosition += 1;
+                            }
+                        }
+                    }
+                    breakPosition = Math.min(estimatedBreakPosition, remainingContent.length);
+                    breakFound = true;
+                    break;
+                }
+
+                // Search for pattern in the content window
+                // Estimate window end position with padding for uneven page lengths
+                const approxCharsPerPage = remainingContent.length / remainingPages;
+                const windowPages = windowEndIdx - currentFromIdx + 1;
+                // Add 50% padding to account for uneven content distribution across pages
+                const approxWindowEnd = Math.min(
+                    Math.floor(approxCharsPerPage * windowPages * 1.5),
+                    remainingContent.length,
+                );
+
+                // Find all matches in window
+                regex.lastIndex = 0;
+                const windowContent = remainingContent.slice(0, approxWindowEnd);
+                const matches: { index: number; length: number }[] = [];
+                for (const regexMatch of windowContent.matchAll(regex)) {
+                    matches.push({ index: regexMatch.index, length: regexMatch[0].length });
+                }
+
+                if (matches.length > 0) {
+                    // Select first or last based on prefer
+                    const selected = prefer === 'longer' ? matches[matches.length - 1] : matches[0];
+                    breakPosition = selected.index + selected.length;
+                    breakFound = true;
+                    break;
+                }
+            }
+
+            if (!breakFound || breakPosition <= 0) {
+                // No pattern matched, output rest as single segment
+                const finalSeg: Segment = {
+                    content: remainingContent.trim(),
+                    from: pageIds[currentFromIdx],
+                };
+                if (currentFromIdx !== toIdx) {
+                    finalSeg.to = pageIds[toIdx];
+                }
+                if (isFirstPiece && segment.meta) {
+                    finalSeg.meta = segment.meta;
+                }
+                if (finalSeg.content) {
+                    result.push(finalSeg);
+                }
+                break;
+            }
+
+            // Create segment up to break point
+            const pieceContent = remainingContent.slice(0, breakPosition).trim();
+            if (pieceContent) {
+                const pieceSeg: Segment = {
+                    content: pieceContent,
+                    from: pageIds[currentFromIdx],
+                };
+                // Estimate which page this ends on based on content ratio
+                const contentRatio = breakPosition / remainingContent.length;
+                const estimatedEndIdx = Math.min(
+                    currentFromIdx + Math.floor((toIdx - currentFromIdx + 1) * contentRatio),
+                    toIdx,
+                );
+                if (estimatedEndIdx > currentFromIdx) {
+                    pieceSeg.to = pageIds[estimatedEndIdx];
+                }
+                if (isFirstPiece && segment.meta) {
+                    pieceSeg.meta = segment.meta;
+                }
+                result.push(pieceSeg);
+            }
+
+            // Update for next iteration
+            remainingContent = remainingContent.slice(breakPosition).trim();
+            // Move to next page window
+            currentFromIdx = windowEndIdx + 1;
+            isFirstPiece = false;
+        }
+    }
+
+    return result;
+};
+
+/**
  * Segments pages of content based on pattern-matching rules.
  *
  * This is the main entry point for the segmentation engine. It takes an array
@@ -453,16 +752,15 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
  * });
  */
 export const segmentPages = (pages: Page[], options: SegmentationOptions): Segment[] => {
-    const { rules = [] } = options;
-    if (!rules.length || !pages.length) {
+    const { rules = [], maxPages, breakpoints, prefer = 'longer' } = options;
+    if (!pages.length) {
         return [];
     }
 
     const { content: matchContent, pageMap } = buildPageMap(pages);
     const splitPoints: SplitPoint[] = [];
-    // Collect fallback splits separately so they don't override other rules at same positions
-    const fallbackSplits: { index: number; meta?: Record<string, unknown> }[] = [];
 
+    // Process rules to find structural split points
     for (const rule of rules) {
         const { regex, usesCapture, captureNames, usesLineStartsAfter } = buildRuleRegex(rule);
         const allMatches = findMatches(matchContent, regex, usesCapture, captureNames);
@@ -470,17 +768,8 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
         // Filter matches by page ID constraints
         const constrainedMatches = filterByConstraints(allMatches, rule, pageMap.getId);
 
-        // Apply occurrence filtering (per-span or global)
-        const finalMatches =
-            rule.maxSpan !== undefined && rule.maxSpan > 0
-                ? groupBySpanAndFilter(
-                      constrainedMatches,
-                      rule.maxSpan,
-                      rule.occurrence,
-                      pageMap.getId,
-                      pageMap.pageIds,
-                  )
-                : filterByOccurrence(constrainedMatches, rule.occurrence);
+        // Apply occurrence filtering (global)
+        const finalMatches = filterByOccurrence(constrainedMatches, rule.occurrence);
 
         for (const m of finalMatches) {
             // For lineStartsAfter: we want to exclude the marker from content.
@@ -498,50 +787,6 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
                 meta: rule.meta,
                 namedCaptures: m.namedCaptures,
             });
-        }
-
-        // Handle fallback: 'page' - collect page boundary splits for pages with no matches
-        // These are added AFTER all rules so other rules get priority at same positions
-        if (rule.fallback === 'page' && rule.maxSpan !== undefined && rule.maxSpan > 0) {
-            // Find which pages had matches
-            const matchedPageIds = [...new Set(finalMatches.map((m) => pageMap.getId(m.start)))];
-
-            // For each page, check if it's covered by the sliding window of any matched page
-            for (const boundary of pageMap.boundaries) {
-                // Check constraints first
-                if (
-                    (rule.min !== undefined && boundary.id < rule.min) ||
-                    (rule.max !== undefined && boundary.id > rule.max)
-                ) {
-                    continue;
-                }
-
-                // Check if this page is within maxSpan of any matched page (looking back)
-                // A page is "covered" if there's a matched page within maxSpan distance before it
-                const isCoveredByMatch = matchedPageIds.some((matchedId) => {
-                    // The matched page's window covers this page if:
-                    // boundary.id is within [matchedId - maxSpan, matchedId + maxSpan]
-                    // But for "last" occurrence, we only care about matchedId >= boundary.id - maxSpan
-                    // and matchedId is a page before or at this boundary that would include this page in its window
-                    return matchedId >= boundary.id && matchedId <= boundary.id + rule.maxSpan!;
-                });
-
-                // If no match covers this page, collect fallback split
-                if (!isCoveredByMatch) {
-                    fallbackSplits.push({
-                        index: boundary.start,
-                        meta: rule.meta,
-                    });
-                }
-            }
-        }
-    }
-
-    // Add fallback splits only where no other rule has claimed that position
-    const mainIndices = new Set(splitPoints.map((p) => p.index));
-    for (const fb of fallbackSplits) {
-        if (!mainIndices.has(fb.index)) {
-            splitPoints.push({ index: fb.index, meta: fb.meta });
         }
     }
 
@@ -566,7 +811,33 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
     const unique = [...byIndex.values()];
     unique.sort((a, b) => a.index - b.index);
 
-    return buildSegments(unique, matchContent, pageMap, rules);
+    // Build initial segments from structural rules
+    let segments = buildSegments(unique, matchContent, pageMap, rules);
+
+    // Handle case where no rules or no split points - create one segment from all content
+    // This allows breakpoints to still process the content
+    if (segments.length === 0 && pages.length > 0) {
+        const firstPage = pages[0];
+        const lastPage = pages[pages.length - 1];
+        const allContent = pages.map((p) => normalizeLineEndings(p.content)).join('\n');
+        const initialSeg: Segment = {
+            content: allContent.trim(),
+            from: firstPage.id,
+        };
+        if (lastPage.id !== firstPage.id) {
+            initialSeg.to = lastPage.id;
+        }
+        if (initialSeg.content) {
+            segments = [initialSeg];
+        }
+    }
+
+    // Apply breakpoints post-processing for oversized segments
+    if (maxPages !== undefined && maxPages > 0 && breakpoints?.length) {
+        return applyBreakpoints(segments, pages, maxPages, breakpoints, prefer);
+    }
+
+    return segments;
 };
 
 /**
