@@ -460,6 +460,13 @@ export const expandTokens = (query: string): string => expandTokensWithCaptures(
  * Expands all tokens and attempts to compile the result as a RegExp
  * with Unicode flag. Returns `null` if the resulting pattern is invalid.
  *
+ * @remarks
+ * This function dynamically compiles regular expressions from template strings.
+ * If templates may come from untrusted sources, be aware of potential ReDoS
+ * (Regular Expression Denial of Service) risks due to catastrophic backtracking.
+ * Consider validating pattern complexity or applying execution timeouts when
+ * running user-submitted patterns.
+ *
  * @param template - Template string containing `{{token}}` placeholders
  * @returns Compiled RegExp with 'u' flag, or `null` if invalid
  *

@@ -130,6 +130,11 @@ const buildRuleRegex = (rule: SplitRule): RuleRegex => {
 
     /**
      * Safely compiles a regex pattern, throwing a helpful error if invalid.
+     *
+     * @remarks
+     * This catches syntax errors only. It does NOT protect against ReDoS
+     * (catastrophic backtracking) from pathological patterns. Avoid compiling
+     * patterns from untrusted sources.
      */
     const compileRegex = (pattern: string): RegExp => {
         try {
@@ -410,14 +415,12 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
         return content;
     }
 
-    // Convert page-break newlines to spaces using array for efficiency
-    const chars = Array.from(content);
-    for (const idx of breaksInRange) {
-        if (chars[idx] === '\n') {
-            chars[idx] = ' ';
-        }
-    }
-    return chars.join('');
+    // Convert ONLY page-break newlines (the ones inserted during concatenation) to spaces.
+    //
+    // NOTE: Offsets from findBreaksInRange are string indices (code units). Using Array.from()
+    // would index by Unicode code points and can desync indices if surrogate pairs appear.
+    const breakSet = new Set(breaksInRange);
+    return content.replace(/\n/g, (match, offset: number) => (breakSet.has(offset) ? ' ' : match));
 };
 
 /**
@@ -442,6 +445,32 @@ const applyBreakpoints = (
     breakpoints: Breakpoint[],
     prefer: 'longer' | 'shorter',
 ): Segment[] => {
+    const findExclusionBreakPosition = (
+        currentFromIdx: number,
+        windowEndIdx: number,
+        toIdx: number,
+        pageIds: number[],
+        expandedBreakpoints: Array<{ excludeSet: Set<number> }>,
+        cumulativeOffsets: number[],
+    ): number => {
+        const startingPageId = pageIds[currentFromIdx];
+        const startingPageExcluded = expandedBreakpoints.some((bp) => bp.excludeSet.has(startingPageId));
+        if (startingPageExcluded && currentFromIdx < toIdx) {
+            // Output just this one page as a segment (break at next page boundary)
+            return cumulativeOffsets[currentFromIdx + 1] - cumulativeOffsets[currentFromIdx];
+        }
+
+        // Find the first excluded page AFTER the starting page (within window) and split BEFORE it
+        for (let pageIdx = currentFromIdx + 1; pageIdx <= windowEndIdx; pageIdx++) {
+            const pageId = pageIds[pageIdx];
+            const isExcluded = expandedBreakpoints.some((bp) => bp.excludeSet.has(pageId));
+            if (isExcluded) {
+                return cumulativeOffsets[pageIdx] - cumulativeOffsets[currentFromIdx];
+            }
+        }
+        return -1;
+    };
+
     // Get page IDs in order
     const pageIds = pages.map((p) => p.id);
 
@@ -541,25 +570,14 @@ const applyBreakpoints = (
             );
             let breakPosition = -1;
             if (windowHasExclusions) {
-                // Check if the CURRENT starting page is excluded - if so, output just this page
-                const startingPageExcluded = expandedBreakpoints.some((bp) =>
-                    bp.excludeSet.has(pageIds[currentFromIdx]),
+                breakPosition = findExclusionBreakPosition(
+                    currentFromIdx,
+                    windowEndIdx,
+                    toIdx,
+                    pageIds,
+                    expandedBreakpoints,
+                    cumulativeOffsets,
                 );
-                if (startingPageExcluded && currentFromIdx < toIdx) {
-                    // Output just this one page as a segment (break at next page boundary)
-                    breakPosition = cumulativeOffsets[currentFromIdx + 1] - cumulativeOffsets[currentFromIdx];
-                } else {
-                    // Find the first excluded page AFTER the starting page (within window) and split BEFORE it
-                    for (let pageIdx = currentFromIdx + 1; pageIdx <= windowEndIdx; pageIdx++) {
-                        const pageId = pageIds[pageIdx];
-                        const isExcluded = expandedBreakpoints.some((bp) => bp.excludeSet.has(pageId));
-                        if (isExcluded) {
-                            // Found an excluded page - split BEFORE it
-                            breakPosition = cumulativeOffsets[pageIdx] - cumulativeOffsets[currentFromIdx];
-                            break;
-                        }
-                    }
-                }
             }
 
             // If no exclusion-based split found, use normal breakpoint finding
@@ -571,7 +589,6 @@ const applyBreakpoints = (
                     normalizedPages,
                     pageIds,
                     prefer,
-                    processPattern: patternProcessor,
                 };
                 breakPosition = findBreakPosition(remainingContent, currentFromIdx, toIdx, windowEndIdx, breakpointCtx);
             }

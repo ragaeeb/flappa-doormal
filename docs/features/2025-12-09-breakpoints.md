@@ -135,8 +135,8 @@ bun test
 - [src/segmentation/types.ts](../src/segmentation/types.ts) - Added new options
 - [src/segmentation/segmenter.test.ts](../src/segmentation/segmenter.test.ts) - Removed ~400 lines of maxSpan tests, added 13 breakpoints tests
 - [src/index.test.ts](../src/index.test.ts) - Simplified integration tests
-- [test/2576.json](file:///Users/rhaq/workspace/flappa-doormal/test/2576.json) - Removed deprecated `maxSpan` from rules
-- [test/2588.json](file:///Users/rhaq/workspace/flappa-doormal/test/2588.json) - Removed deprecated `maxSpan` from rules
+- [test/2576.json](../test/2576.json) - Removed deprecated `maxSpan` from rules
+- [test/2588.json](../test/2588.json) - Removed deprecated `maxSpan` from rules
 
 ## Known Lint Warnings
 Two "excessive complexity" warnings remain in [segmenter.ts](../src/segmentation/segmenter.ts):

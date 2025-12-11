@@ -91,6 +91,12 @@ export const isInBreakpointRange = (pageId: number, rule: BreakpointRule): boole
  * @param excludeList - List of page IDs or [from, to] ranges
  * @returns Set of all excluded page IDs
  *
+ * @remarks
+ * This expands ranges into explicit page IDs for fast membership checks. For typical
+ * book-scale inputs (thousands of pages), this is small and keeps downstream logic
+ * simple and fast. If you expect extremely large ranges (e.g., millions of pages),
+ * consider avoiding broad excludes or introducing a range-based membership structure.
+ *
  * @example
  * buildExcludeSet([1, 5, [10, 12]])
  * // → Set { 1, 5, 10, 11, 12 }
@@ -151,6 +157,7 @@ export type ExpandedBreakpoint = {
     rule: BreakpointRule;
     regex: RegExp | null;
     excludeSet: Set<number>;
+    skipWhenRegex: RegExp | null;
 };
 
 /** Function type for pattern processing */
@@ -162,16 +169,38 @@ export type PatternProcessor = (pattern: string) => string;
  * @param breakpoints - Array of breakpoint patterns or rules
  * @param processPattern - Function to expand tokens in patterns
  * @returns Array of expanded breakpoints with compiled regexes
+ *
+ * @remarks
+ * This function compiles regex patterns dynamically. This can be a ReDoS vector
+ * if patterns come from untrusted sources. In typical usage, breakpoint rules
+ * are application configuration, not user input.
  */
 export const expandBreakpoints = (breakpoints: Breakpoint[], processPattern: PatternProcessor): ExpandedBreakpoint[] =>
     breakpoints.map((bp) => {
         const rule = normalizeBreakpoint(bp);
         const excludeSet = buildExcludeSet(rule.exclude);
+        const skipWhenRegex =
+            rule.skipWhen !== undefined
+                ? (() => {
+                      const expandedSkip = processPattern(rule.skipWhen);
+                      try {
+                          return new RegExp(expandedSkip, 'mu');
+                      } catch (error) {
+                          const message = error instanceof Error ? error.message : String(error);
+                          throw new Error(`Invalid breakpoint skipWhen regex: ${rule.skipWhen}\n  Cause: ${message}`);
+                      }
+                  })()
+                : null;
         if (rule.pattern === '') {
-            return { excludeSet, regex: null, rule };
+            return { excludeSet, regex: null, rule, skipWhenRegex };
         }
         const expanded = processPattern(rule.pattern);
-        return { excludeSet, regex: new RegExp(expanded, 'g'), rule };
+        try {
+            return { excludeSet, regex: new RegExp(expanded, 'gmu'), rule, skipWhenRegex };
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`Invalid breakpoint regex: ${rule.pattern}\n  Cause: ${message}`);
+        }
     });
 
 /** Normalized page data for efficient lookups */
@@ -263,8 +292,6 @@ export type BreakpointContext = {
     cumulativeOffsets: number[];
     expandedBreakpoints: ExpandedBreakpoint[];
     prefer: 'longer' | 'shorter';
-    /** Pattern processor for skipWhen patterns */
-    processPattern: PatternProcessor;
 };
 
 /**
@@ -352,9 +379,9 @@ export const findBreakPosition = (
     windowEndIdx: number,
     ctx: BreakpointContext,
 ): number => {
-    const { pageIds, normalizedPages, cumulativeOffsets, expandedBreakpoints, prefer, processPattern } = ctx;
+    const { pageIds, normalizedPages, cumulativeOffsets, expandedBreakpoints, prefer } = ctx;
 
-    for (const { rule, regex, excludeSet } of expandedBreakpoints) {
+    for (const { rule, regex, excludeSet, skipWhenRegex } of expandedBreakpoints) {
         // Check if this breakpoint applies to the current segment's starting page
         if (!isInBreakpointRange(pageIds[currentFromIdx], rule)) {
             continue;
@@ -365,12 +392,9 @@ export const findBreakPosition = (
             continue;
         }
 
-        // Check if content matches skipWhen pattern
-        if (rule.skipWhen) {
-            const skipPattern = processPattern(rule.skipWhen);
-            if (new RegExp(skipPattern).test(remainingContent)) {
-                continue;
-            }
+        // Check if content matches skipWhen pattern (pre-compiled)
+        if (skipWhenRegex?.test(remainingContent)) {
+            continue;
         }
 
         // Handle page boundary (empty pattern)

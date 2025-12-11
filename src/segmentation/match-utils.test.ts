@@ -103,6 +103,18 @@ describe('match-utils', () => {
             expect(result).toHaveLength(1);
             expect(result[0].start).toBe(100);
         });
+
+        it('should filter by exclude single pages', () => {
+            const result = filterByConstraints(matches, { exclude: [1] }, getId);
+            expect(result).toHaveLength(2);
+            expect(result.map((m) => m.start)).toEqual([0, 200]);
+        });
+
+        it('should filter by exclude page ranges', () => {
+            const result = filterByConstraints(matches, { exclude: [[0, 1]] }, getId);
+            expect(result).toHaveLength(1);
+            expect(result[0].start).toBe(200);
+        });
     });
 
     describe('filterByOccurrence', () => {

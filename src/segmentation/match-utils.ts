@@ -8,6 +8,7 @@
  * @module match-utils
  */
 
+import { isPageExcluded } from './breakpoint-utils.js';
 import type { SplitRule } from './types.js';
 
 /**
@@ -152,30 +153,6 @@ export const filterByConstraints = (
     rule: Pick<SplitRule, 'min' | 'max' | 'exclude'>,
     getId: (offset: number) => number,
 ): MatchResult[] => {
-    /**
-     * Checks if a page ID is in an excluded list (single pages or ranges).
-     */
-    const isPageExcluded = (pageId: number, excludeList: SplitRule['exclude']): boolean => {
-        if (!excludeList || excludeList.length === 0) {
-            return false;
-        }
-        for (const item of excludeList) {
-            if (typeof item === 'number') {
-                // Single page exclusion
-                if (pageId === item) {
-                    return true;
-                }
-            } else {
-                // Range exclusion [from, to] inclusive
-                const [from, to] = item;
-                if (pageId >= from && pageId <= to) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    };
-
     return matches.filter((m) => {
         const id = getId(m.start);
         if (rule.min !== undefined && id < rule.min) {
@@ -270,8 +247,13 @@ export const groupBySpanAndFilter = (
         return [];
     }
 
+    // Precompute pageId per match once to avoid O(P×M) behavior for large inputs.
+    // Since match offsets are in concatenated page order, pageIds are expected to be non-decreasing.
+    const matchPageIds = matches.map((m) => getId(m.start));
+
     // If no pageIds provided, fall back to unique page IDs from matches
-    const uniquePageIds = pageIds ?? [...new Set(matches.map((m) => getId(m.start)))].sort((a, b) => a - b);
+    const uniquePageIds =
+        pageIds ?? [...new Set(matchPageIds)].sort((a, b) => a - b);
 
     if (!uniquePageIds.length) {
         return filterByOccurrence(matches, occurrence);
@@ -279,32 +261,58 @@ export const groupBySpanAndFilter = (
 
     const result: MatchResult[] = [];
     let windowStartIdx = 0; // Index into uniquePageIds
+    let matchIdx = 0; // Index into matches/matchPageIds
 
     while (windowStartIdx < uniquePageIds.length) {
         const windowStartPageId = uniquePageIds[windowStartIdx];
+        const windowEndPageId = windowStartPageId + maxSpan;
 
-        // Find all matches within the lookahead window (page ID difference <= maxSpan)
-        const windowMatches = matches.filter((m) => {
-            const matchPageId = getId(m.start);
-            return matchPageId >= windowStartPageId && matchPageId <= windowStartPageId + maxSpan;
-        });
+        // Advance matchIdx to first match in or after the window start page.
+        while (matchIdx < matches.length && matchPageIds[matchIdx] < windowStartPageId) {
+            matchIdx++;
+        }
 
-        if (windowMatches.length > 0) {
-            // Apply occurrence filter to matches in this window
-            const selectedMatches = filterByOccurrence(windowMatches, occurrence);
-            result.push(...selectedMatches);
+        // No remaining matches anywhere
+        if (matchIdx >= matches.length) {
+            break;
+        }
 
-            // Move window to start after the last selected match's page
-            const lastMatchPageId = getId(selectedMatches[selectedMatches.length - 1].start);
-            // Find the next page index after the last match's page
-            windowStartIdx = uniquePageIds.findIndex((id) => id > lastMatchPageId);
-            if (windowStartIdx === -1) {
-                break; // No more pages
-            }
-        } else {
+        // Find range of matches that fall within [windowStartPageId, windowEndPageId]
+        const windowMatchStart = matchIdx;
+        let windowMatchEndExclusive = windowMatchStart;
+        while (windowMatchEndExclusive < matches.length && matchPageIds[windowMatchEndExclusive] <= windowEndPageId) {
+            windowMatchEndExclusive++;
+        }
+
+        if (windowMatchEndExclusive <= windowMatchStart) {
             // No matches in this window, move to next page
             windowStartIdx++;
+            continue;
         }
+
+        // Apply occurrence selection without allocating/filtering per window.
+        let selectedStart = windowMatchStart;
+        let selectedEndExclusive = windowMatchEndExclusive;
+        if (occurrence === 'first') {
+            selectedEndExclusive = selectedStart + 1;
+        } else if (occurrence === 'last') {
+            selectedStart = windowMatchEndExclusive - 1;
+        }
+
+        for (let i = selectedStart; i < selectedEndExclusive; i++) {
+            result.push(matches[i]);
+        }
+
+        const lastSelectedIndex = selectedEndExclusive - 1;
+        const lastMatchPageId = matchPageIds[lastSelectedIndex];
+
+        // Move window to start after the last selected match's page
+        while (windowStartIdx < uniquePageIds.length && uniquePageIds[windowStartIdx] <= lastMatchPageId) {
+            windowStartIdx++;
+        }
+
+        // Matches before this index can never be selected again (windowStartPageId only increases)
+        matchIdx = lastSelectedIndex + 1;
     }
 
     return result;

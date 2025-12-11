@@ -23,7 +23,7 @@ Traditional Arabic text segmentation requires:
 
 ### Repository Structure
 
-```
+```text
 src/
 ├── index.ts                    # Main entry point and exports
 └── segmentation/
