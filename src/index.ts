@@ -1,42 +1,60 @@
 /**
- * flappa-doormal - Arabic text marker pattern library
+ * flappa-doormal - Declarative text segmentation library for Arabic texts.
  *
- * A TypeScript library for generating regex patterns from declarative marker configurations.
- * Designed for Arabic text segmentation with support for template-based patterns.
+ * Provides pattern-based segmentation of multi-page Arabic content using
+ * human-readable template syntax with support for diacritic-insensitive
+ * matching and automatic metadata extraction via named captures.
+ *
+ * @packageDocumentation
+ *
+ * @example
+ * import { segmentPages, TOKEN_PATTERNS } from 'flappa-doormal';
+ *
+ * const pages = [
+ *   { id: 1, content: '## كتاب الإيمان\nباب ما جاء...' },
+ *   { id: 2, content: '٦٦٩٦ - حدثنا...' }
+ * ];
+ *
+ * const segments = segmentPages(pages, {
+ *   rules: [
+ *     { lineStartsWith: ['{{kitab}}'], split: 'at', fuzzy: true, meta: { type: 'book' } },
+ *     { lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'at', meta: { type: 'hadith' } }
+ *   ]
+ * });
  */
 
-// Centralized defaults - single source of truth
+// ─────────────────────────────────────────────────────────────
+// Page Segmentation
+// ─────────────────────────────────────────────────────────────
+
+// Fuzzy matching utilities
+export { escapeRegex, makeDiacriticInsensitive } from './segmentation/fuzzy.js';
+// Core segmentation
+export { segmentPages } from './segmentation/segmenter.js';
+// Text utilities
+export { normalizeLineEndings, stripHtmlTags } from './segmentation/textUtils.js';
+
+// Token expansion types
+export type { ExpandResult } from './segmentation/tokens.js';
+
+// Token expansion (with named capture support)
 export {
-    DEFAULT_NUMBERING,
-    DEFAULT_SEPARATOR,
-    DEFAULT_SEPARATOR_PATTERN,
-    NUMBERING_PATTERNS,
-    SEPARATOR_PATTERNS,
-} from './markers/defaults.js';
+    containsTokens,
+    expandTokens,
+    expandTokensWithCaptures,
+    getAvailableTokens,
+    getTokenPattern,
+    TOKEN_PATTERNS,
+    templateToRegex,
+} from './segmentation/tokens.js';
 
-export { generateRegexFromMarker } from './markers/generator.js';
-export { DEFAULT_BASMALA_PATTERNS, DEFAULT_HADITH_PHRASES } from './markers/presets.js';
-export { createTokenMap, expandTemplate, validateTemplate } from './markers/template-parser.js';
-export { TOKENS } from './markers/tokens.js';
-
-export {
-    generateBabRegex,
-    generateBasmalaRegex,
-    generateBulletRegex,
-    generateHadithChainRegex,
-    generateHeadingRegex,
-    generateNumberedRegex,
-    generateNumLetterRegex,
-    generateNumParenRegex,
-    generateNumSlashRegex,
-    generatePatternRegex,
-    generatePhraseRegex,
-    generateSquareBracketRegex,
-} from './markers/type-generators.js';
-
+// Type definitions
 export type {
-    MarkerConfig,
-    MarkerType,
-    NumberingStyle,
-    SeparatorStyle,
-} from './types.js';
+    Breakpoint,
+    BreakpointRule,
+    Page,
+    PageRange,
+    Segment,
+    SegmentationOptions,
+    SplitRule,
+} from './segmentation/types.js';

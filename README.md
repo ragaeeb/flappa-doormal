@@ -12,311 +12,461 @@
 [![codecov](https://codecov.io/gh/ragaeeb/flappa-doormal/graph/badge.svg?token=RQ2BV4M9IS)](https://codecov.io/gh/ragaeeb/flappa-doormal)
 [![npm version](https://badge.fury.io/js/flappa-doormal.svg)](https://badge.fury.io/js/flappa-doormal)
 
-**Arabic text marker pattern library** - Generate regex patterns from declarative marker configurations.
+**Declarative Arabic text segmentation library** - Split pages of content into logical segments using human-readable patterns.
 
-🎯 **Purpose:** Simplify Arabic text segmentation by replacing complex regex patterns with readable, composable templates.
+## Why This Library?
+
+### The Problem
+
+Working with Arabic hadith and Islamic text collections requires splitting continuous text into segments (individual hadiths, chapters, verses). This traditionally means:
+
+- Writing complex Unicode regex patterns: `^[\u0660-\u0669]+\s*[-–—ـ]\s*`
+- Handling diacritic variations: `حَدَّثَنَا` vs `حدثنا`
+- Managing multi-page spans and page boundary tracking
+- Manually extracting hadith numbers, volume/page references
+
+### What Exists
+
+- **General regex libraries**: Don't understand Arabic text nuances
+- **NLP tokenizers**: Overkill for pattern-based segmentation
+- **Manual regex**: Error-prone, hard to maintain, no metadata extraction
+
+### The Solution
+
+**flappa-doormal** provides:
+
+✅ **Readable templates**: `{{raqms}} {{dash}}` instead of cryptic regex  
+✅ **Named captures**: `{{raqms:hadithNum}}` auto-extracts to `meta.hadithNum`  
+✅ **Fuzzy matching**: Ignore diacritics with `fuzzy: true`  
+✅ **Page tracking**: Know which page each segment came from  
+✅ **Declarative rules**: Describe *what* to match, not *how*
 
 ## Installation
 
 ```bash
+npm install flappa-doormal
+# or
 bun add flappa-doormal
-# Peer dependencies
-bun add bitaboom baburchi shamela
+# or
+yarn add flappa-doormal
 ```
 
 ## Quick Start
 
 ```typescript
-import { generateRegexFromMarker } from 'flappa-doormal';
+import { segmentPages } from 'flappa-doormal';
 
-// Simple numbered marker
-const regex = generateRegexFromMarker({
-  type: 'numbered'  // Defaults: Arabic-Indic numerals, dash separator
+// Your pages from a hadith book
+const pages = [
+  { id: 1, content: '٦٦٩٦ - حَدَّثَنَا أَبُو بَكْرٍ عَنِ النَّبِيِّ...' },
+  { id: 1, content: '٦٦٩٧ - أَخْبَرَنَا عُمَرُ قَالَ...' },
+  { id: 2, content: '٦٦٩٨ - حَدَّثَنِي مُحَمَّدٌ...' },
+];
+
+const segments = segmentPages(pages, {
+  rules: [{
+    lineStartsAfter: ['{{raqms:num}} {{dash}} '],
+    split: 'at',
+  }]
 });
 
-regex.exec('٥ - نص الحديث');
-// Returns: ['٥ - نص الحديث', 'نص الحديث']
+// Result:
+// [
+//   { content: 'حَدَّثَنَا أَبُو بَكْرٍ عَنِ النَّبِيِّ...', from: 1, meta: { num: '٦٦٩٦' } },
+//   { content: 'أَخْبَرَنَا عُمَرُ قَالَ...', from: 1, meta: { num: '٦٦٩٧' } },
+//   { content: 'حَدَّثَنِي مُحَمَّدٌ...', from: 2, meta: { num: '٦٦٩٨' } }
+// ]
 ```
 
 ## Features
 
-✅ **13 Preset Types** - Common patterns like `bab`, `hadith-chain`, `basmala`  
-✅ **Template System** - Use `{num}`, `{dash}`, `{bullet}` instead of regex  
-✅ **Type-Safe** - Full TypeScript support  
-✅ **Composable** - Mix and match tokens with quantifiers  
-✅ **Diacritic-Insensitive** - Handles Arabic text variations
+### 1. Template Tokens
 
-## Marker Types
+Replace regex with readable tokens:
 
-### Basic Types
+| Token | Matches | Regex Equivalent |
+|-------|---------|------------------|
+| `{{raqms}}` | Arabic-Indic digits | `[\\u0660-\\u0669]+` |
+| `{{raqm}}` | Single Arabic digit | `[\\u0660-\\u0669]` |
+| `{{dash}}` | Dash variants | `[-–—ـ]` |
+| `{{harf}}` | Arabic letter | `[أ-ي]` |
+| `{{numbered}}` | Hadith numbering `٢٢ - ` | `{{raqms}} {{dash}} ` |
+| `{{fasl}}` | Section markers | `فصل\|مسألة` |
+| `{{tarqim}}` | Punctuation marks | `[.!?؟؛]` |
+| `{{bullet}}` | Bullet points | `[•*°]` |
+| `{{naql}}` | Narrator phrases | `حدثنا\|أخبرنا\|...` |
+| `{{kitab}}` | "كتاب" (book) | `كتاب` |
+| `{{bab}}` | "باب" (chapter) | `باب` |
+| `{{basmalah}}` | "بسم الله" | `بسم الله` |
+
+### 2. Named Capture Groups
+
+Extract metadata automatically with the `{{token:name}}` syntax:
+
 ```typescript
-{ type: 'numbered' }      // ٥ - text
-{ type: 'bullet' }        // • text
-{ type: 'bab' }           // باب chapter
-{ type: 'hadith-chain' }  // حَدَّثَنَا narrator
-{ type: 'basmala' }       // بسم الله
-{ type: 'square-bracket' } // [٦٥] reference
+// Capture hadith number
+{ template: '^{{raqms:hadithNum}} {{dash}} ' }
+// Result: meta.hadithNum = '٦٦٩٦'
+
+// Capture volume and page
+{ template: '^{{raqms:vol}}/{{raqms:page}} {{dash}} ' }
+// Result: meta.vol = '٣', meta.page = '٤٥٦'
+
+// Capture rest of content
+{ template: '^{{raqms:num}} {{dash}} {{:text}}' }
+// Result: meta.num = '٦٦٩٦', meta.text = 'حَدَّثَنَا أَبُو بَكْرٍ'
 ```
 
-### Numbered Variants
+### 3. Fuzzy Matching (Diacritic-Insensitive)
+
+Match Arabic text regardless of harakat:
+
 ```typescript
-{ type: 'num-letter' }    // ٥ أ - (number + letter)
-{ type: 'num-paren' }     // ٥ (أ) - (number + paren)
-{ type: 'num-slash' }     // ٥/٦ - (number/number)
+const rules = [{
+  fuzzy: true,
+  lineStartsAfter: ['{{kitab:book}} '],
+  split: 'at',
+}];
+
+// Matches both:
+// - 'كِتَابُ الصلاة' (with diacritics)
+// - 'كتاب الصيام' (without diacritics)
 ```
 
-### Custom Patterns
+### 4. Pattern Types
 
-**Using templates (recommended):**
+| Type | Marker in content? | Use case |
+|------|-------------------|----------|
+| `lineStartsWith` | ✅ Included | Keep marker, segment at boundary |
+| `lineStartsAfter` | ❌ Excluded | Strip marker, capture only content |
+| `lineEndsWith` | ✅ Included | Match patterns at end of line |
+| `template` | Depends | Custom pattern with full control |
+| `regex` | Depends | Raw regex for complex cases |
+
+### 5. Page Constraints
+
+Limit rules to specific page ranges:
+
 ```typescript
 {
-  type: 'pattern',
-  template: '{bullet}? {num}+ {dash}'
+  lineStartsWith: ['## '],
+  split: 'at',
+  min: 10,    // Only pages 10+
+  max: 100,   // Only pages up to 100
 }
 ```
 
-**Using raw regex (for complex patterns):**
+### 6. Occurrence Filtering
+
+Control which matches to use:
+
 ```typescript
 {
-  type: 'pattern',
-  pattern: '^CUSTOM: (.*)'  // When templates aren't sufficient
+  lineEndsWith: ['\\.'],
+  split: 'after',
+  occurrence: 'last',  // Only split at LAST period on page
+  maxSpan: 1,          // Apply per-page
 }
 ```
 
-**Using format for numbered:**
+## Use Cases
+
+### Simple Hadith Segmentation
+
+Use `{{numbered}}` for the common "number - content" format:
+
 ```typescript
-{
-  type: 'numbered',
-  format: '{bullet}+ {num} {letter} {dash}'
-}
+const segments = segmentPages(pages, {
+  rules: [{
+    lineStartsAfter: ['{{numbered}}'],
+    split: 'at',
+    meta: { type: 'hadith' }
+  }]
+});
+
+// Matches: ٢٢ - حدثنا, ٦٦٩٦ – أخبرنا, etc.
+// Content starts AFTER the number and dash
 ```
 
-## Complex Pattern Examples
+### Hadith Segmentation with Number Extraction
 
-### Comma-Separated Numerals
-Match patterns like: `٩٩٣٦، ٩٩٣٧ - حَدَّثَنَا`
+For capturing the hadith number, use explicit capture syntax:
 
 ```typescript
-{
-  type: 'pattern',
-  template: '{num}(?:،{s}{num})*{s}{dash}'
-}
+const segments = segmentPages(pages, {
+  rules: [{
+    lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '],
+    split: 'at',
+    meta: { type: 'hadith' }
+  }]
+});
+
+// Each segment has:
+// - content: The hadith text (without number prefix)
+// - from/to: Page range
+// - meta: { type: 'hadith', hadithNum: '٦٦٩٦' }
 ```
 
-### Number / Letter
-Match patterns like: `١١٠٧٣/ أ - حَدَّثَنَا`
+### Volume/Page Reference Extraction
 
 ```typescript
-{
-  type: 'pattern',
-  template: '{num}{s}/{s}{letter}{s}{dash}'
-}
+const segments = segmentPages(pages, {
+  rules: [{
+    lineStartsAfter: ['{{raqms:vol}}/{{raqms:page}} {{dash}} '],
+    split: 'at'
+  }]
+});
+
+// meta: { vol: '٣', page: '٤٥٦' }
 ```
 
-### Number / Number (Built-in)
-Match patterns like: `١٠٢٦٦ / ١ - "وَإِذَا`
+### Chapter Detection with Fuzzy Matching
 
 ```typescript
-{
-  type: 'num-slash'  // Built-in preset
-}
+const segments = segmentPages(pages, {
+  rules: [{
+    fuzzy: true,
+    lineStartsAfter: ['{{kitab:book}} '],
+    split: 'at',
+    meta: { type: 'chapter' }
+  }]
+});
+
+// Matches "كِتَابُ" or "كتاب" regardless of diacritics
 ```
 
-### Repeating Dots
-Match patterns like: `. . . . . . . . . .`
+### Naql (Transmission) Phrase Detection
 
 ```typescript
-{
-  type: 'pattern',
-  template: '\\.(?:{s}\\.)+' 
- }
+const segments = segmentPages(pages, {
+  rules: [{
+    fuzzy: true,
+    lineStartsWith: ['{{naql:phrase}}'],
+    split: 'at'
+  }]
+});
+
+// meta.phrase captures which narrator phrase was matched:
+// 'حدثنا', 'أخبرنا', 'حدثني', etc.
 ```
 
-### Asterisk + Dots + Number
-Match patterns like: `*. . . / ٨٦ - حَدَّثَنَا`
+### Mixed Captured and Non-Captured Tokens
 
-**Option 1: Capture from asterisk**
 ```typescript
-{
-  type: 'pattern',
-  template: '\\*\\.(?:{s}\\.)*{s}/{s}{num}{s}{dash}',
-  removeMarker: false  // Keep everything
-}
+// Only capture the number, not the letter
+const segments = segmentPages(pages, {
+  rules: [{
+    lineStartsWith: ['{{raqms:num}} {{harf}} {{dash}} '],
+    split: 'at'
+  }]
+});
+
+// Input: '٥ أ - البند الأول'
+// meta: { num: '٥' }  // harf not captured (no :name suffix)
 ```
 
-**Option 2: Detect from asterisk, capture from number**
+### Sentence-Based Splitting (Last Period Per Page)
+
 ```typescript
-{
-  type: 'pattern',
-  pattern: '^\\*\\.(?:\\s?\\.)*\\s?/\\s?([\\u0660-\\u0669]+\\s?[-–—ـ].*)'
-}
+const segments = segmentPages(pages, {
+  rules: [{
+    lineEndsWith: ['\\.'],
+    split: 'after',
+    occurrence: 'last',
+    maxSpan: 1
+  }]
+});
 ```
 
-## Template Tokens
+### Page Fallback for Unmatched Content
 
-| Token | Matches | Example |
-|-------|---------|---------|
-| `{num}` | Arabic-Indic numerals | `[\\u0660-\\u0669]+` |
-| `{latin}` | Latin numerals | `\\d+` |
-| `{roman}` | Roman numerals | `[IVXLCDM]+` |
-| `{dash}` | Various dashes | `[-–—ـ]` |
-| `{dot}` | Period | `\\.` |
-| `{bullet}` | Bullet variants | `[•*°]` |
-| `{letter}` | Arabic letters | `[أ-ي]` |
-| `{s}` | Optional space | `\\s?` |
-| `{space}` | Required space | `\\s+` |
+When using `maxSpan` to group matches per page, use `fallback: 'page'` to prevent unmatched pages from merging with adjacent segments:
 
-**Quantifiers:** Add `+`, `*`, `?` after tokens: `{num}+`, `{bullet}?`
-
-## Examples
-
-### Before (Regex)
 ```typescript
-const pattern = '^[•*°]+ ([\\u0660-\\u0669]+\\s?[-–—ـ].*)';
+const segments = segmentPages(pages, {
+  rules: [{
+    template: '{{tarqim}}',  // Match punctuation marks
+    split: 'after',
+    occurrence: 'last',
+    maxSpan: 1,
+    fallback: 'page'  // If no punctuation found, segment the page anyway
+  }]
+});
 ```
 
-### After (Template)
+**Without `fallback`**: Pages without matches merge into the next segment  
+**With `fallback: 'page'`**: Each page becomes its own segment even without matches
+
+> **Future extensions**: The `fallback` option may support additional values like `'skip'` (omit unmatched content) or `'line'` (split at line breaks) in future versions.
+
+### Multiple Rules with Priority
+
 ```typescript
-{
-  type: 'numbered',
-  format: '{bullet}+ {num} {dash}'
-}
+const segments = segmentPages(pages, {
+  rules: [
+    // First: Chapter headers (highest priority)
+    { fuzzy: true, lineStartsAfter: ['{{kitab:book}} '], split: 'at', meta: { type: 'chapter' } },
+    // Second: Sub-chapters
+    { fuzzy: true, lineStartsAfter: ['{{bab:section}} '], split: 'at', meta: { type: 'section' } },
+    // Third: Individual hadiths
+    { lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'at', meta: { type: 'hadith' } },
+  ]
+});
 ```
 
-**80% reduction in complexity!**
+## API Reference
 
-## API
+### `segmentPages(pages, options)`
 
-### `generateRegexFromMarker(config)`
+Main segmentation function.
 
 ```typescript
-import { generateRegexFromMarker, type MarkerConfig } from 'flappa-doormal';
+import { segmentPages, type Page, type SegmentationOptions, type Segment } from 'flappa-doormal';
 
-const config: MarkerConfig = {
-  type: 'numbered',
-  numbering: 'arabic-indic',  // or 'latin', 'roman'
-  separator: 'dash',           // or 'dot', 'colon', 'paren'
-  removeMarker: true,          // Remove marker from capture (default: true)
+const pages: Page[] = [
+  { id: 1, content: 'First page content...' },
+  { id: 2, content: 'Second page content...' },
+];
+
+const options: SegmentationOptions = {
+  rules: [
+    { lineStartsWith: ['## '], split: 'at' }
+  ]
 };
 
-const regex = generateRegexFromMarker(config);
+const segments: Segment[] = segmentPages(pages, options);
 ```
 
-### `expandTemplate(template, options)`
+### `stripHtmlTags(html)`
+
+Remove all HTML tags from content, keeping only text.
 
 ```typescript
-import { expandTemplate } from 'flappa-doormal';
+import { stripHtmlTags } from 'flappa-doormal';
 
-const pattern = expandTemplate('{num} {dash}');
-// Returns: '^[\\u0660-\\u0669]+ [-–—ـ](.*)'
-
-const pattern2 = expandTemplate('{num} {dash}', { removeMarker: false });
-// Returns: '^([\\u0660-\\u0669]+ [-–—ـ].*)'
+const text = stripHtmlTags('<p>Hello <b>World</b></p>');
+// Returns: 'Hello World'
 ```
 
-### `validateTemplate(template)`
+For more sophisticated HTML to Markdown conversion (like converting `<span data-type="title">` to `## ` headers), you can implement your own function. Here's an example:
 
 ```typescript
-import { validateTemplate } from 'flappa-doormal';
-
-const result = validateTemplate('{num} {invalid}');
-// Returns: { valid: false, errors: ['Unknown tokens: {invalid}'] }
-```
-
-## Configuration Options
-
-```typescript
-type MarkerConfig = {
-  type: MarkerType;
-  numbering?: 'arabic-indic' | 'latin' | 'roman'; 
-  separator?: 'dash' | 'dot' | 'paren' | 'colon' | 'none' | string;
-  format?: string;           // Template for numbered markers
-  template?: string;         // Template for pattern markers
-  pattern?: string;          // Raw regex (when templates aren't enough)
-  tokens?: Record<string, string>;  // Custom token definitions
-  phrases?: string[];        // For 'phrase' and 'hadith-chain' types
-  removeMarker?: boolean;    // Default: true for numbered/bullet
+const htmlToMarkdown = (html: string): string => {
+    return html
+        // Convert title spans to markdown headers
+        .replace(/<span[^>]*data-type=["']title["'][^>]*>(.*?)<\/span>/gi, '## $1')
+        // Strip narrator links but keep text
+        .replace(/<a[^>]*href=["']inr:\/\/[^"']*["'][^>]*>(.*?)<\/a>/gi, '$1')
+        // Strip all remaining HTML tags
+        .replace(/<[^>]*>/g, '');
 };
 ```
 
-## Extensibility
+### `expandTokens(template)`
 
-### Extending Default Phrase Lists
-
-```typescript
-import { DEFAULT_HADITH_PHRASES, generateRegexFromMarker } from 'flappa-doormal';
-
-// Add to existing hadith phrases
-const myPhrases = [...DEFAULT_HADITH_PHRASES, 'أَخْبَرَنِي', 'سَمِعْتُ'];
-
-const regex = generateRegexFromMarker({
-  type: 'hadith-chain',
-  phrases: myPhrases,
-});
-```
-
-### Using Type-Specific Generators
+Expand template tokens to regex pattern.
 
 ```typescript
-import { generateHadithChainRegex, DEFAULT_HADITH_PHRASES } from 'flappa-doormal';
+import { expandTokens } from 'flappa-doormal';
 
-// Direct access to type-specific generator
-const regex = generateHadithChainRegex(
-  { type: 'hadith-chain', phrases: [...DEFAULT_HADITH_PHRASES, 'extra'] },
-  true // removeMarker
-);
+const pattern = expandTokens('{{raqms}} {{dash}}');
+// Returns: '[\u0660-\u0669]+ [-–—ـ]'
 ```
 
-### Custom Tokens
+### `makeDiacriticInsensitive(text)`
+
+Make Arabic text diacritic-insensitive for fuzzy matching.
 
 ```typescript
-import { createTokenMap, expandTemplate } from 'flappa-doormal';
+import { makeDiacriticInsensitive } from 'flappa-doormal';
 
-const customTokens = createTokenMap({
-  verse: '\\[[\\u0660-\\u0669]+\\]',
-  tafsir: 'تفسير',
-});
-
-const pattern = expandTemplate('{verse} {tafsir}', { 
-  tokens: customTokens,
-  removeMarker: true 
-});
+const pattern = makeDiacriticInsensitive('حدثنا');
+// Returns regex pattern matching 'حَدَّثَنَا', 'حدثنا', etc.
 ```
 
-## Available Exports
+### `TOKEN_PATTERNS`
 
-**Constants:**
-- `DEFAULT_HADITH_PHRASES` - Default narrator phrases
-- `DEFAULT_BASMALA_PATTERNS` - Default basmala patterns
-- `TOKENS` - Token definitions
+Access available token definitions.
 
-**Functions:**
-- `generateRegexFromMarker()` - Main function
-- `generate{Type}Regex()` - 12 type-specific generators
-- `expandTemplate()` - Template expansion
-- `validateTemplate()` - Template validation
-- `createTokenMap()` - Custom token maps
+```typescript
+import { TOKEN_PATTERNS } from 'flappa-doormal';
 
-## Testing
-
-This project has comprehensive unit test coverage for all marker type generators.
-
-```bash
-# Run all tests
-bun test
-
-# Run specific test file
-bun test src/markers/type-generators.test.ts
-
-# Run tests with coverage
-bun test --coverage
+console.log(TOKEN_PATTERNS.narrated);
+// 'حدثنا|أخبرنا|حدثني|وحدثنا|أنبأنا|سمعت'
 ```
 
-**Test Coverage**: 100% coverage for `type-generators.ts` with 54+ test cases covering:
-- All 12 marker type generators
-- Edge cases (empty phrases, diacritic variations, custom separators)
-- Error handling (missing required fields)
-- Various numbering styles and separators
+## Types
+
+### `SplitRule`
+
+```typescript
+type SplitRule = {
+  // Pattern (choose one)
+  lineStartsWith?: string[];
+  lineStartsAfter?: string[];
+  lineEndsWith?: string[];
+  template?: string;
+  regex?: string;
+
+  // Split behavior
+  split: 'at' | 'after';
+  occurrence?: 'first' | 'last' | 'all';
+  maxSpan?: number;
+  fuzzy?: boolean;
+  fallback?: 'page';  // NEW: Page-boundary fallback
+
+  // Constraints
+  min?: number;
+  max?: number;
+  meta?: Record<string, unknown>;
+};
+```
+
+### `Segment`
+
+```typescript
+type Segment = {
+  content: string;
+  from: number;
+  to?: number;
+  meta?: Record<string, unknown>;
+};
+```
+
+## Usage with Next.js / Node.js
+
+```typescript
+// app/api/segment/route.ts (Next.js App Router)
+import { segmentPages } from 'flappa-doormal';
+import { NextResponse } from 'next/server';
+
+export async function POST(request: Request) {
+  const { pages, rules } = await request.json();
+  
+  const segments = segmentPages(pages, { rules });
+  
+  return NextResponse.json({ segments });
+}
+```
+
+```typescript
+// Node.js script
+import { segmentPages, stripHtmlTags } from 'flappa-doormal';
+
+const pages = rawPages.map((p, i) => ({
+  id: i + 1,
+  content: stripHtmlTags(p.html)
+}));
+
+const segments = segmentPages(pages, {
+  rules: [{
+    lineStartsAfter: ['{{raqms:num}} {{dash}} '],
+    split: 'at'
+  }]
+});
+
+console.log(`Found ${segments.length} segments`);
+```
 
 ## Development
 
@@ -324,34 +474,86 @@ bun test --coverage
 # Install dependencies
 bun install
 
-# Run tests
+# Run tests (222 tests)
 bun test
 
-# Build (if needed)
+# Build
 bun run build
 
-# Format code
-bunx biome format --write .
+# Run performance test (generates 50K pages, measures segmentation speed/memory)
+bun run perf
 
-# Lint code
+# Lint
 bunx biome lint .
+
+# Format
+bunx biome format --write .
 ```
+
+## Design Decisions
+
+### Double-Brace Syntax `{{token}}`
+
+Single braces conflict with regex quantifiers `{n,m}`. Double braces are visually distinct and match common template syntax (Handlebars, Mustache).
+
+### `lineStartsAfter` vs `lineStartsWith`
+
+- `lineStartsWith`: Keep marker in content (for detection only)
+- `lineStartsAfter`: Strip marker, capture only content (for clean extraction)
+
+### Fuzzy Applied at Token Level
+
+Fuzzy transforms are applied to raw Arabic text *before* wrapping in regex groups. This prevents corruption of regex metacharacters like `(`, `)`, `|`.
+
+### Extracted Utilities
+
+Complex logic was extracted into `match-utils.ts` for independent testing and reduced complexity (main function: 37 → 10).
+
+## Performance Notes
+
+### Memory Requirements
+
+The library concatenates all pages into a single string for pattern matching across page boundaries. Memory usage scales linearly with total content size:
+
+| Pages | Avg Page Size | Approximate Memory |
+|-------|---------------|-------------------|
+| 1,000 | 5 KB | ~5 MB |
+| 6,000 | 5 KB | ~30 MB |
+| 40,000 | 5 KB | ~200 MB |
+
+For typical book processing (up to 6,000 pages), memory usage is well within Node.js defaults. For very large books (40,000+ pages), ensure adequate heap size.
+
+### `maxSpan` Sliding Window Behavior
+
+The `maxSpan` option uses a **sliding window algorithm** based on page ID difference:
+
+```typescript
+// maxSpan = maximum page ID difference when looking ahead for split points
+// Algorithm prefers LONGER segments by looking as far ahead as allowed
+
+// Pages [1, 2, 3, 4] with maxSpan: 1, occurrence: 'last'
+// Window from page 1: pages 1-2 (diff <= 1), splits at page 2's last match
+// Window from page 3: pages 3-4 (diff <= 1), splits at page 4's last match
+// Result: 2 segments spanning pages 1-2 and 3-4
+
+// Pages [1, 5, 10] with maxSpan: 1, occurrence: 'last'  
+// Window from page 1: only page 1 (5-1=4 > 1), splits at page 1
+// Window from page 5: only page 5 (10-5=5 > 1), splits at page 5
+// Window from page 10: only page 10, splits at page 10
+// Result: 3 segments (pages too far apart to merge)
+```
+
+This is intentional for books where page IDs represent actual page numbers. With `occurrence: 'last'`, the algorithm finds the last match within the lookahead window, creating longer segments where possible.
 
 ## For AI Agents
 
-See [AGENTS.md](./AGENTS.md) for comprehensive guidance on:
-- Project architecture and design patterns
-- Adding new marker types
-- Testing strategies
-- Code quality standards
-- Extension points
+See [AGENTS.md](./AGENTS.md) for:
+- Architecture details and design patterns
+- Adding new tokens and pattern types
+- Algorithm explanations
+- Lessons learned during development
 
 ## License
 
 MIT
 
-## Related
-
-- [bitaboom](https://github.com/ragaeeb/bitaboom) - Arabic text utilities
-- [baburchi](https://github.com/ragaeeb/baburchi) - Text sanitization
-- [shamela](https://github.com/ragaeeb/shamela) - Shamela library utilities
