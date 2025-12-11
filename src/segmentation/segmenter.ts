@@ -631,19 +631,26 @@ const applyBreakpoints = (
                     break;
                 }
 
-                // Search for pattern in the content window
-                // Estimate window end position with padding for uneven page lengths
-                const approxCharsPerPage = remainingContent.length / remainingPages;
-                const windowPages = windowEndIdx - currentFromIdx + 1;
-                // Add 50% padding to account for uneven content distribution across pages
-                const approxWindowEnd = Math.min(
-                    Math.floor(approxCharsPerPage * windowPages * 1.5),
-                    remainingContent.length,
-                );
+                // Calculate exact window end position using actual page content lengths
+                // The window covers all pages from currentFromIdx to windowEndIdx
+                let windowEndPosition = 0;
+                for (let pageIdx = currentFromIdx; pageIdx <= windowEndIdx; pageIdx++) {
+                    const pageId = pageIds[pageIdx];
+                    const pageData = pageContentMap.get(pageId);
+                    if (pageData) {
+                        // Add this page's content length (normalized)
+                        windowEndPosition += pageData.content.replace(/\r\n?/g, '\n').length;
+                        // Add separator between pages (except after the last page in window)
+                        if (pageIdx < windowEndIdx) {
+                            windowEndPosition += 1;
+                        }
+                    }
+                }
+                // Ensure we don't exceed remaining content length
+                windowEndPosition = Math.min(windowEndPosition, remainingContent.length);
 
-                // Find all matches in window
-                regex.lastIndex = 0;
-                const windowContent = remainingContent.slice(0, approxWindowEnd);
+                // Find all matches in the window (all content up to windowEndPosition)
+                const windowContent = remainingContent.slice(0, windowEndPosition);
                 const matches: { index: number; length: number }[] = [];
                 for (const regexMatch of windowContent.matchAll(regex)) {
                     matches.push({ index: regexMatch.index, length: regexMatch[0].length });
@@ -676,21 +683,36 @@ const applyBreakpoints = (
                 break;
             }
 
-            // Create segment up to break point
             const pieceContent = remainingContent.slice(0, breakPosition).trim();
             if (pieceContent) {
                 const pieceSeg: Segment = {
                     content: pieceContent,
                     from: pageIds[currentFromIdx],
                 };
-                // Estimate which page this ends on based on content ratio
-                const contentRatio = breakPosition / remainingContent.length;
-                const estimatedEndIdx = Math.min(
-                    currentFromIdx + Math.floor((toIdx - currentFromIdx + 1) * contentRatio),
-                    toIdx,
-                );
-                if (estimatedEndIdx > currentFromIdx) {
-                    pieceSeg.to = pageIds[estimatedEndIdx];
+                // Find the actual ending page by searching backwards from toIdx
+                // A page is included if its content prefix appears in the piece (not just at position 0)
+                let actualEndIdx = currentFromIdx;
+                for (let pi = toIdx; pi > currentFromIdx; pi--) {
+                    const pageId = pageIds[pi];
+                    const pageData = pageContentMap.get(pageId);
+                    if (pageData) {
+                        const normalizedPageContent = pageData.content.replace(/\r\n?/g, '\n');
+                        // Use a meaningful portion of the page content (more than 20 chars if available)
+                        const checkPortion = normalizedPageContent.slice(0, Math.min(30, normalizedPageContent.length));
+                        if (checkPortion.length > 0) {
+                            const matchPos = pieceContent.indexOf(checkPortion);
+                            // Only count if found at a non-zero position (to avoid false positives from
+                            // duplicate content at the start)
+                            if (matchPos > 0) {
+                                actualEndIdx = pi;
+                                break;
+                            }
+                        }
+                    }
+                }
+                // Only set 'to' if it's different from 'from'
+                if (actualEndIdx > currentFromIdx) {
+                    pieceSeg.to = pageIds[actualEndIdx];
                 }
                 if (isFirstPiece && segment.meta) {
                     pieceSeg.meta = segment.meta;

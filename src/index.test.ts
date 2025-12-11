@@ -268,12 +268,11 @@ describe('index', () => {
                     },
                 ],
             };
+
             data.pages = data.pages.map(mapPageToMarkdown);
             const segments = segmentPages(data.pages, data);
 
-            console.log(segments);
-
-            expect(segments).toHaveLength(19);
+            expect(segments).toHaveLength(17);
 
             testSegment(segments[0], {
                 endsWith: 'الرياض',
@@ -292,18 +291,85 @@ describe('index', () => {
             });
 
             testSegment(segments[3], {
-                endsWith: '٣٣٤ هـ،',
+                endsWith: 'سنة ٣٣٤ هـ،',
                 from: 5,
                 meta: { type: 'chapter' },
                 startsWith: 'مقدمة التحقيق',
-                to: 56,
             });
 
             testSegment(segments[4], {
                 endsWith: 'محمد الحلو',
                 from: 56,
                 startsWith: 'السابق لها',
-                to: undefined,
+            });
+
+            testSegment(segments[5], {
+                endsWith: 'الجزء الأول',
+                from: 57,
+                startsWith: 'المغْني',
+            });
+
+            testSegment(segments[6], {
+                content: 'المغْني',
+                from: 58,
+            });
+
+            testSegment(segments[7], {
+                endsWith: 'أمَر سائِرَ الناسِ',
+                from: 59,
+                startsWith: 'بِسْمِ اللَّهِ الرَّحْمَنِ',
+            });
+
+            testSegment(segments[9], {
+                endsWith: 'عَيْنَها.',
+                from: 229,
+                startsWith: 'فصل: وإنْ خُلِقَ',
+            });
+
+            testSegment(segments[10], {
+                endsWith: 'مَحَلِّ الفَرْضِ.',
+                from: 229,
+                startsWith: 'فصل: وإن انْقَلَعَتْ',
+            });
+
+            testSegment(segments[11], {
+                endsWith: 'فإنَّها كامِلَةٌ.',
+                from: 229,
+                startsWith: 'فصل: وإن قُطِعَت',
+                to: 7954,
+            });
+
+            testSegment(segments[12], {
+                endsWith: 'كالمُدَبَّرَةِ.',
+                from: 7954,
+                startsWith: 'فصل: ولا يَجِبُ',
+            });
+
+            testSegment(segments[13], {
+                endsWith: 'ما كان عليه.',
+                from: 7954,
+                startsWith: 'مسألة؛ قال: (وإِنْ',
+            });
+
+            testSegment(segments[14], {
+                endsWith: 'بقَتلِ الحُرِّ دِيَتُه (٢).',
+                from: 7954,
+                startsWith: 'مسألة؛ قال: (وَإِذَا قَتلَتْ',
+                to: 7955,
+            });
+
+            testSegment(segments[15], {
+                endsWith: ' في اسْتِجْمارهِ.',
+                from: 7957,
+                meta: { type: 'chapter' },
+                startsWith: 'بابُ الاسْتِطابةِ',
+            });
+
+            testSegment(segments[16], {
+                endsWith: 'إذَا قُمْتُمْ',
+                from: 7957,
+                meta: { type: 'chapter' },
+                startsWith: 'مسألة؛ قال: (وليس',
             });
         });
     });
