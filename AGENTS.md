@@ -29,6 +29,7 @@ src/
 └── segmentation/
     ├── types.ts                # TypeScript type definitions for rules/segments
     ├── segmenter.ts            # Core segmentation engine (segmentPages, applyBreakpoints)
+    ├── breakpoint-utils.ts     # Extracted breakpoint processing utilities (NEW)
     ├── tokens.ts               # Token definitions and expansion logic  
     ├── fuzzy.ts                # Diacritic-insensitive matching utilities
     ├── html.ts                 # HTML utilities (stripHtmlTags)
@@ -36,6 +37,7 @@ src/
     ├── match-utils.ts          # Extracted match processing utilities
     ├── segmenter.test.ts       # Core test suite (150+ tests including breakpoints)
     ├── segmenter.bukhari.test.ts # Real-world test cases
+    ├── breakpoint-utils.test.ts # Breakpoint utility tests (42 tests)
     ├── tokens.test.ts          # Token expansion tests
     ├── fuzzy.test.ts           # Fuzzy matching tests
     ├── textUtils.test.ts       # Text utility tests
@@ -46,8 +48,10 @@ test/
 └── 2588.json                   # Test data for book 2588 (Al-Mughni)
 
 docs/
-└── checkpoints/
-    └── 2025-12-09-handoff.md   # AI agent handoff documentation
+├── checkpoints/                # AI agent handoff documentation
+│   └── 2025-12-09-handoff.md
+└── reviews/                    # Performance analysis reports
+    └── 2025-12-10/
 ```
 
 ### Core Components
@@ -66,7 +70,20 @@ docs/
    - `filterByConstraints()` - Apply min/max page filters
    - `anyRuleAllowsId()` - Check if page passes rule constraints
 
-4. **`fuzzy.ts`** - Arabic text normalization
+4. **`breakpoint-utils.ts`** - Breakpoint processing utilities (NEW)
+   - `normalizeBreakpoint()` - Convert string to BreakpointRule object
+   - `isPageExcluded()` - Check if page is in exclude list
+   - `isInBreakpointRange()` - Validate page against min/max/exclude constraints
+   - `buildExcludeSet()` - Create Set from PageRange[] for O(1) lookups
+   - `createSegment()` - Create segment with optional to/meta fields
+   - `expandBreakpoints()` - Expand patterns with pre-compiled regexes
+   - `findActualEndPage()` - Search backwards for ending page by content
+   - `findBreakPosition()` - Find break position using breakpoint patterns
+   - `hasExcludedPageInRange()` - Check if range contains excluded pages
+   - `findNextPagePosition()` - Find next page content position
+   - `findPatternBreakPosition()` - Find pattern match by preference
+
+5. **`fuzzy.ts`** - Arabic text normalization
    - `makeDiacriticInsensitive()` - Generate regex that ignores diacritics
 
 ## Key Algorithms
@@ -209,7 +226,7 @@ The original `segmentPages` had complexity 37 (max: 15). Extraction:
 1. **TypeScript strict mode** - No `any` types
 2. **Biome linting** - Max complexity 15 per function (some exceptions exist)
 3. **JSDoc comments** - All exported functions documented
-4. **Test coverage** - 165 tests across 6 files
+4. **Test coverage** - 222 tests across 7 files
 
 ## Dependencies
 
@@ -267,6 +284,7 @@ bunx biome lint .
 - **Composability**: Tokens can be combined freely with `:name` captures
 - **Fail gracefully**: Unknown tokens are left as-is, allowing partial templates
 - **Post-process > Inline**: Breakpoints runs after rules, avoiding conflicts
+- **Dependency injection for testability**: `breakpoint-utils.ts` accepts a `PatternProcessor` function instead of importing `processPattern` directly, enabling independent testing without mocking
 
 ---
 

@@ -474,7 +474,7 @@ console.log(`Found ${segments.length} segments`);
 # Install dependencies
 bun install
 
-# Run tests (96 tests)
+# Run tests (222 tests)
 bun test
 
 # Build
