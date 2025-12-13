@@ -410,6 +410,11 @@ const findBreaksInRange = (startOffset: number, endOffset: number, sortedBreaks:
  * @returns Content with page-break newlines converted to spaces
  */
 const convertPageBreaks = (content: string, startOffset: number, pageBreaks: number[]): string => {
+    // OPTIMIZATION: Fast-path for empty or no-newline content (common cases)
+    if (!content || !content.includes('\n')) {
+        return content;
+    }
+
     const endOffset = startOffset + content.length;
     const breaksInRange = findBreaksInRange(startOffset, endOffset, pageBreaks);
 
@@ -900,7 +905,8 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
     if (segments.length === 0 && pages.length > 0) {
         const firstPage = pages[0];
         const lastPage = pages[pages.length - 1];
-        const allContent = pages.map((p) => normalizeLineEndings(p.content)).join('\n');
+        // OPTIMIZATION: Reuse pre-normalized content from buildPageMap instead of re-normalizing
+        const allContent = normalizedContent.join('\n');
         const initialSeg: Segment = {
             content: allContent.trim(),
             from: firstPage.id,

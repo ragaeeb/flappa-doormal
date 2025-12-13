@@ -17,4 +17,6 @@ export const stripHtmlTags = (html: string): string => {
  * @param content - Raw content with potentially mixed line endings
  * @returns Content with all line endings normalized to `\n`
  */
-export const normalizeLineEndings = (content: string) => content.replace(/\r\n?/g, '\n');
+// OPTIMIZATION: Fast-path when no \r present (common case for Unix/Mac content)
+export const normalizeLineEndings = (content: string) =>
+    content.includes('\r') ? content.replace(/\r\n?/g, '\n') : content;

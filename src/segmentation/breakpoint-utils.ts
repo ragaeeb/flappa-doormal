@@ -350,14 +350,21 @@ export const findPatternBreakPosition = (
     regex: RegExp,
     prefer: 'longer' | 'shorter',
 ): number => {
-    const matches: { index: number; length: number }[] = [];
+    // OPTIMIZATION: Stream matches instead of collecting all into an array.
+    // Only track first and last match to avoid allocating large arrays for dense patterns.
+    let first: { index: number; length: number } | undefined;
+    let last: { index: number; length: number } | undefined;
     for (const m of windowContent.matchAll(regex)) {
-        matches.push({ index: m.index, length: m[0].length });
+        const match = { index: m.index, length: m[0].length };
+        if (!first) {
+            first = match;
+        }
+        last = match;
     }
-    if (matches.length === 0) {
+    if (!first) {
         return -1;
     }
-    const selected = prefer === 'longer' ? matches[matches.length - 1] : matches[0];
+    const selected = prefer === 'longer' ? last! : first;
     return selected.index + selected.length;
 };
 
