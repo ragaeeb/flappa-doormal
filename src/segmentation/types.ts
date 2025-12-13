@@ -3,22 +3,33 @@
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Literal regex pattern rule - no token expansion is applied.
+ * Literal regex pattern rule - no token expansion or auto-escaping is applied.
  *
- * Use this when you need full control over the regex pattern.
+ * Use this when you need full control over the regex pattern, including:
+ * - Character classes like `[أب]` to match أ or ب
+ * - Capturing groups like `(test|text)` for alternation
+ * - Any other regex syntax that would be escaped in template patterns
+ *
  * If the regex contains capturing groups, the captured content
  * will be used as the segment content.
+ *
+ * **Note**: Unlike `template`, `lineStartsWith`, etc., this pattern type
+ * does NOT auto-escape `()[]`. You have full regex control.
  *
  * @example
  * // Match Arabic-Indic numbers followed by a dash
  * { regex: '^[٠-٩]+ - ', split: 'at' }
  *
  * @example
+ * // Character class - matches أ or ب
+ * { regex: '^[أب] ', split: 'at' }
+ *
+ * @example
  * // Capture group - content after the marker becomes segment content
  * { regex: '^[٠-٩]+ - (.*)', split: 'at' }
  */
 type RegexPattern = {
-    /** Raw regex pattern string (no token expansion) */
+    /** Raw regex pattern string (no token expansion, no auto-escaping) */
     regex: string;
 };
 
@@ -26,6 +37,10 @@ type RegexPattern = {
  * Template pattern rule - expands `{{tokens}}` before compiling to regex.
  *
  * Supports all tokens defined in `TOKEN_PATTERNS` and named capture syntax.
+ *
+ * **Auto-escaping**: Parentheses `()` and square brackets `[]` outside of
+ * `{{tokens}}` are automatically escaped. Write `({{harf}}):` instead of
+ * `\\({{harf}}\\):`. For raw regex control, use `regex` pattern type.
  *
  * @example
  * // Using tokens for Arabic-Indic digits
@@ -35,10 +50,14 @@ type RegexPattern = {
  * // Named capture to extract hadith number into metadata
  * { template: '^{{raqms:hadithNum}} {{dash}}', split: 'at' }
  *
+ * @example
+ * // Auto-escaped brackets - matches literal (أ):
+ * { template: '^({{harf}}): ', split: 'at' }
+ *
  * @see TOKEN_PATTERNS for available tokens
  */
 type TemplatePattern = {
-    /** Template string with `{{token}}` or `{{token:name}}` placeholders */
+    /** Template string with `{{token}}` or `{{token:name}}` placeholders. Brackets `()[]` are auto-escaped. */
     template: string;
 };
 
@@ -51,6 +70,10 @@ type TemplatePattern = {
  * Token expansion is applied to each pattern. Use `fuzzy: true` for
  * diacritic-insensitive Arabic matching.
  *
+ * **Auto-escaping**: Parentheses `()` and square brackets `[]` outside of
+ * `{{tokens}}` are automatically escaped. Write `({{harf}})` instead of
+ * `\\({{harf}}\\)`. For raw regex control, use `regex` pattern type.
+ *
  * @example
  * // Split at chapter headings (marker included in content)
  * { lineStartsWith: ['## ', '### '], split: 'at' }
@@ -58,9 +81,13 @@ type TemplatePattern = {
  * @example
  * // Split at Arabic book/chapter markers with fuzzy matching
  * { lineStartsWith: ['{{kitab}}', '{{bab}}'], split: 'at', fuzzy: true }
+ *
+ * @example
+ * // Auto-escaped brackets - matches literal (أ)
+ * { lineStartsWith: ['({{harf}}) '], split: 'at' }
  */
 type LineStartsWithPattern = {
-    /** Array of patterns that mark line beginnings (marker included in content) */
+    /** Array of patterns that mark line beginnings (marker included in content). Brackets `()[]` are auto-escaped. */
     lineStartsWith: string[];
 };
 
@@ -75,6 +102,10 @@ type LineStartsWithPattern = {
  * Token expansion is applied to each pattern. Use `fuzzy: true` for
  * diacritic-insensitive Arabic matching.
  *
+ * **Auto-escaping**: Parentheses `()` and square brackets `[]` outside of
+ * `{{tokens}}` are automatically escaped. Write `({{harf}}):` instead of
+ * `\\({{harf}}\\):`. For raw regex control, use `regex` pattern type.
+ *
  * @example
  * // Split at numbered hadiths, capturing content without the number prefix
  * // Content extends to next split, not just end of that line
@@ -83,9 +114,13 @@ type LineStartsWithPattern = {
  * @example
  * // Extract hadith number to metadata while stripping the prefix
  * { lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'at' }
+ *
+ * @example
+ * // Auto-escaped brackets - matches literal (أ): prefix
+ * { lineStartsAfter: ['({{harf}}): '], split: 'at' }
  */
 type LineStartsAfterPattern = {
-    /** Array of patterns that mark line beginnings (marker excluded from content) */
+    /** Array of patterns that mark line beginnings (marker excluded from content). Brackets `()[]` are auto-escaped. */
     lineStartsAfter: string[];
 };
 
@@ -97,12 +132,19 @@ type LineStartsAfterPattern = {
  * Token expansion is applied to each pattern. Use `fuzzy: true` for
  * diacritic-insensitive Arabic matching.
  *
+ * **Auto-escaping**: Parentheses `()` and square brackets `[]` outside of
+ * `{{tokens}}` are automatically escaped. For raw regex control, use `regex` pattern type.
+ *
  * @example
  * // Split at lines ending with Arabic sentence-ending punctuation
  * { lineEndsWith: ['۔', '؟', '!'], split: 'after' }
+ *
+ * @example
+ * // Auto-escaped brackets - matches literal (انتهى) suffix
+ * { lineEndsWith: ['(انتهى)'], split: 'after' }
  */
 type LineEndsWithPattern = {
-    /** Array of patterns that mark line endings */
+    /** Array of patterns that mark line endings. Brackets `()[]` are auto-escaped. */
     lineEndsWith: string[];
 };
 

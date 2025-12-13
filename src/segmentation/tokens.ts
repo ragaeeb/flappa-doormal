@@ -40,6 +40,44 @@
  * { lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '], split: 'at' }
  */
 // ─────────────────────────────────────────────────────────────
+// Auto-escaping for template patterns
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Escapes regex metacharacters (parentheses and brackets) in template patterns,
+ * but preserves content inside `{{...}}` token delimiters.
+ *
+ * This allows users to write intuitive patterns like `({{harf}}):` instead of
+ * the verbose `\\({{harf}}\\):`. The escaping is applied BEFORE token expansion,
+ * so tokens like `{{harf}}` which expand to `[أ-ي]` work correctly.
+ *
+ * @param pattern - Template pattern that may contain `()[]` and `{{tokens}}`
+ * @returns Pattern with `()[]` escaped outside of `{{...}}` delimiters
+ *
+ * @example
+ * escapeTemplateBrackets('({{harf}}): ')
+ * // → '\\({{harf}}\\): '
+ *
+ * @example
+ * escapeTemplateBrackets('[{{raqm}}] ')
+ * // → '\\[{{raqm}}\\] '
+ *
+ * @example
+ * escapeTemplateBrackets('{{harf}}')
+ * // → '{{harf}}' (unchanged - no brackets outside tokens)
+ */
+export const escapeTemplateBrackets = (pattern: string): string => {
+    // Match either a token ({{...}}) or a bracket character
+    // Tokens are preserved as-is, brackets are escaped
+    return pattern.replace(/(\{\{[^}]*\}\})|([()[\]])/g, (match, token, bracket) => {
+        if (token) {
+            return token; // Leave tokens intact
+        }
+        return `\\${bracket}`; // Escape the bracket
+    });
+};
+
+// ─────────────────────────────────────────────────────────────
 // Base tokens - raw regex patterns (no template references)
 // ─────────────────────────────────────────────────────────────
 

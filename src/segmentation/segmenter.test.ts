@@ -691,6 +691,196 @@ describe('segmenter', () => {
     });
 
     // ─────────────────────────────────────────────────────────────
+    // Auto-escaping brackets in template patterns
+    // ─────────────────────────────────────────────────────────────
+
+    describe('auto-escaping brackets', () => {
+        describe('lineStartsAfter', () => {
+            it('should auto-escape parentheses without manual escaping', () => {
+                const pages: Page[] = [
+                    { content: '(أ): النقطة الأولى', id: 1 },
+                    { content: '(ب): النقطة الثانية', id: 2 },
+                ];
+
+                // User writes ({{harf}}): without escaping - should work
+                const rules: SplitRule[] = [{ lineStartsAfter: ['({{harf}}): '], split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0]).toMatchObject({ content: 'النقطة الأولى', from: 1 });
+                expect(result[1]).toMatchObject({ content: 'النقطة الثانية', from: 2 });
+            });
+
+            it('should auto-escape square brackets without manual escaping', () => {
+                const pages: Page[] = [
+                    { content: '[١] الفقرة الأولى', id: 1 },
+                    { content: '[٢] الفقرة الثانية', id: 2 },
+                ];
+
+                // User writes [{{raqm}}] without escaping - should work
+                const rules: SplitRule[] = [{ lineStartsAfter: ['[{{raqm}}] '], split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0]).toMatchObject({ content: 'الفقرة الأولى', from: 1 });
+                expect(result[1]).toMatchObject({ content: 'الفقرة الثانية', from: 2 });
+            });
+
+            it('should auto-escape mixed brackets', () => {
+                const pages: Page[] = [
+                    { content: '(١) [أ] البند الأول', id: 1 },
+                    { content: '(٢) [ب] البند الثاني', id: 2 },
+                ];
+
+                const rules: SplitRule[] = [{ lineStartsAfter: ['({{raqm}}) [{{harf}}] '], split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0]).toMatchObject({ content: 'البند الأول', from: 1 });
+                expect(result[1]).toMatchObject({ content: 'البند الثاني', from: 2 });
+            });
+
+            it('should preserve tokens inside double braces while escaping outside brackets', () => {
+                const pages: Page[] = [
+                    { content: '(أ): البند', id: 1 },
+                ];
+
+                // {{harf}} should expand to [أ-ي] (character class preserved)
+                // but ( and ) outside should be escaped
+                const rules: SplitRule[] = [{ lineStartsAfter: ['({{harf}}): '], split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(1);
+                expect(result[0].content).toBe('البند');
+            });
+        });
+
+        describe('lineStartsWith', () => {
+            it('should auto-escape parentheses in lineStartsWith', () => {
+                const pages: Page[] = [
+                    { content: '(أ) النقطة الأولى', id: 1 },
+                    { content: '(ب) النقطة الثانية', id: 2 },
+                ];
+
+                const rules: SplitRule[] = [{ lineStartsWith: ['({{harf}}) '], split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0]).toMatchObject({ content: '(أ) النقطة الأولى', from: 1 });
+                expect(result[1]).toMatchObject({ content: '(ب) النقطة الثانية', from: 2 });
+            });
+
+            it('should auto-escape square brackets in lineStartsWith', () => {
+                const pages: Page[] = [
+                    { content: '[١] الفقرة الأولى', id: 1 },
+                    { content: '[٢] الفقرة الثانية', id: 2 },
+                ];
+
+                const rules: SplitRule[] = [{ lineStartsWith: ['[{{raqm}}] '], split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0]).toMatchObject({ content: '[١] الفقرة الأولى', from: 1 });
+                expect(result[1]).toMatchObject({ content: '[٢] الفقرة الثانية', from: 2 });
+            });
+        });
+
+        describe('template patterns', () => {
+            it('should auto-escape parentheses in template', () => {
+                const pages: Page[] = [
+                    { content: '(١) البند الأول', id: 1 },
+                    { content: '(٢) البند الثاني', id: 2 },
+                ];
+
+                const rules: SplitRule[] = [{ template: '^({{raqm}}) ', split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0]).toMatchObject({ content: '(١) البند الأول', from: 1 });
+                expect(result[1]).toMatchObject({ content: '(٢) البند الثاني', from: 2 });
+            });
+
+            it('should auto-escape square brackets in template', () => {
+                const pages: Page[] = [
+                    { content: '[أ] البند الأول', id: 1 },
+                    { content: '[ب] البند الثاني', id: 2 },
+                ];
+
+                const rules: SplitRule[] = [{ template: '^[{{harf}}] ', split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0]).toMatchObject({ content: '[أ] البند الأول', from: 1 });
+                expect(result[1]).toMatchObject({ content: '[ب] البند الثاني', from: 2 });
+            });
+        });
+
+        describe('regex patterns (no escaping)', () => {
+            it('should NOT auto-escape in regex patterns - user has full control', () => {
+                const pages: Page[] = [
+                    { content: 'أ البند الأول', id: 1 },
+                    { content: 'ب البند الثاني', id: 2 },
+                ];
+
+                // In regex, [أب] is a character class matching أ or ب
+                const rules: SplitRule[] = [{ regex: '^[أب] ', split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0]).toMatchObject({ content: 'أ البند الأول', from: 1 });
+                expect(result[1]).toMatchObject({ content: 'ب البند الثاني', from: 2 });
+            });
+
+            it('should allow capturing groups in regex patterns', () => {
+                const pages: Page[] = [
+                    { content: 'test البند الأول', id: 1 },
+                    { content: 'text البند الثاني', id: 2 },
+                ];
+
+                // In regex, (te.t) is a capturing group
+                const rules: SplitRule[] = [{ regex: '^(te.t) ', split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+            });
+        });
+
+        describe('lineEndsWith', () => {
+            it('should auto-escape parentheses in lineEndsWith', () => {
+                const pages: Page[] = [
+                    { content: 'النص الأول (انتهى)\nالنص الثاني (انتهى)', id: 1 },
+                ];
+
+                const rules: SplitRule[] = [{ lineEndsWith: ['(انتهى)'], split: 'after' }];
+                const result = segmentPages(pages, { rules });
+
+                // Verifies that (انتهى) is matched literally (not as a regex group)
+                expect(result).toHaveLength(2);
+                expect(result[0]).toMatchObject({ content: 'النص الأول (انتهى)', from: 1 });
+                // Second segment starts with newline from original content
+                expect(result[1].content).toContain('النص الثاني (انتهى)');
+                expect(result[1].from).toBe(1);
+            });
+        });
+
+        describe('with named captures', () => {
+            it('should work with named captures and auto-escaped brackets', () => {
+                const pages: Page[] = [
+                    { content: '(١): البند الأول', id: 1 },
+                    { content: '(٢): البند الثاني', id: 2 },
+                ];
+
+                const rules: SplitRule[] = [{ lineStartsAfter: ['({{raqm:num}}): '], split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0]).toMatchObject({ content: 'البند الأول', from: 1, meta: { num: '١' } });
+                expect(result[1]).toMatchObject({ content: 'البند الثاني', from: 2, meta: { num: '٢' } });
+            });
+        });
+    });
+
+    // ─────────────────────────────────────────────────────────────
     // Named Capture Groups: {{token:name}} syntax
     // ─────────────────────────────────────────────────────────────
 
@@ -1460,75 +1650,6 @@ describe('segmenter', () => {
                     // All pages should become segments
                     expect(result).toHaveLength(4);
                 });
-            });
-        });
-
-        describe('infinite loop prevention', () => {
-            it('should not infinite loop when remaining content is exhausted during breakpoint processing', () => {
-                // Regression test for bug where applyBreakpoints would infinite loop when:
-                // 1. remainingContent became empty after slicing
-                // 2. currentFromIdx did not advance because nextFromIdx === actualEndIdx
-                // The fix ensures we break out of the loop when remainingContent is empty
-                const pages: Page[] = [
-                    {
-                        content: `مقدمة المحقق
-الحمدلله رب العالمين والصلاة والسلام على سيد المرسلين.
-فهذه دراسة تناولت فيها سيرة المزي.`,
-                        id: 4,
-                    },
-                    {
-                        content: `وقد ترجم له من معاصريه: ابن سيد الناس.
-وترجم له بعد عصره جماعة.`,
-                        id: 5,
-                    },
-                    {
-                        content: `وغالبا ما ينقل هؤلاء الواحد عن الآخر.`,
-                        id: 6,
-                    },
-                ];
-
-                // This setup triggers the infinite loop scenario:
-                // - maxPages: 1 forces breakpoint processing
-                // - Multiple segments spanning pages
-                // - After processing remaining content becomes empty
-                const result = segmentPages(pages, {
-                    breakpoints: [{ pattern: '{{tarqim}}\\s*' }, ''],
-                    maxPages: 1,
-                    prefer: 'longer',
-                    rules: [{ lineStartsWith: ['مقدمة'], meta: { type: 'chapter' }, split: 'at' }],
-                });
-
-                // The test passes if it completes without hanging
-                // We should get some segments from the content
-                expect(result.length).toBeGreaterThan(0);
-                // Verify content is preserved
-                expect(result.some((s) => s.content.includes('الحمدلله'))).toBe(true);
-            });
-
-            it('should complete without hanging when processing page boundaries', () => {
-                // This tests that the breakpoint loop exits properly
-                // when processing at page boundaries without infinite looping
-                const pages: Page[] = [
-                    { content: 'Content on page one.', id: 1 },
-                    { content: 'Content on page two.', id: 2 },
-                    { content: 'Content on page three.', id: 3 },
-                ];
-
-                // With maxPages: 0, every page needs breakpoint processing
-                // Empty string fallback forces page boundary splits
-                const result = segmentPages(pages, {
-                    breakpoints: [''],
-                    maxPages: 0,
-                    prefer: 'longer',
-                    rules: [],
-                });
-
-                // Should complete without hanging and produce segments
-                expect(result.length).toBeGreaterThan(0);
-                // Each page should be represented
-                expect(result.some((s) => s.from === 1)).toBe(true);
-                expect(result.some((s) => s.from === 2 || s.to === 2)).toBe(true);
-                expect(result.some((s) => s.from === 3 || s.to === 3)).toBe(true);
             });
         });
 

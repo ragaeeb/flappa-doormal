@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
     containsTokens,
+    escapeTemplateBrackets,
     expandTokens,
     expandTokensWithCaptures,
     getAvailableTokens,
@@ -10,6 +11,48 @@ import {
 } from './tokens.js';
 
 describe('tokens', () => {
+    describe('escapeTemplateBrackets', () => {
+        it('should escape parentheses outside tokens', () => {
+            expect(escapeTemplateBrackets('({{harf}}): ')).toBe('\\({{harf}}\\): ');
+        });
+
+        it('should escape square brackets outside tokens', () => {
+            expect(escapeTemplateBrackets('[{{raqm}}] ')).toBe('\\[{{raqm}}\\] ');
+        });
+
+        it('should escape mixed brackets', () => {
+            expect(escapeTemplateBrackets('({{raqm}}) [{{harf}}]')).toBe('\\({{raqm}}\\) \\[{{harf}}\\]');
+        });
+
+        it('should NOT escape brackets inside tokens', () => {
+            // The token content should be preserved as-is
+            expect(escapeTemplateBrackets('{{harf}}')).toBe('{{harf}}');
+        });
+
+        it('should preserve plain text without brackets', () => {
+            expect(escapeTemplateBrackets('{{raqms}} {{dash}}')).toBe('{{raqms}} {{dash}}');
+        });
+
+        it('should handle pattern with no tokens', () => {
+            expect(escapeTemplateBrackets('(test) [value]')).toBe('\\(test\\) \\[value\\]');
+        });
+
+        it('should handle nested looking patterns correctly', () => {
+            // This is {{harf:name}} with named capture syntax
+            expect(escapeTemplateBrackets('({{harf:name}})')).toBe('\\({{harf:name}}\\)');
+        });
+
+        it('should preserve empty pattern', () => {
+            expect(escapeTemplateBrackets('')).toBe('');
+        });
+
+        it('should escape only brackets, not other regex metacharacters', () => {
+            // . * + ? are not escaped
+            expect(escapeTemplateBrackets('test.*')).toBe('test.*');
+            expect(escapeTemplateBrackets('^start$')).toBe('^start$');
+        });
+    });
+
     describe('containsTokens', () => {
         it('should return true when string contains token pattern', () => {
             expect(containsTokens('{{raqms}} {{dash}}')).toBeTrue();

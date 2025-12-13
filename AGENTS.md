@@ -133,6 +133,36 @@ For patterns like `^٦٦٩٦ - (content)`, the content capture is the *last* pos
 // Solution: Iterate backward from m.length-1 to find last defined capture
 ```
 
+### Auto-Escaping Brackets in Templates
+
+Template patterns (`lineStartsWith`, `lineStartsAfter`, `lineEndsWith`, `template`) automatically escape `()[]` characters that appear **outside** of `{{token}}` delimiters. This allows intuitive patterns without manual escaping.
+
+**Processing order:**
+1. `escapeTemplateBrackets()` escapes `()[]` outside `{{...}}`
+2. `expandTokensWithCaptures()` expands tokens to regex patterns
+3. Fuzzy transform applied (if enabled)
+
+```
+Input:  "({{harf}}): "
+Step 1: "\({{harf}}\): "           (brackets escaped)
+Step 2: "\([أ-ي]\): "              (token expanded - its [] preserved)
+```
+
+**Implementation in `tokens.ts`:**
+```typescript
+export const escapeTemplateBrackets = (pattern: string): string => {
+    return pattern.replace(/(\{\{[^}]*\}\})|([()[\]])/g, (match, token, bracket) => {
+        if (token) return token;      // Preserve {{tokens}}
+        return `\\${bracket}`;        // Escape brackets
+    });
+};
+```
+
+**Where escaping is applied:**
+- `processPattern()` - handles `lineStartsWith`, `lineStartsAfter`, `lineEndsWith`
+- Direct `template` processing in `buildRuleRegex()`
+- **NOT** applied to `regex` patterns (user has full control)
+
 ### Breakpoints Post-Processing Algorithm
 
 The `breakpoints` option provides a post-processing mechanism for limiting segment size. Unlike the deprecated `maxSpan` (which was per-rule), breakpoints runs AFTER all structural rules.
@@ -290,6 +320,8 @@ bunx biome lint .
 7. **Window padding matters**: When calculating approximate content windows, 50% padding is needed (not 20%) to ensure enough content is captured for `prefer: 'longer'` scenarios.
 
 8. **Escaping in tests requires care**: TypeScript string `'\\.'` creates regex `\.`, but regex literal `/\./` is already escaped. Double-backslash in strings, single in literals.
+
+9. **Auto-escaping improves DX significantly**: Users expect `(أ):` to match literal parentheses. Auto-escaping `()[]` in template patterns (but not `regex`) gives intuitive behavior while preserving power-user escape hatch.
 
 ### Architecture Insights
 

@@ -143,7 +143,31 @@ const rules = [{
 | `template` | Depends | Custom pattern with full control |
 | `regex` | Depends | Raw regex for complex cases |
 
-### 5. Page Constraints
+### 5. Auto-Escaping Brackets
+
+In `lineStartsWith`, `lineStartsAfter`, `lineEndsWith`, and `template` patterns, parentheses `()` and square brackets `[]` are **automatically escaped**. This means you can write intuitive patterns without manual escaping:
+
+```typescript
+// Write this (clean and readable):
+{ lineStartsAfter: ['({{harf}}): '], split: 'at' }
+
+// Instead of this (verbose escaping):
+{ lineStartsAfter: ['\\({{harf}}\\): '], split: 'at' }
+```
+
+**Important**: Brackets inside `{{tokens}}` are NOT escaped - token patterns like `{{harf}}` which expand to `[أ-ي]` work correctly.
+
+For full regex control (character classes, capturing groups), use the `regex` pattern type which does NOT auto-escape:
+
+```typescript
+// Character class [أب] matches أ or ب
+{ regex: '^[أب] ', split: 'at' }
+
+// Capturing group (test|text) matches either
+{ regex: '^(test|text) ', split: 'at' }
+```
+
+### 6. Page Constraints
 
 Limit rules to specific page ranges:
 
@@ -156,7 +180,7 @@ Limit rules to specific page ranges:
 }
 ```
 
-### 6. Occurrence Filtering
+### 7. Occurrence Filtering
 
 Control which matches to use:
 
@@ -395,30 +419,81 @@ console.log(TOKEN_PATTERNS.narrated);
 // 'حدثنا|أخبرنا|حدثني|وحدثنا|أنبأنا|سمعت'
 ```
 
-### Pattern Detection
+### Pattern Detection Utilities
 
-Auto-detect tokens in Arabic text for building rules:
+These functions help auto-detect tokens in text, useful for building UI tools that suggest rule configurations from user-highlighted text.
+
+#### `detectTokenPatterns(text)`
+
+Analyzes text and returns all detected token patterns with their positions.
 
 ```typescript
-import { detectTokenPatterns, analyzeTextForRule } from 'flappa-doormal';
+import { detectTokenPatterns } from 'flappa-doormal';
 
-// Detect individual tokens
-const tokens = detectTokenPatterns('٣٤ - حدثنا');
+const detected = detectTokenPatterns("٣٤ - حدثنا");
+// Returns:
 // [
 //   { token: 'raqms', match: '٣٤', index: 0, endIndex: 2 },
 //   { token: 'dash', match: '-', index: 3, endIndex: 4 },
 //   { token: 'naql', match: 'حدثنا', index: 5, endIndex: 10 }
 // ]
+```
 
-// Get complete rule suggestion
-const rule = analyzeTextForRule('٣٤ - ');
+#### `generateTemplateFromText(text, detected)`
+
+Converts text to a template string using detected patterns.
+
+```typescript
+import { detectTokenPatterns, generateTemplateFromText } from 'flappa-doormal';
+
+const text = "٣٤ - ";
+const detected = detectTokenPatterns(text);
+const template = generateTemplateFromText(text, detected);
+// Returns: "{{raqms}} {{dash}} "
+```
+
+#### `suggestPatternConfig(detected)`
+
+Suggests the best pattern type and options based on detected patterns.
+
+```typescript
+import { detectTokenPatterns, suggestPatternConfig } from 'flappa-doormal';
+
+// For numbered patterns (hadith-style)
+const hadithDetected = detectTokenPatterns("٣٤ - ");
+suggestPatternConfig(hadithDetected);
+// Returns: { patternType: 'lineStartsAfter', fuzzy: false, metaType: 'hadith' }
+
+// For structural patterns (chapter markers)
+const chapterDetected = detectTokenPatterns("باب الصلاة");
+suggestPatternConfig(chapterDetected);
+// Returns: { patternType: 'lineStartsWith', fuzzy: true, metaType: 'bab' }
+```
+
+#### `analyzeTextForRule(text)`
+
+Complete analysis that combines detection, template generation, and config suggestion.
+
+```typescript
+import { analyzeTextForRule } from 'flappa-doormal';
+
+const result = analyzeTextForRule("٣٤ - حدثنا");
+// Returns:
 // {
-//   template: '{{raqms}} {{dash}} ',
+//   template: "{{raqms}} {{dash}} {{naql}}",
 //   patternType: 'lineStartsAfter',
 //   fuzzy: false,
 //   metaType: 'hadith',
 //   detected: [...]
 // }
+
+// Use the result to build a rule:
+const rule = {
+  [result.patternType]: [result.template],
+  split: 'at',
+  fuzzy: result.fuzzy,
+  meta: { type: result.metaType }
+};
 ```
 
 ## Types
@@ -459,55 +534,18 @@ type Segment = {
 };
 ```
 
-### `Logger`
+### `DetectedPattern`
 
-Optional logging interface for debugging segmentation:
-
-```typescript
-interface Logger {
-  trace?: (message: string, ...args: unknown[]) => void;  // Per-iteration details
-  debug?: (message: string, ...args: unknown[]) => void;  // Detailed operations
-  info?: (message: string, ...args: unknown[]) => void;   // Key progress points
-  warn?: (message: string, ...args: unknown[]) => void;   // Potential issues
-  error?: (message: string, ...args: unknown[]) => void;  // Critical failures
-}
-```
-
-## Debugging
-
-### Using the Logger
-
-Pass a `logger` option to receive detailed information about the segmentation process:
+Result from pattern detection utilities.
 
 ```typescript
-// Console logger for development
-const segments = segmentPages(pages, {
-  rules: [...],
-  logger: {
-    debug: console.debug,
-    info: console.info,
-    warn: console.warn,
-  }
-});
-
-// Production logger (only errors)
-const segments = segmentPages(pages, {
-  rules: [...],
-  logger: {
-    error: (msg, ...args) => myLoggingService.error(msg, args),
-  }
-});
+type DetectedPattern = {
+  token: string;    // Token name (e.g., 'raqms', 'dash')
+  match: string;    // The matched text
+  index: number;    // Start index in original text
+  endIndex: number; // End index (exclusive)
+};
 ```
-
-**Verbosity levels:**
-- `trace` - Per-iteration loop details (very verbose)
-- `debug` - Segment processing, pattern matching
-- `info` - Start/completion of breakpoint processing
-- `warn` - Safety checks triggered
-- `error` - Infinite loop detection
-
-When no logger is provided, no logging overhead is incurred.
-
 
 ## Usage with Next.js / Node.js
 
@@ -550,7 +588,7 @@ console.log(`Found ${segments.length} segments`);
 # Install dependencies
 bun install
 
-# Run tests (251 tests)
+# Run tests (222 tests)
 bun test
 
 # Build

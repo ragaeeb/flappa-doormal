@@ -40,6 +40,7 @@ export type { ExpandResult } from './segmentation/tokens.js';
 // Token expansion (with named capture support)
 export {
     containsTokens,
+    escapeTemplateBrackets,
     expandTokens,
     expandTokensWithCaptures,
     getAvailableTokens,
