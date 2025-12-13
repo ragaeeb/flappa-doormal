@@ -395,6 +395,32 @@ console.log(TOKEN_PATTERNS.narrated);
 // 'حدثنا|أخبرنا|حدثني|وحدثنا|أنبأنا|سمعت'
 ```
 
+### Pattern Detection
+
+Auto-detect tokens in Arabic text for building rules:
+
+```typescript
+import { detectTokenPatterns, analyzeTextForRule } from 'flappa-doormal';
+
+// Detect individual tokens
+const tokens = detectTokenPatterns('٣٤ - حدثنا');
+// [
+//   { token: 'raqms', match: '٣٤', index: 0, endIndex: 2 },
+//   { token: 'dash', match: '-', index: 3, endIndex: 4 },
+//   { token: 'naql', match: 'حدثنا', index: 5, endIndex: 10 }
+// ]
+
+// Get complete rule suggestion
+const rule = analyzeTextForRule('٣٤ - ');
+// {
+//   template: '{{raqms}} {{dash}} ',
+//   patternType: 'lineStartsAfter',
+//   fuzzy: false,
+//   metaType: 'hadith',
+//   detected: [...]
+// }
+```
+
 ## Types
 
 ### `SplitRule`
@@ -432,6 +458,56 @@ type Segment = {
   meta?: Record<string, unknown>;
 };
 ```
+
+### `Logger`
+
+Optional logging interface for debugging segmentation:
+
+```typescript
+interface Logger {
+  trace?: (message: string, ...args: unknown[]) => void;  // Per-iteration details
+  debug?: (message: string, ...args: unknown[]) => void;  // Detailed operations
+  info?: (message: string, ...args: unknown[]) => void;   // Key progress points
+  warn?: (message: string, ...args: unknown[]) => void;   // Potential issues
+  error?: (message: string, ...args: unknown[]) => void;  // Critical failures
+}
+```
+
+## Debugging
+
+### Using the Logger
+
+Pass a `logger` option to receive detailed information about the segmentation process:
+
+```typescript
+// Console logger for development
+const segments = segmentPages(pages, {
+  rules: [...],
+  logger: {
+    debug: console.debug,
+    info: console.info,
+    warn: console.warn,
+  }
+});
+
+// Production logger (only errors)
+const segments = segmentPages(pages, {
+  rules: [...],
+  logger: {
+    error: (msg, ...args) => myLoggingService.error(msg, args),
+  }
+});
+```
+
+**Verbosity levels:**
+- `trace` - Per-iteration loop details (very verbose)
+- `debug` - Segment processing, pattern matching
+- `info` - Start/completion of breakpoint processing
+- `warn` - Safety checks triggered
+- `error` - Infinite loop detection
+
+When no logger is provided, no logging overhead is incurred.
+
 
 ## Usage with Next.js / Node.js
 
@@ -474,7 +550,7 @@ console.log(`Found ${segments.length} segments`);
 # Install dependencies
 bun install
 
-# Run tests (222 tests)
+# Run tests (251 tests)
 bun test
 
 # Build

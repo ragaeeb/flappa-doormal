@@ -1463,6 +1463,75 @@ describe('segmenter', () => {
             });
         });
 
+        describe('infinite loop prevention', () => {
+            it('should not infinite loop when remaining content is exhausted during breakpoint processing', () => {
+                // Regression test for bug where applyBreakpoints would infinite loop when:
+                // 1. remainingContent became empty after slicing
+                // 2. currentFromIdx did not advance because nextFromIdx === actualEndIdx
+                // The fix ensures we break out of the loop when remainingContent is empty
+                const pages: Page[] = [
+                    {
+                        content: `مقدمة المحقق
+الحمدلله رب العالمين والصلاة والسلام على سيد المرسلين.
+فهذه دراسة تناولت فيها سيرة المزي.`,
+                        id: 4,
+                    },
+                    {
+                        content: `وقد ترجم له من معاصريه: ابن سيد الناس.
+وترجم له بعد عصره جماعة.`,
+                        id: 5,
+                    },
+                    {
+                        content: `وغالبا ما ينقل هؤلاء الواحد عن الآخر.`,
+                        id: 6,
+                    },
+                ];
+
+                // This setup triggers the infinite loop scenario:
+                // - maxPages: 1 forces breakpoint processing
+                // - Multiple segments spanning pages
+                // - After processing remaining content becomes empty
+                const result = segmentPages(pages, {
+                    breakpoints: [{ pattern: '{{tarqim}}\\s*' }, ''],
+                    maxPages: 1,
+                    prefer: 'longer',
+                    rules: [{ lineStartsWith: ['مقدمة'], meta: { type: 'chapter' }, split: 'at' }],
+                });
+
+                // The test passes if it completes without hanging
+                // We should get some segments from the content
+                expect(result.length).toBeGreaterThan(0);
+                // Verify content is preserved
+                expect(result.some((s) => s.content.includes('الحمدلله'))).toBe(true);
+            });
+
+            it('should complete without hanging when processing page boundaries', () => {
+                // This tests that the breakpoint loop exits properly
+                // when processing at page boundaries without infinite looping
+                const pages: Page[] = [
+                    { content: 'Content on page one.', id: 1 },
+                    { content: 'Content on page two.', id: 2 },
+                    { content: 'Content on page three.', id: 3 },
+                ];
+
+                // With maxPages: 0, every page needs breakpoint processing
+                // Empty string fallback forces page boundary splits
+                const result = segmentPages(pages, {
+                    breakpoints: [''],
+                    maxPages: 0,
+                    prefer: 'longer',
+                    rules: [],
+                });
+
+                // Should complete without hanging and produce segments
+                expect(result.length).toBeGreaterThan(0);
+                // Each page should be represented
+                expect(result.some((s) => s.from === 1)).toBe(true);
+                expect(result.some((s) => s.from === 2 || s.to === 2)).toBe(true);
+                expect(result.some((s) => s.from === 3 || s.to === 3)).toBe(true);
+            });
+        });
+
         describe('error handling', () => {
             it('should throw helpful error for invalid regex patterns', () => {
                 const pages: Page[] = [{ content: 'test content', id: 1 }];

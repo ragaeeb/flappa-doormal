@@ -22,7 +22,8 @@
     },
     "files": [
         "dist",
-        "README.md"
+        "README.md",
+        "AGENTS.md"
     ],
     "homepage": "https://github.com/ragaeeb/flappa-doormal#readme",
     "keywords": [
@@ -48,5 +49,5 @@
     },
     "type": "module",
     "types": "./dist/index.d.mts",
-    "version": "2.0.0"
+    "version": "2.1.0"
 }

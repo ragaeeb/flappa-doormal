@@ -450,6 +450,51 @@ export type BreakpointRule = {
  */
 export type Breakpoint = string | BreakpointRule;
 
+// ─────────────────────────────────────────────────────────────
+// Logger Interface
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Logger interface for custom logging implementations.
+ *
+ * All methods are optional - only implement the verbosity levels you need.
+ * When no logger is provided, no logging overhead is incurred.
+ *
+ * Compatible with the Logger interface from ffmpeg-simplified and similar libraries.
+ *
+ * @example
+ * // Simple console logger
+ * const logger: Logger = {
+ *   debug: console.debug,
+ *   info: console.info,
+ *   warn: console.warn,
+ *   error: console.error,
+ * };
+ *
+ * @example
+ * // Production logger (only warnings and errors)
+ * const prodLogger: Logger = {
+ *   warn: (msg, ...args) => myLoggingService.warn(msg, args),
+ *   error: (msg, ...args) => myLoggingService.error(msg, args),
+ * };
+ */
+export interface Logger {
+    /** Log a debug message (verbose debugging output) */
+    debug?: (message: string, ...args: unknown[]) => void;
+    /** Log an error message (critical failures) */
+    error?: (message: string, ...args: unknown[]) => void;
+    /** Log an informational message (key progress points) */
+    info?: (message: string, ...args: unknown[]) => void;
+    /** Log a trace message (extremely verbose, per-iteration details) */
+    trace?: (message: string, ...args: unknown[]) => void;
+    /** Log a warning message (potential issues) */
+    warn?: (message: string, ...args: unknown[]) => void;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Segmentation Options
+// ─────────────────────────────────────────────────────────────
+
 /**
  * Segmentation options controlling how pages are split.
  *
@@ -469,6 +514,17 @@ export type Breakpoint = string | BreakpointRule;
  *   maxPages: 2,
  *   breakpoints: ['{{tarqim}}\\s*', '\\n', ''],
  *   prefer: 'longer'
+ * };
+ *
+ * @example
+ * // With custom logger for debugging
+ * const options: SegmentationOptions = {
+ *   rules: [...],
+ *   logger: {
+ *     debug: console.debug,
+ *     info: console.info,
+ *     warn: console.warn,
+ *   }
  * };
  */
 export type SegmentationOptions = {
@@ -535,6 +591,39 @@ export type SegmentationOptions = {
      * @default 'longer'
      */
     prefer?: 'longer' | 'shorter';
+
+    /**
+     * Optional logger for debugging segmentation.
+     *
+     * Provide a logger to receive detailed information about the segmentation
+     * process. Useful for debugging pattern matching, page tracking, and
+     * breakpoint processing issues.
+     *
+     * When not provided, no logging overhead is incurred (methods are not called).
+     *
+     * Verbosity levels:
+     * - `trace`: Per-iteration details (very verbose)
+     * - `debug`: Detailed operation information
+     * - `info`: Key progress points
+     * - `warn`: Potential issues
+     * - `error`: Critical failures
+     *
+     * @example
+     * // Console logger for development
+     * logger: {
+     *   debug: console.debug,
+     *   info: console.info,
+     *   warn: console.warn,
+     * }
+     *
+     * @example
+     * // Custom logger integration
+     * logger: {
+     *   debug: (msg, ...args) => winston.debug(msg, { meta: args }),
+     *   error: (msg, ...args) => winston.error(msg, { meta: args }),
+     * }
+     */
+    logger?: Logger;
 };
 
 /**

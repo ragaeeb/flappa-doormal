@@ -52,9 +52,24 @@ export {
 export type {
     Breakpoint,
     BreakpointRule,
+    Logger,
     Page,
     PageRange,
     Segment,
     SegmentationOptions,
     SplitRule,
 } from './segmentation/types.js';
+
+// ─────────────────────────────────────────────────────────────
+// Pattern Detection
+// ─────────────────────────────────────────────────────────────
+
+// Pattern detection types
+export type { DetectedPattern } from './pattern-detection.js';
+// Pattern detection utilities
+export {
+    analyzeTextForRule,
+    detectTokenPatterns,
+    generateTemplateFromText,
+    suggestPatternConfig,
+} from './pattern-detection.js';

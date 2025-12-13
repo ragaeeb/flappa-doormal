@@ -26,10 +26,12 @@ Traditional Arabic text segmentation requires:
 ```text
 src/
 ├── index.ts                    # Main entry point and exports
+├── pattern-detection.ts        # Token detection for auto-generating rules (NEW)
+├── pattern-detection.test.ts   # Pattern detection tests (22 tests)
 └── segmentation/
     ├── types.ts                # TypeScript type definitions for rules/segments
     ├── segmenter.ts            # Core segmentation engine (segmentPages, applyBreakpoints)
-    ├── breakpoint-utils.ts     # Extracted breakpoint processing utilities (NEW)
+    ├── breakpoint-utils.ts     # Extracted breakpoint processing utilities
     ├── tokens.ts               # Token definitions and expansion logic  
     ├── fuzzy.ts                # Diacritic-insensitive matching utilities
     ├── html.ts                 # HTML utilities (stripHtmlTags)
@@ -83,8 +85,19 @@ docs/
    - `findNextPagePosition()` - Find next page content position
    - `findPatternBreakPosition()` - Find pattern match by preference
 
-5. **`fuzzy.ts`** - Arabic text normalization
+5. **`types.ts`** - Type definitions
+   - `Logger` interface - Optional logging for debugging
+   - `SegmentationOptions` - Options with `logger` property
+   - Verbosity levels: `trace`, `debug`, `info`, `warn`, `error`
+
+6. **`fuzzy.ts`** - Arabic text normalization
    - `makeDiacriticInsensitive()` - Generate regex that ignores diacritics
+
+7. **`pattern-detection.ts`** - Token auto-detection (NEW)
+   - `detectTokenPatterns()` - Detect tokens in text with positions
+   - `generateTemplateFromText()` - Convert text to template string
+   - `suggestPatternConfig()` - Suggest rule configuration
+   - `analyzeTextForRule()` - Complete analysis returning template + config
 
 ## Key Algorithms
 
@@ -226,7 +239,7 @@ The original `segmentPages` had complexity 37 (max: 15). Extraction:
 1. **TypeScript strict mode** - No `any` types
 2. **Biome linting** - Max complexity 15 per function (some exceptions exist)
 3. **JSDoc comments** - All exported functions documented
-4. **Test coverage** - 222 tests across 7 files
+4. **Test coverage** - 251 tests across 8 files
 
 ## Dependencies
 
@@ -285,6 +298,7 @@ bunx biome lint .
 - **Fail gracefully**: Unknown tokens are left as-is, allowing partial templates
 - **Post-process > Inline**: Breakpoints runs after rules, avoiding conflicts
 - **Dependency injection for testability**: `breakpoint-utils.ts` accepts a `PatternProcessor` function instead of importing `processPattern` directly, enabling independent testing without mocking
+- **Optional logging**: Use optional chaining (`logger?.debug?.()`) for zero-overhead when no logger is provided. All log methods are optional, allowing clients to subscribe to only the verbosity levels they need.
 
 ---
 
