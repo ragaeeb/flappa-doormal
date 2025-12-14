@@ -510,7 +510,7 @@ type SplitRule = {
   regex?: string;
 
   // Split behavior
-  split: 'at' | 'after';
+  split?: 'at' | 'after';  // Default: 'at'
   occurrence?: 'first' | 'last' | 'all';
   maxSpan?: number;
   fuzzy?: boolean;

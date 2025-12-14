@@ -124,6 +124,29 @@ describe('tokens', () => {
             expect(result.hasCaptures).toBeTrue();
         });
 
+        it('should handle repeating tokens without captures', () => {
+            const result = expandTokensWithCaptures('{{raqms:num}} {{harf}} {{harf}}');
+            expect(result.pattern).toBe('(?<num>[\\u0660-\\u0669]+) [أ-ي] [أ-ي]');
+            expect(result.captureNames).toEqual(['num']);
+            expect(result.hasCaptures).toBeTrue();
+        });
+
+        it('should handle repeating tokens with different capture names', () => {
+            const result = expandTokensWithCaptures('{{raqms:number}} {{harf:firstLetter}} {{harf:secondLetter}}');
+            expect(result.pattern).toBe('(?<number>[\\u0660-\\u0669]+) (?<firstLetter>[أ-ي]) (?<secondLetter>[أ-ي])');
+            expect(result.captureNames).toEqual(['number', 'firstLetter', 'secondLetter']);
+            expect(result.hasCaptures).toBeTrue();
+        });
+
+        it('should auto-rename duplicate capture names to prevent regex errors', () => {
+            // Using the same capture name twice would create invalid regex without renaming
+            const result = expandTokensWithCaptures('{{harf:letter}} {{harf:letter}}');
+            expect(result.captureNames).toContain('letter');
+            expect(result.captureNames).toContain('letter_2');
+            expect(result.pattern).toBe('(?<letter>[أ-ي]) (?<letter_2>[أ-ي])');
+            expect(result.hasCaptures).toBeTrue();
+        });
+
         it('should apply fuzzy transform when provided', () => {
             const mockFuzzy = (text: string) => text.replace(/ب/g, '[ب]');
             const result = expandTokensWithCaptures('{{bab}}', mockFuzzy);

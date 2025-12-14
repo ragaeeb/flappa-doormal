@@ -187,8 +187,8 @@ interface SegmentationOptions {
 ```typescript
 segmentPages(pages, {
   rules: [
-    { lineStartsWith: ['{{basmalah}}'], split: 'at' },
-    { lineStartsWith: ['{{bab}}'], split: 'at', meta: { type: 'chapter' } },
+    { lineStartsWith: ['{{basmalah}}'] },  // split defaults to 'at'
+    { lineStartsWith: ['{{bab}}'], meta: { type: 'chapter' } },
   ],
   maxPages: 2,
   breakpoints: ['{{tarqim}}\\s*', '\\n', ''],  // Try: punctuation → newline → page boundary

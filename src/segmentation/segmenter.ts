@@ -869,7 +869,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
                 capturedContent: isLineStartsAfter ? undefined : m.captured,
                 // lineStartsAfter: skip the marker when slicing content
                 contentStartOffset: isLineStartsAfter ? markerLength : undefined,
-                index: rule.split === 'at' ? m.start : m.end,
+                index: (rule.split ?? 'at') === 'at' ? m.start : m.end,
                 meta: rule.meta,
                 namedCaptures: m.namedCaptures,
             });

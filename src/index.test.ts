@@ -15,6 +15,21 @@ const htmlToMarkdown = (html: string): string => {
     );
 };
 
+const htmlToMarkdown2 = (html: string): string => {
+    return (
+        html
+            // Move content after line break but before title span INTO the span
+            .replace(/\r([^\r]*?)<span[^>]*data-type=["']title["'][^>]*>/gi, '\r<span data-type="title">$1')
+            // Convert title spans to markdown headers
+            .replace(/<span[^>]*data-type=["']title["'][^>]*>(.*?)<\/span>/gi, '## $1')
+            // Strip narrator links but keep text
+            .replace(/<a[^>]*href=["']inr:\/\/[^"']*["'][^>]*>(.*?)<\/a>/gi, '$1')
+            // Strip all remaining HTML tags
+            .replace(/<[^>]*>/g, '')
+            .replace(/舄/g, '')
+    );
+};
+
 const mapPageToMarkdown = (p: Page) => ({ content: htmlToMarkdown(p.content), id: p.id });
 
 const testSegment = (
@@ -295,6 +310,79 @@ describe('index', () => {
                 from: 7957,
                 meta: { type: 'chapter' },
             });
+        });
+    });
+
+    describe('misc', () => {
+        it.only('should segment the text', () => {
+            data = {
+                pages: [
+                    {
+                        content:
+                            'أربعا وتسعين سنة (١) .\r٢٩- خ سي:<span data-type="title" id=toc-70> أَحْمَد بن حميد الطريثيثي، أَبُو الْحَسَن الكوفي، ختن عُبَيد اللَّهِ بْن مُوسَى، ويعرف بدار أم </span>سَلَمَة (٢) .\rوكان من حفاظ الكوفة.\rرَوَى عَن: حَفْص بْن غِيَاث (٣) النخعي، وأبي أسامة حَمَّاد بْن أسامة، وعبد الله بْن إدريس، وعبد الله بْن المبارك، وعبد الله بْن نمير، وعبد الرحيم بْن سُلَيْمان (عخ) ، وعُبَيد الله بْن عُبَيد الرحمن الأشجعي (خ سي) ، والقاسم بْن معن المسعودي، ومحمد بْن بشر العبدي، ومحمد ابن جَعْفَر، غندر، ومحمد بْن فضيل بْن غزوان (بخ) ، ومعاوية بْن هشام القصار، ويحيى بْن زكريا بْن أَبي زائدة، وأبي بَكْر بْن عياش.\rرَوَى عَنه: البخاري (٤) ، وأحمد بن محمد ابن الاصفر، وأحمد بن محمد ابن المعلى الآدمي (٥) ، وأَبُو علي حنبل بْن إسحاق بْن حنبل، ابْن عم أَحْمَد بْن مُحَمَّد بْن حنبل، وعباس بْن مُحَمَّد الدوري، وأَبُو سَعِيد عَبْد اللَّهِ بْن سَعِيد الأشج، وعبد الله بْن عَبْد الرَّحْمَنِ الدارمي، وأَبُو إِسْمَاعِيل مُحَمَّد بْن إِسْمَاعِيل بْن يُوسُف السلمي التِّرْمِذِيّ، ومحمد بْن أَبي خالد الصومعي، ومحمد بْن يحيى بْن كثير الحراني، ومحمد بْن يزيد الأَدَمِيّ (٦) (سي) ، ويحيى بْن عبد الحميد الحماني، وهو من أقرانه، وأَبُو',
+                        id: 257,
+                    },
+                ],
+            };
+            data.pages = data.pages.map((p) => ({ content: htmlToMarkdown2(p.content), id: p.id }));
+            console.log('data.pages', data.pages);
+
+            const segments = segmentPages(data.pages, {
+                breakpoints: [
+                    {
+                        pattern: '{{tarqim}}\\s*',
+                    },
+                    '',
+                ],
+                maxPages: 1,
+                rules: [
+                    {
+                        fuzzy: true,
+                        lineStartsWith: ['{{basmalah}}'],
+                    },
+                    {
+                        fuzzy: true,
+                        lineStartsWith: ['{{fasl}}'],
+                    },
+                    {
+                        fuzzy: true,
+                        lineStartsWith: ['{{bab}}'],
+                        meta: {
+                            type: 'chapter',
+                        },
+                    },
+                    {
+                        fuzzy: true,
+                        lineStartsWith: ['{{naql}}'],
+                    },
+                    {
+                        lineStartsAfter: ['## {{raqms:num}}\\s*{{dash}}'],
+                        meta: { type: 'chapter' },
+                    },
+                    {
+                        lineStartsAfter: ['##'],
+                        meta: {
+                            type: 'chapter',
+                        },
+                        split: 'at',
+                    },
+                    {
+                        lineStartsAfter: ['({{harf}}):'],
+                    },
+                    {
+                        fuzzy: true,
+                        lineStartsWith: ['{{kitab}}'],
+                        meta: {
+                            type: 'book',
+                        },
+                    },
+                    {
+                        lineStartsAfter: ['{{raqms:num}}\\s*{{dash}}'],
+                    },
+                ],
+            });
+
+            console.log(segments);
         });
     });
 });

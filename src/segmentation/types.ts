@@ -180,8 +180,9 @@ type SplitBehavior = {
      * Where to split relative to the match.
      * - `'at'`: New segment starts at the match position
      * - `'after'`: New segment starts after the match ends
+     * @default 'at'
      */
-    split: 'at' | 'after';
+    split?: 'at' | 'after';
 
     /**
      * Which occurrence(s) to split on.
@@ -339,14 +340,13 @@ type RuleConstraints = {
  * Each rule must specify:
  * - **Pattern** (exactly one): `regex`, `template`, `lineStartsWith`,
  *   `lineStartsAfter`, or `lineEndsWith`
- * - **Split behavior**: `split` (required), `occurrence`, `maxSpan`, `fuzzy`
+ * - **Split behavior**: `split` (optional, defaults to `'at'`), `occurrence`, `maxSpan`, `fuzzy`
  * - **Constraints** (optional): `min`, `max`, `meta`
  *
  * @example
- * // Basic rule: split at markdown headers
+ * // Basic rule: split at markdown headers (split defaults to 'at')
  * const rule: SplitRule = {
  *   lineStartsWith: ['## ', '### '],
- *   split: 'at',
  *   meta: { type: 'section' }
  * };
  *
@@ -354,7 +354,6 @@ type RuleConstraints = {
  * // Advanced rule: extract hadith numbers with fuzzy Arabic matching
  * const rule: SplitRule = {
  *   lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '],
- *   split: 'at',
  *   fuzzy: true,
  *   min: 5,
  *   max: 500,

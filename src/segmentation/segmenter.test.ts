@@ -9,6 +9,23 @@ describe('segmenter', () => {
         // Basic split: 'at' tests (current behavior)
         // ─────────────────────────────────────────────────────────────
 
+        it('should default split to "at" when not specified', () => {
+            const pages: Page[] = [
+                { content: '## Chapter 1\nContent one', id: 1 },
+                { content: '## Chapter 2\nContent two', id: 2 },
+            ];
+
+            // No split property specified - should default to 'at'
+            const rules: SplitRule[] = [{ lineStartsWith: ['## '] }];
+
+            const result = segmentPages(pages, { rules });
+
+            expect(result).toHaveLength(2);
+            // 'at' behavior: split happens AT the match, marker is included
+            expect(result[0]).toMatchObject({ content: '## Chapter 1\nContent one', from: 1 });
+            expect(result[1]).toMatchObject({ content: '## Chapter 2\nContent two', from: 2 });
+        });
+
         it('should segment a single plain-text page with 3 numeric markers', () => {
             const pages: Page[] = [{ content: '١ - الحديث الأول\r٢ - الحديث الثاني\r٣ - الحديث الثالث', id: 1 }];
 

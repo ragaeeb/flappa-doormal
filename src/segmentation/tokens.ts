@@ -107,7 +107,7 @@ const BASE_TOKENS: Record<string, string> = {
      *
      * @example 'بسم الله الرحمن الرحيم' (In the name of Allah, the Most Gracious, the Most Merciful)
      */
-    basmalah: 'بسم الله|﷽',
+    basmalah: ['بسم الله', '﷽'].join('|'),
 
     /**
      * Bullet point variants - common bullet characters.
@@ -135,7 +135,7 @@ const BASE_TOKENS: Record<string, string> = {
      * Section marker - Arabic word for "section/issue".
      * Commonly used for fiqh books.
      */
-    fasl: 'فصل|مسألة',
+    fasl: ['مسألة', 'فصل'].join('|'),
 
     /**
      * Single Arabic letter - matches any Arabic letter character.
@@ -169,7 +169,7 @@ const BASE_TOKENS: Record<string, string> = {
      *
      * @example '{{naql}}' matches any of the above phrases
      */
-    naql: 'حدثنا|أخبرنا|حدثني|وحدثنا|أنبأنا|سمعت',
+    naql: ['حدثني', 'وأخبرنا', 'حدثنا', 'سمعت', 'أنبأنا', 'وحدثنا', 'أخبرنا'].join('|'),
 
     /**
      * Single Arabic-Indic digit - matches one digit (٠-٩).
@@ -391,6 +391,18 @@ export type ExpandResult = {
  */
 export const expandTokensWithCaptures = (query: string, fuzzyTransform?: (pattern: string) => string): ExpandResult => {
     const captureNames: string[] = [];
+    // Track capture name usage counts to handle duplicates
+    const captureNameCounts = new Map<string, number>();
+
+    /**
+     * Gets a unique capture name, appending _2, _3, etc. for duplicates.
+     * This prevents invalid regex with duplicate named groups.
+     */
+    const getUniqueCaptureName = (baseName: string): string => {
+        const count = captureNameCounts.get(baseName) ?? 0;
+        captureNameCounts.set(baseName, count + 1);
+        return count === 0 ? baseName : `${baseName}_${count + 1}`;
+    };
 
     // Split the query into token matches and non-token segments
     const segments: Array<{ type: 'token' | 'text'; value: string }> = [];
@@ -434,8 +446,9 @@ export const expandTokensWithCaptures = (query: string, fuzzyTransform?: (patter
 
         // {{:name}} - capture anything with name
         if (!tokenName && captureName) {
-            captureNames.push(captureName);
-            return `(?<${captureName}>.+)`;
+            const uniqueName = getUniqueCaptureName(captureName);
+            captureNames.push(uniqueName);
+            return `(?<${uniqueName}>.+)`;
         }
 
         // Get the token pattern
@@ -456,8 +469,9 @@ export const expandTokensWithCaptures = (query: string, fuzzyTransform?: (patter
 
         // {{token:name}} - capture with name
         if (captureName) {
-            captureNames.push(captureName);
-            return `(?<${captureName}>${tokenPattern})`;
+            const uniqueName = getUniqueCaptureName(captureName);
+            captureNames.push(uniqueName);
+            return `(?<${uniqueName}>${tokenPattern})`;
         }
 
         // {{token}} - no capture, just expand
@@ -490,7 +504,7 @@ export const expandTokensWithCaptures = (query: string, fuzzyTransform?: (patter
  *
  * @see expandTokensWithCaptures for full capture group support
  */
-export const expandTokens = (query: string): string => expandTokensWithCaptures(query).pattern;
+export const expandTokens = (query: string) => expandTokensWithCaptures(query).pattern;
 
 /**
  * Converts a template string to a compiled RegExp.
@@ -513,7 +527,7 @@ export const expandTokens = (query: string): string => expandTokensWithCaptures(
  * templateToRegex('{{raqms}}+')   // → /[٠-٩]++/u (might be invalid in some engines)
  * templateToRegex('(((')          // → null (invalid regex)
  */
-export const templateToRegex = (template: string): RegExp | null => {
+export const templateToRegex = (template: string) => {
     const expanded = expandTokens(template);
     try {
         return new RegExp(expanded, 'u');
@@ -534,7 +548,7 @@ export const templateToRegex = (template: string): RegExp | null => {
  * getAvailableTokens()
  * // → ['bab', 'basmala', 'bullet', 'dash', 'harf', 'kitab', 'naql', 'raqm', 'raqms']
  */
-export const getAvailableTokens = (): string[] => Object.keys(TOKEN_PATTERNS);
+export const getAvailableTokens = () => Object.keys(TOKEN_PATTERNS);
 
 /**
  * Gets the regex pattern for a specific token name.
