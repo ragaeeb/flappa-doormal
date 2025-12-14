@@ -289,7 +289,6 @@ export const findActualStartPage = (
 export type BreakpointContext = {
     pageIds: number[];
     normalizedPages: Map<number, NormalizedPage>;
-    cumulativeOffsets: number[];
     expandedBreakpoints: ExpandedBreakpoint[];
     prefer: 'longer' | 'shorter';
 };
@@ -384,9 +383,10 @@ export const findBreakPosition = (
     currentFromIdx: number,
     toIdx: number,
     windowEndIdx: number,
+    windowEndPosition: number,
     ctx: BreakpointContext,
 ): number => {
-    const { pageIds, normalizedPages, cumulativeOffsets, expandedBreakpoints, prefer } = ctx;
+    const { pageIds, normalizedPages, expandedBreakpoints, prefer } = ctx;
 
     for (const { rule, regex, excludeSet, skipWhenRegex } of expandedBreakpoints) {
         // Check if this breakpoint applies to the current segment's starting page
@@ -406,29 +406,23 @@ export const findBreakPosition = (
 
         // Handle page boundary (empty pattern)
         if (regex === null) {
+            // Break at the window boundary (i.e. start of the page AFTER windowEndIdx)
+            // Prefer using detected next-page position if available, but never exceed windowEndPosition.
             const nextPageIdx = windowEndIdx + 1;
             if (nextPageIdx <= toIdx) {
                 const nextPageData = normalizedPages.get(pageIds[nextPageIdx]);
                 if (nextPageData) {
                     const pos = findNextPagePosition(remainingContent, nextPageData);
                     if (pos > 0) {
-                        return pos;
+                        return Math.min(pos, windowEndPosition, remainingContent.length);
                     }
                 }
             }
-            // Fallback to cumulative offsets
-            return Math.min(
-                cumulativeOffsets[windowEndIdx + 1] - cumulativeOffsets[currentFromIdx],
-                remainingContent.length,
-            );
+            return Math.min(windowEndPosition, remainingContent.length);
         }
 
         // Find matches within window
-        const windowEndPosition = Math.min(
-            cumulativeOffsets[windowEndIdx + 1] - cumulativeOffsets[currentFromIdx],
-            remainingContent.length,
-        );
-        const windowContent = remainingContent.slice(0, windowEndPosition);
+        const windowContent = remainingContent.slice(0, Math.min(windowEndPosition, remainingContent.length));
         const breakPos = findPatternBreakPosition(windowContent, regex, prefer);
         if (breakPos > 0) {
             return breakPos;

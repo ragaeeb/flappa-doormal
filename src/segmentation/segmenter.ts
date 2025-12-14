@@ -454,6 +454,103 @@ const applyBreakpoints = (
     prefer: 'longer' | 'shorter',
     logger?: Logger,
 ): Segment[] => {
+    const findWindowEndPosition = (
+        remainingContent: string,
+        currentFromIdx: number,
+        windowEndIdx: number,
+        toIdx: number,
+        pageIds: number[],
+        normalizedPages: Map<number, NormalizedPage>,
+        cumulativeOffsets: number[],
+    ): number => {
+        // If the window already reaches the end of the segment, the window is the remaining content.
+        if (windowEndIdx >= toIdx) {
+            return remainingContent.length;
+        }
+
+        const findBoundaryNear = (nextIdx: number, expectedBoundary: number): number => {
+            const nextPageData = normalizedPages.get(pageIds[nextIdx]);
+            if (!nextPageData) {
+                return -1;
+            }
+
+            // Use progressively shorter prefixes until we find one that exists in remainingContent.
+            // This is important because the "next page" content might be truncated in the current
+            // segment due to structural split points early in that page (e.g. `##` headings).
+            const nextTrimmed = nextPageData.content.trimStart();
+            const candidateLengths = [80, 60, 40, 30, 20, 15];
+
+            // Anchor search near the expected boundary to avoid matching repeated phrases earlier in content.
+            const approx = Math.min(Math.max(0, expectedBoundary), remainingContent.length);
+            const searchStart = Math.max(0, approx - 10_000);
+            const searchEnd = Math.min(remainingContent.length, approx + 2_000);
+
+            for (const len of candidateLengths) {
+                const prefix = nextTrimmed.slice(0, Math.min(len, nextTrimmed.length)).trim();
+                if (!prefix) continue;
+
+                let pos = remainingContent.indexOf(prefix, searchStart);
+                while (pos !== -1 && pos <= searchEnd) {
+                    // Prefer matches that look like page boundaries (preceded by whitespace).
+                    if (pos > 0 && /\s/.test(remainingContent[pos - 1] ?? '')) {
+                        return pos;
+                    }
+                    pos = remainingContent.indexOf(prefix, pos + 1);
+                }
+
+                // Fallback: take the last occurrence at or before approx (still anchored).
+                const last = remainingContent.lastIndexOf(prefix, approx);
+                if (last > 0) {
+                    return last;
+                }
+            }
+
+            return -1;
+        };
+
+        // Desired boundary is the start of the page AFTER windowEndIdx.
+        // We locate that boundary within remainingContent using page prefix matching.
+        //
+        // IMPORTANT: We intentionally derive window boundaries from remainingContent, because
+        // structural rules (e.g. lineStartsAfter) can strip markers, shifting offsets relative
+        // to raw per-page concatenation. Using raw offsets can accidentally include text from
+        // the next page, violating maxPages.
+        const desiredNextIdx = windowEndIdx + 1;
+        const minNextIdx = currentFromIdx + 1;
+        const maxNextIdx = Math.min(desiredNextIdx, toIdx);
+
+        // Estimate how far into the current page `remainingContent` begins.
+        // This matters because remainingContent can start mid-page after a previous breakpoint split,
+        // so raw cumulativeOffsets (which assume page-start alignment) overestimate boundary positions.
+        let startOffsetInCurrentPage = 0;
+        const currentPageData = normalizedPages.get(pageIds[currentFromIdx]);
+        if (currentPageData) {
+            const remStart = remainingContent.trimStart().slice(0, Math.min(60, remainingContent.length));
+            const needle = remStart.slice(0, Math.min(30, remStart.length));
+            if (needle.length > 0) {
+                const idx = currentPageData.content.indexOf(needle);
+                if (idx > 0) {
+                    startOffsetInCurrentPage = idx;
+                }
+            }
+        }
+
+        // If we can't find the boundary for the desired next page, progressively fall back
+        // to earlier page boundaries (smaller window), which is conservative but still correct.
+        for (let nextIdx = maxNextIdx; nextIdx >= minNextIdx; nextIdx--) {
+            const expectedBoundary =
+                cumulativeOffsets[nextIdx] !== undefined && cumulativeOffsets[currentFromIdx] !== undefined
+                    ? Math.max(0, cumulativeOffsets[nextIdx] - cumulativeOffsets[currentFromIdx] - startOffsetInCurrentPage)
+                    : remainingContent.length;
+            const pos = findBoundaryNear(nextIdx, expectedBoundary);
+            if (pos > 0) return pos;
+        }
+
+        // As a last resort (should be rare), treat the entire remaining content as the window.
+        // This may under-enforce maxPages if boundary detection fails, but avoids infinite loops.
+        return remainingContent.length;
+    };
+
     const findExclusionBreakPosition = (
         currentFromIdx: number,
         windowEndIdx: number,
@@ -616,11 +713,22 @@ const applyBreakpoints = (
                 }
             }
 
+            const windowEndPosition = findWindowEndPosition(
+                remainingContent,
+                currentFromIdx,
+                windowEndIdx,
+                toIdx,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
             logger?.trace?.('Window calculation', {
                 currentPageId,
                 maxWindowPageId,
                 windowEndIdx,
                 windowEndPageId: pageIds[windowEndIdx],
+                windowEndPosition,
             });
 
             // Special case: if we have exclusions IN THE CURRENT WINDOW, handle them
@@ -650,7 +758,6 @@ const applyBreakpoints = (
             if (breakPosition <= 0) {
                 // Use extracted helper to find break position
                 const breakpointCtx: BreakpointContext = {
-                    cumulativeOffsets,
                     expandedBreakpoints,
                     normalizedPages,
                     pageIds,
@@ -659,7 +766,14 @@ const applyBreakpoints = (
 
                 logger?.trace?.('Finding break position using patterns...');
 
-                breakPosition = findBreakPosition(remainingContent, currentFromIdx, toIdx, windowEndIdx, breakpointCtx);
+                breakPosition = findBreakPosition(
+                    remainingContent,
+                    currentFromIdx,
+                    toIdx,
+                    windowEndIdx,
+                    windowEndPosition,
+                    breakpointCtx,
+                );
 
                 logger?.trace?.('Pattern break position', { breakPosition });
             }
@@ -673,13 +787,16 @@ const applyBreakpoints = (
                     logger?.trace?.('Single page window, outputting page and advancing');
 
                     // Output this single page as a segment
-                    const pageContent =
-                        cumulativeOffsets[currentFromIdx + 1] !== undefined
-                            ? remainingContent.slice(
-                                  0,
-                                  cumulativeOffsets[currentFromIdx + 1] - cumulativeOffsets[currentFromIdx],
-                              )
-                            : remainingContent;
+                    const pageBoundaryPos = findWindowEndPosition(
+                        remainingContent,
+                        currentFromIdx,
+                        currentFromIdx,
+                        toIdx,
+                        pageIds,
+                        normalizedPages,
+                        cumulativeOffsets,
+                    );
+                    const pageContent = remainingContent.slice(0, pageBoundaryPos);
                     const pageSeg = createSegment(
                         pageContent.trim(),
                         pageIds[currentFromIdx],
@@ -702,7 +819,7 @@ const applyBreakpoints = (
                     continue;
                 }
                 // Multi-page window with no pattern match - output entire window and continue
-                breakPosition = cumulativeOffsets[windowEndIdx + 1] - cumulativeOffsets[currentFromIdx];
+                breakPosition = windowEndPosition;
                 logger?.trace?.('Multi-page window, using full window break position', { breakPosition });
             }
 

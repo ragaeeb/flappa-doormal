@@ -1178,6 +1178,59 @@ describe('segmenter', () => {
                 });
             });
 
+            it('should enforce maxPages window even when structural rules strip markers (regression: 442-444)', () => {
+                // This reproduces the failure mode seen in src/index.test.ts:
+                // - A structural rule (lineStartsAfter) strips a long marker at the start of the segment,
+                //   shifting the true page boundary positions in the segment content.
+                // - Breakpoint processing must still enforce maxPages using the *actual* window content,
+                //   not raw per-page offsets.
+
+                const marker = `INTRO ${'X'.repeat(80)} `;
+
+                const pages: Page[] = [
+                    {
+                        content: `${marker}بعضهم إحدى هاتين الترجمتين بالأخرى (١) ، والصواب التفريق كما ذكرنا، والله أعلم (٢) .`,
+                        id: 442,
+                    },
+                    {
+                        content:
+                            'ق: أَحْمَد بن مُحَمَّد بن يحيى بن سَعِيد بن فروخ القطان... عيسى الْبَغْدَادِيّ.',
+                        id: 443,
+                    },
+                    {
+                        // Intentionally short page; if the window boundary is miscomputed, this punctuation
+                        // can be incorrectly selected (prefer longer) and violate maxPages.
+                        content: 'ومئتين (١) .',
+                        id: 444,
+                    },
+                ];
+
+                const result = segmentPages(pages, {
+                    breakpoints: [{ pattern: '{{tarqim}}\\s*' }, ''],
+                    maxPages: 1,
+                    // prefer should default to 'longer'
+                    rules: [{ lineStartsAfter: [marker], split: 'at' }],
+                });
+
+                // First segment should NOT include page 444 content; it should break at the last punctuation
+                // within the allowed window (pages 442-443), i.e. at the end of page 443.
+                expect(result.length).toBeGreaterThanOrEqual(2);
+                expect(result[0].to).toBe(443);
+                expect(result[0].content).toContain('الْبَغْدَادِيّ.');
+                expect(result[0].content).not.toContain('ومئتين');
+
+                // Remaining segment(s) should include page 444 and start from 444.
+                const page444Seg = result.find((s) => s.content.includes('ومئتين'));
+                expect(page444Seg).toBeDefined();
+                expect(page444Seg?.from).toBe(444);
+
+                // No segment should violate maxPages=1 constraint (by page ID difference).
+                for (const seg of result) {
+                    const span = (seg.to ?? seg.from) - seg.from;
+                    expect(span).toBeLessThanOrEqual(1);
+                }
+            });
+
             describe('prefer option', () => {
                 it('should prefer longer segments when prefer is "longer"', () => {
                     const pages: Page[] = [
