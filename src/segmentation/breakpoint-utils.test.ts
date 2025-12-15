@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import {
+    applyPageJoinerBetweenPages,
     buildExcludeSet,
     createSegment,
     estimateStartOffsetInCurrentPage,
@@ -426,6 +427,22 @@ describe('breakpoint-utils', () => {
             ]);
             const remainingContent = 'Something else';
             expect(computeNextFromIdx(remainingContent, 0, 1, pageIds, normalizedPages)).toBe(0);
+        });
+    });
+
+    describe('applyPageJoinerBetweenPages', () => {
+        it('should replace only the page-boundary newline with space', () => {
+            const pageIds = [443, 444];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [443, { content: '... سنة ثمان وخمسين', index: 0, length: 18 }],
+                // Simulate a realistic next page where only the very beginning is included in the segment,
+                // but the page itself continues with more content.
+                [444, { content: 'ومئتين (١) .\n١٠٧- س: ...', index: 1, length: 20 }],
+            ]);
+
+            const content = 'سنة ثمان وخمسين\nومئتين (١) .';
+            const out = applyPageJoinerBetweenPages(content, 0, 1, pageIds, normalizedPages, 'space');
+            expect(out).toBe('سنة ثمان وخمسين ومئتين (١) .');
         });
     });
 });

@@ -182,13 +182,19 @@ export const dedupeSplitPoints = (splitPoints: SplitPoint[]): SplitPoint[] => {
  * If no structural rules produced segments, create a single segment spanning all pages.
  * This allows breakpoint processing to still run.
  */
-export const ensureFallbackSegment = (segments: Segment[], pages: Page[], normalizedContent: string[]): Segment[] => {
+export const ensureFallbackSegment = (
+    segments: Segment[],
+    pages: Page[],
+    normalizedContent: string[],
+    pageJoiner: 'space' | 'newline',
+): Segment[] => {
     if (segments.length > 0 || pages.length === 0) {
         return segments;
     }
     const firstPage = pages[0];
     const lastPage = pages[pages.length - 1];
-    const allContent = normalizedContent.join('\n').trim();
+    const joinChar = pageJoiner === 'newline' ? '\n' : ' ';
+    const allContent = normalizedContent.join(joinChar).trim();
     if (!allContent) {
         return segments;
     }
@@ -387,7 +393,7 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
  * });
  */
 export const segmentPages = (pages: Page[], options: SegmentationOptions): Segment[] => {
-    const { rules = [], maxPages, breakpoints, prefer = 'longer', logger } = options;
+    const { rules = [], maxPages, breakpoints, prefer = 'longer', pageJoiner = 'space', logger } = options;
     if (!pages.length) {
         return [];
     }
@@ -399,7 +405,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
     // Build initial segments from structural rules
     let segments = buildSegments(unique, matchContent, pageMap, rules);
 
-    segments = ensureFallbackSegment(segments, pages, normalizedContent);
+    segments = ensureFallbackSegment(segments, pages, normalizedContent, pageJoiner);
 
     // Apply breakpoints post-processing for oversized segments
     if (maxPages !== undefined && maxPages >= 0 && breakpoints?.length) {
@@ -413,6 +419,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
             prefer,
             patternProcessor,
             logger,
+            pageJoiner,
         );
     }
 

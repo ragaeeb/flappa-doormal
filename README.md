@@ -355,7 +355,11 @@ const pages: Page[] = [
 const options: SegmentationOptions = {
   rules: [
     { lineStartsWith: ['## '], split: 'at' }
-  ]
+  ],
+  // How to join content across page boundaries in OUTPUT segments:
+  // - 'space' (default): page boundaries become spaces
+  // - 'newline': preserve page boundaries as newlines
+  pageJoiner: 'space',
 };
 
 const segments: Segment[] = segmentPages(pages, options);
@@ -588,7 +592,7 @@ console.log(`Found ${segments.length} segments`);
 # Install dependencies
 bun install
 
-# Run tests (222 tests)
+# Run tests
 bun test
 
 # Build
@@ -621,7 +625,12 @@ Fuzzy transforms are applied to raw Arabic text *before* wrapping in regex group
 
 ### Extracted Utilities
 
-Complex logic was extracted into `match-utils.ts` for independent testing and reduced complexity (main function: 37 → 10).
+Complex logic is intentionally split into small, independently testable modules:
+
+- `src/segmentation/match-utils.ts`: match filtering + capture extraction
+- `src/segmentation/rule-regex.ts`: SplitRule → compiled regex builder (`buildRuleRegex`, `processPattern`)
+- `src/segmentation/breakpoint-utils.ts`: breakpoint windowing/exclusion helpers + page boundary join normalization
+- `src/segmentation/breakpoint-processor.ts`: breakpoint post-processing engine (applies breakpoints after structural segmentation)
 
 ## Performance Notes
 

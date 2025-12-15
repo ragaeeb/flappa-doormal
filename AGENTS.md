@@ -30,8 +30,10 @@ src/
 ├── pattern-detection.test.ts   # Pattern detection tests (22 tests)
 └── segmentation/
     ├── types.ts                # TypeScript type definitions for rules/segments
-    ├── segmenter.ts            # Core segmentation engine (segmentPages, applyBreakpoints)
-    ├── breakpoint-utils.ts     # Extracted breakpoint processing utilities
+    ├── segmenter.ts            # Core segmentation engine (segmentPages)
+    ├── breakpoint-processor.ts # Breakpoint post-processing engine (applyBreakpoints)
+    ├── breakpoint-utils.ts     # Breakpoint processing utilities (windowing, excludes, page joins)
+    ├── rule-regex.ts           # SplitRule -> compiled regex builder (buildRuleRegex, processPattern)
     ├── tokens.ts               # Token definitions and expansion logic  
     ├── fuzzy.ts                # Diacritic-insensitive matching utilities
     ├── html.ts                 # HTML utilities (stripHtmlTags)
@@ -40,6 +42,8 @@ src/
     ├── segmenter.test.ts       # Core test suite (150+ tests including breakpoints)
     ├── segmenter.bukhari.test.ts # Real-world test cases
     ├── breakpoint-utils.test.ts # Breakpoint utility tests (42 tests)
+    ├── rule-regex.test.ts      # Rule regex builder tests
+    ├── segmenter-utils.test.ts # Segmenter helper tests
     ├── tokens.test.ts          # Token expansion tests
     ├── fuzzy.test.ts           # Fuzzy matching tests
     ├── textUtils.test.ts       # Text utility tests
@@ -72,7 +76,15 @@ docs/
    - `filterByConstraints()` - Apply min/max page filters
    - `anyRuleAllowsId()` - Check if page passes rule constraints
 
-4. **`breakpoint-utils.ts`** - Breakpoint processing utilities (NEW)
+4. **`rule-regex.ts`** - SplitRule → compiled regex builder
+   - `buildRuleRegex()` - Compiles rule patterns (`lineStartsWith`, `lineStartsAfter`, `lineEndsWith`, `template`, `regex`)
+   - `processPattern()` - Token expansion + auto-escaping + optional fuzzy application
+
+5. **`breakpoint-processor.ts`** - Breakpoint post-processing engine
+   - `applyBreakpoints()` - Splits oversized structural segments using breakpoint patterns + windowing
+   - Applies `pageJoiner` normalization to breakpoint-created segments
+
+6. **`breakpoint-utils.ts`** - Breakpoint processing utilities (NEW)
    - `normalizeBreakpoint()` - Convert string to BreakpointRule object
    - `isPageExcluded()` - Check if page is in exclude list
    - `isInBreakpointRange()` - Validate page against min/max/exclude constraints
@@ -80,20 +92,23 @@ docs/
    - `createSegment()` - Create segment with optional to/meta fields
    - `expandBreakpoints()` - Expand patterns with pre-compiled regexes
    - `findActualEndPage()` - Search backwards for ending page by content
+   - `findBreakpointWindowEndPosition()` - Compute window boundary in content-space (robust to marker stripping)
+   - `applyPageJoinerBetweenPages()` - Normalize page-boundary join in output segments (`space` vs `newline`)
    - `findBreakPosition()` - Find break position using breakpoint patterns
    - `hasExcludedPageInRange()` - Check if range contains excluded pages
    - `findNextPagePosition()` - Find next page content position
    - `findPatternBreakPosition()` - Find pattern match by preference
 
-5. **`types.ts`** - Type definitions
+7. **`types.ts`** - Type definitions
    - `Logger` interface - Optional logging for debugging
    - `SegmentationOptions` - Options with `logger` property
+   - `pageJoiner` - Controls how page boundaries are represented in output (`space` default)
    - Verbosity levels: `trace`, `debug`, `info`, `warn`, `error`
 
-6. **`fuzzy.ts`** - Arabic text normalization
+8. **`fuzzy.ts`** - Arabic text normalization
    - `makeDiacriticInsensitive()` - Generate regex that ignores diacritics
 
-7. **`pattern-detection.ts`** - Token auto-detection (NEW)
+9. **`pattern-detection.ts`** - Token auto-detection (NEW)
    - `detectTokenPatterns()` - Detect tokens in text with positions
    - `generateTemplateFromText()` - Convert text to template string
    - `suggestPatternConfig()` - Suggest rule configuration

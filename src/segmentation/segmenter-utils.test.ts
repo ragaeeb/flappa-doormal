@@ -35,9 +35,9 @@ describe('segmenter utils', () => {
                 { id: 3, content: 'B' },
             ];
             const normalizedContent = ['A', 'B'];
-            const segments = ensureFallbackSegment([], pages as never, normalizedContent);
+            const segments = ensureFallbackSegment([], pages as never, normalizedContent, 'space');
             expect(segments).toHaveLength(1);
-            expect(segments[0]).toMatchObject({ content: 'A\nB', from: 1, to: 3 });
+            expect(segments[0]).toMatchObject({ content: 'A B', from: 1, to: 3 });
         });
     });
 });

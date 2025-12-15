@@ -10,6 +10,10 @@
 import type { Breakpoint, BreakpointRule, PageRange, Segment } from './types.js';
 
 const WINDOW_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15] as const;
+// For page-join normalization we need to handle cases where only the very beginning of the next page
+// is present in the current segment (e.g. the segment ends right before the next structural marker).
+// That can be as short as a few words, so we allow shorter prefixes here.
+const JOINER_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15, 12, 10, 8, 6] as const;
 
 /**
  * Normalizes a breakpoint to the object form.
@@ -207,6 +211,59 @@ export const expandBreakpoints = (breakpoints: Breakpoint[], processPattern: Pat
 
 /** Normalized page data for efficient lookups */
 export type NormalizedPage = { content: string; length: number; index: number };
+
+/**
+ * Applies a configured joiner at detected page boundaries within a multi-page content chunk.
+ *
+ * This is used for breakpoint-generated segments which don't have access to the original
+ * `pageMap.pageBreaks` offsets. We detect page starts sequentially by searching for each page's
+ * prefix after the previous boundary, then replace ONLY the single newline immediately before
+ * that page start.
+ *
+ * This avoids converting real in-page newlines, while still normalizing page joins consistently.
+ */
+export const applyPageJoinerBetweenPages = (
+    content: string,
+    fromIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    joiner: 'space' | 'newline',
+): string => {
+    if (joiner === 'newline' || fromIdx >= toIdx || !content.includes('\n')) {
+        return content;
+    }
+
+    let updated = content;
+    let searchFrom = 0;
+
+    for (let pi = fromIdx + 1; pi <= toIdx; pi++) {
+        const pageData = normalizedPages.get(pageIds[pi]);
+        if (!pageData) continue;
+
+        const trimmed = pageData.content.trimStart();
+        let found = -1;
+        for (const len of JOINER_PREFIX_LENGTHS) {
+            const prefix = trimmed.slice(0, Math.min(len, trimmed.length)).trim();
+            if (!prefix) continue;
+
+            const pos = updated.indexOf(prefix, searchFrom);
+            if (pos > 0) {
+                found = pos;
+                break;
+            }
+        }
+
+        if (found > 0) {
+            if (updated[found - 1] === '\n') {
+                updated = `${updated.slice(0, found - 1)} ${updated.slice(found)}`;
+            }
+            searchFrom = found;
+        }
+    }
+
+    return updated;
+};
 
 /**
  * Estimates how far into the current page `remainingContent` begins.

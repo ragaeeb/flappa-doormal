@@ -7,6 +7,7 @@
 
 import {
     type BreakpointContext,
+    applyPageJoinerBetweenPages,
     createSegment,
     expandBreakpoints,
     findActualEndPage,
@@ -260,6 +261,7 @@ export const applyBreakpoints = (
     prefer: 'longer' | 'shorter',
     patternProcessor: BreakpointPatternProcessor,
     logger?: Logger,
+    pageJoiner: 'space' | 'newline' = 'space',
 ): Segment[] => {
     const pageIds = pages.map((p) => p.id);
     const pageIdToIndex = buildPageIdToIndexMap(pageIds);
@@ -283,8 +285,7 @@ export const applyBreakpoints = (
             continue;
         }
 
-        result.push(
-            ...processOversizedSegment(
+        const broken = processOversizedSegment(
                 segment,
                 fromIdx,
                 toIdx,
@@ -295,7 +296,20 @@ export const applyBreakpoints = (
                 maxPages,
                 prefer,
                 logger,
-            ),
+        );
+        // Normalize page joins for breakpoint-created pieces
+        result.push(
+            ...broken.map((s) => {
+                const segFromIdx = pageIdToIndex.get(s.from) ?? -1;
+                const segToIdx = s.to !== undefined ? (pageIdToIndex.get(s.to) ?? segFromIdx) : segFromIdx;
+                if (segFromIdx >= 0 && segToIdx > segFromIdx) {
+                    return {
+                        ...s,
+                        content: applyPageJoinerBetweenPages(s.content, segFromIdx, segToIdx, pageIds, normalizedPages, pageJoiner),
+                    };
+                }
+                return s;
+            }),
         );
     }
 
