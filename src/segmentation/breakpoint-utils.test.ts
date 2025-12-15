@@ -9,8 +9,11 @@ import { describe, expect, it } from 'bun:test';
 import {
     buildExcludeSet,
     createSegment,
+    estimateStartOffsetInCurrentPage,
     expandBreakpoints,
     findActualEndPage,
+    findBreakpointWindowEndPosition,
+    findExclusionBreakPosition,
     findNextPagePosition,
     findPatternBreakPosition,
     hasExcludedPageInRange,
@@ -19,6 +22,7 @@ import {
     type NormalizedPage,
     normalizeBreakpoint,
 } from './breakpoint-utils.js';
+import { computeNextFromIdx, computeWindowEndIdx } from './breakpoint-processor.js';
 
 describe('breakpoint-utils', () => {
     describe('normalizeBreakpoint', () => {
@@ -304,6 +308,124 @@ describe('breakpoint-utils', () => {
             // "Start" is at position 0, should be ignored
             const result = findActualEndPage('Start content', 0, 1, pageIds, normalizedPages);
             expect(result).toBe(0);
+        });
+    });
+
+    describe('estimateStartOffsetInCurrentPage', () => {
+        it('should return 0 when remainingContent starts at page start', () => {
+            const pageIds = [1];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [1, { content: 'Hello world. This is page one.', index: 0, length: 29 }],
+            ]);
+
+            const remaining = 'Hello world. This is page one.';
+            expect(estimateStartOffsetInCurrentPage(remaining, 0, pageIds, normalizedPages)).toBe(0);
+        });
+
+        it('should estimate non-zero offset when remainingContent begins mid-page', () => {
+            const pageIds = [1];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [1, { content: 'AAAA BBBB CCCC DDDD', index: 0, length: 19 }],
+            ]);
+
+            const remaining = 'CCCC DDDD';
+            const offset = estimateStartOffsetInCurrentPage(remaining, 0, pageIds, normalizedPages);
+            expect(offset).toBe(10); // 'CCCC' starts at index 10 in 'AAAA BBBB CCCC DDDD'
+        });
+    });
+
+    describe('findBreakpointWindowEndPosition', () => {
+        it('should find start of next page within remainingContent (supports truncated next page)', () => {
+            const pageIds = [59, 229];
+            const page59 = '... ثم أمَر سائِرَ الناسِ';
+            const page229InSegment = 'إلى هذا الطَّرْفِ.\n## فصل: وإنْ خُلِقَ';
+            const remainingContent = `${page59}\n${page229InSegment}`;
+
+            const page229Full = `${page229InSegment} LONGER_CONTINUATION_TEXT`;
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [59, { content: page59, index: 0, length: page59.length }],
+                [229, { content: page229Full, index: 1, length: page229Full.length }],
+            ]);
+
+            const cumulativeOffsets = [0, page59.length + 1, page59.length + 1 + page229Full.length];
+
+            const pos = findBreakpointWindowEndPosition(
+                remainingContent,
+                0,
+                0, // windowEndIdx=0 so next boundary is start of pageIds[1]
+                1,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+            expect(pos).toBe(remainingContent.indexOf('إلى هذا'));
+        });
+
+        it('should account for remainingContent starting mid-page when estimating expected boundaries', () => {
+            const pageIds = [1, 2];
+            const page1 = 'AAAA BBBB CCCC DDDD';
+            const page2 = 'EEEE FFFF';
+            const remainingContent = `CCCC DDDD\n${page2}`;
+
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [1, { content: page1, index: 0, length: page1.length }],
+                [2, { content: page2, index: 1, length: page2.length }],
+            ]);
+
+            const cumulativeOffsets = [0, page1.length + 1, page1.length + 1 + page2.length];
+
+            const pos = findBreakpointWindowEndPosition(
+                remainingContent,
+                0,
+                0,
+                1,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+            expect(pos).toBe(remainingContent.indexOf('EEEE'));
+        });
+    });
+
+    describe('findExclusionBreakPosition', () => {
+        it('should split before the first excluded page in window', () => {
+            const pageIds = [1, 2, 3];
+            const cumulativeOffsets = [0, 4, 8, 11];
+            const expandedBreakpoints = [{ excludeSet: new Set([2]) }];
+
+            const breakPos = findExclusionBreakPosition(0, 2, 2, pageIds, expandedBreakpoints, cumulativeOffsets);
+            expect(breakPos).toBe(4);
+        });
+    });
+
+    describe('computeWindowEndIdx', () => {
+        it('should choose last index within maxPages window by page ID', () => {
+            const pageIds = [442, 443, 444, 500];
+            expect(computeWindowEndIdx(0, 3, pageIds, 1)).toBe(1); // 442 -> up to 443
+            expect(computeWindowEndIdx(1, 3, pageIds, 1)).toBe(2); // 443 -> up to 444
+            expect(computeWindowEndIdx(2, 3, pageIds, 1)).toBe(2); // 444 -> 500 too far
+        });
+    });
+
+    describe('computeNextFromIdx', () => {
+        it('should advance to next page when remainingContent starts with next page prefix', () => {
+            const pageIds = [1, 2];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [1, { content: 'Page1 content', index: 0, length: 13 }],
+                [2, { content: 'Page2 content', index: 1, length: 13 }],
+            ]);
+            const remainingContent = 'Page2 content and more';
+            expect(computeNextFromIdx(remainingContent, 0, 1, pageIds, normalizedPages)).toBe(1);
+        });
+
+        it('should not advance when remainingContent does not start with next page prefix', () => {
+            const pageIds = [1, 2];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [1, { content: 'Page1 content', index: 0, length: 13 }],
+                [2, { content: 'Page2 content', index: 1, length: 13 }],
+            ]);
+            const remainingContent = 'Something else';
+            expect(computeNextFromIdx(remainingContent, 0, 1, pageIds, normalizedPages)).toBe(0);
         });
     });
 });

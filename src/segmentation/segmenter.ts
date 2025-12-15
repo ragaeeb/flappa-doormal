@@ -8,17 +8,7 @@
  * @module segmenter
  */
 
-import {
-    type BreakpointContext,
-    createSegment,
-    expandBreakpoints,
-    findActualEndPage,
-    findActualStartPage,
-    findBreakPosition,
-    hasExcludedPageInRange,
-    type NormalizedPage,
-} from './breakpoint-utils.js';
-import { makeDiacriticInsensitive } from './fuzzy.js';
+import { applyBreakpoints } from './breakpoint-processor.js';
 import {
     anyRuleAllowsId,
     extractNamedCaptures,
@@ -27,175 +17,11 @@ import {
     getLastPositionalCapture,
     type MatchResult,
 } from './match-utils.js';
+import { buildRuleRegex, processPattern } from './rule-regex.js';
 import { normalizeLineEndings } from './textUtils.js';
-import { escapeTemplateBrackets, expandTokensWithCaptures } from './tokens.js';
-import type { Breakpoint, Logger, Page, Segment, SegmentationOptions, SplitRule } from './types.js';
+import type { Page, Segment, SegmentationOptions, SplitRule } from './types.js';
 
-/**
- * Checks if a regex pattern contains standard (anonymous) capturing groups.
- *
- * Detects standard capturing groups `(...)` while excluding:
- * - Non-capturing groups `(?:...)`
- * - Lookahead assertions `(?=...)` and `(?!...)`
- * - Lookbehind assertions `(?<=...)` and `(?<!...)`
- * - Named groups `(?<name>...)` (start with `(?` so excluded here)
- *
- * **Note**: Named capture groups `(?<name>...)` ARE capturing groups but are
- * excluded by this check because they are tracked separately via the
- * `captureNames` array from token expansion. This function only detects
- * anonymous capturing groups like `(.*)`.
- *
- * @param pattern - Regex pattern string to analyze
- * @returns `true` if the pattern contains at least one anonymous capturing group
- */
-const hasCapturingGroup = (pattern: string): boolean => {
-    // Match ( that is NOT followed by ? (excludes non-capturing and named groups)
-    return /\((?!\?)/.test(pattern);
-};
-
-/**
- * Result of processing a pattern with token expansion and optional fuzzy matching.
- */
-type ProcessedPattern = {
-    /** The expanded regex pattern string (tokens replaced with regex) */
-    pattern: string;
-    /** Names of captured groups extracted from `{{token:name}}` syntax */
-    captureNames: string[];
-};
-
-/**
- * Processes a pattern string by expanding tokens and optionally applying fuzzy matching.
- *
- * Fuzzy matching makes Arabic text diacritic-insensitive. When enabled, the
- * transform is applied to token patterns BEFORE wrapping with capture groups,
- * ensuring regex metacharacters (`(`, `)`, `|`, etc.) are not corrupted.
- *
- * @param pattern - Pattern string potentially containing `{{token}}` placeholders
- * @param fuzzy - Whether to apply diacritic-insensitive transformation
- * @returns Processed pattern with expanded tokens and capture names
- *
- * @example
- * processPattern('{{raqms:num}} {{dash}}', false)
- * // → { pattern: '(?<num>[٠-٩]+) [-–—ـ]', captureNames: ['num'] }
- *
- * @example
- * processPattern('{{naql}}', true)
- * // → { pattern: 'حَ?دَّ?ثَ?نَ?ا|...', captureNames: [] }
- */
-const processPattern = (pattern: string, fuzzy: boolean): ProcessedPattern => {
-    // First escape brackets ()[] outside of {{tokens}} - allows intuitive patterns like ({{harf}}):
-    const escaped = escapeTemplateBrackets(pattern);
-    // Pass fuzzy transform to expandTokensWithCaptures so it can apply to raw token patterns
-    const fuzzyTransform = fuzzy ? makeDiacriticInsensitive : undefined;
-    const { pattern: expanded, captureNames } = expandTokensWithCaptures(escaped, fuzzyTransform);
-    return { captureNames, pattern: expanded };
-};
-
-/**
- * Compiled regex and metadata for a split rule.
- */
-type RuleRegex = {
-    /** Compiled RegExp with 'gmu' flags (global, multiline, unicode) */
-    regex: RegExp;
-    /** Whether the regex uses capturing groups for content extraction */
-    usesCapture: boolean;
-    /** Names of captured groups from `{{token:name}}` syntax */
-    captureNames: string[];
-    /** Whether this rule uses `lineStartsAfter` (content capture at end) */
-    usesLineStartsAfter: boolean;
-};
-
-/**
- * Builds a compiled regex and metadata from a split rule.
- *
- * Handles all pattern types:
- * - `regex`: Used as-is (no token expansion)
- * - `template`: Tokens expanded via `expandTokensWithCaptures`
- * - `lineStartsWith`: Converted to `^(?:patterns...)`
- * - `lineStartsAfter`: Converted to `^(?:patterns...)(.*)`
- * - `lineEndsWith`: Converted to `(?:patterns...)$`
- *
- * @param rule - Split rule containing pattern and options
- * @returns Compiled regex with capture metadata
- */
-const buildRuleRegex = (rule: SplitRule): RuleRegex => {
-    const s: {
-        lineStartsWith?: string[];
-        lineStartsAfter?: string[];
-        lineEndsWith?: string[];
-        template?: string;
-        regex?: string;
-    } = { ...rule };
-
-    const fuzzy = (rule as { fuzzy?: boolean }).fuzzy ?? false;
-    let allCaptureNames: string[] = [];
-
-    /**
-     * Safely compiles a regex pattern, throwing a helpful error if invalid.
-     *
-     * @remarks
-     * This catches syntax errors only. It does NOT protect against ReDoS
-     * (catastrophic backtracking) from pathological patterns. Avoid compiling
-     * patterns from untrusted sources.
-     */
-    const compileRegex = (pattern: string): RegExp => {
-        try {
-            return new RegExp(pattern, 'gmu');
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            throw new Error(`Invalid regex pattern: ${pattern}\n  Cause: ${message}`);
-        }
-    };
-
-    // lineStartsAfter: creates a capturing group to exclude the marker from content
-    if (s.lineStartsAfter?.length) {
-        const processed = s.lineStartsAfter.map((p) => processPattern(p, fuzzy));
-        const patterns = processed.map((p) => p.pattern).join('|');
-        allCaptureNames = processed.flatMap((p) => p.captureNames);
-        // Wrap patterns with named captures in a non-capturing group, then capture rest
-        s.regex = `^(?:${patterns})(.*)`;
-        return {
-            captureNames: allCaptureNames,
-            regex: compileRegex(s.regex),
-            usesCapture: true,
-            usesLineStartsAfter: true,
-        };
-    }
-
-    if (s.lineStartsWith?.length) {
-        const processed = s.lineStartsWith.map((p) => processPattern(p, fuzzy));
-        const patterns = processed.map((p) => p.pattern).join('|');
-        allCaptureNames = processed.flatMap((p) => p.captureNames);
-        s.regex = `^(?:${patterns})`;
-    }
-    if (s.lineEndsWith?.length) {
-        const processed = s.lineEndsWith.map((p) => processPattern(p, fuzzy));
-        const patterns = processed.map((p) => p.pattern).join('|');
-        allCaptureNames = processed.flatMap((p) => p.captureNames);
-        s.regex = `(?:${patterns})$`;
-    }
-    if (s.template) {
-        // Template from user: first escape brackets, then expand tokens with captures
-        const escaped = escapeTemplateBrackets(s.template);
-        const { pattern, captureNames } = expandTokensWithCaptures(escaped);
-        s.regex = pattern;
-        allCaptureNames = [...allCaptureNames, ...captureNames];
-    }
-
-    if (!s.regex) {
-        throw new Error(
-            'Rule must specify exactly one pattern type: regex, template, lineStartsWith, lineStartsAfter, or lineEndsWith',
-        );
-    }
-
-    const usesCapture = hasCapturingGroup(s.regex) || allCaptureNames.length > 0;
-    return {
-        captureNames: allCaptureNames,
-        regex: compileRegex(s.regex),
-        usesCapture,
-        usesLineStartsAfter: false,
-    };
-};
+// buildRuleRegex + processPattern extracted to src/segmentation/rule-regex.ts
 
 /**
  * Represents the byte offset boundaries of a single page within concatenated content.
@@ -326,6 +152,77 @@ type SplitPoint = {
 };
 
 /**
+ * Deduplicate split points by index, preferring ones with more information.
+ *
+ * Preference rules (when same index):
+ * - Prefer a split with `contentStartOffset` (needed for `lineStartsAfter` marker stripping)
+ * - Otherwise prefer a split with `meta` over one without
+ */
+export const dedupeSplitPoints = (splitPoints: SplitPoint[]): SplitPoint[] => {
+    const byIndex = new Map<number, SplitPoint>();
+    for (const p of splitPoints) {
+        const existing = byIndex.get(p.index);
+        if (!existing) {
+            byIndex.set(p.index, p);
+            continue;
+        }
+        const hasMoreInfo =
+            (p.contentStartOffset !== undefined && existing.contentStartOffset === undefined) ||
+            (p.meta !== undefined && existing.meta === undefined);
+        if (hasMoreInfo) {
+            byIndex.set(p.index, p);
+        }
+    }
+    const unique = [...byIndex.values()];
+    unique.sort((a, b) => a.index - b.index);
+    return unique;
+};
+
+/**
+ * If no structural rules produced segments, create a single segment spanning all pages.
+ * This allows breakpoint processing to still run.
+ */
+export const ensureFallbackSegment = (segments: Segment[], pages: Page[], normalizedContent: string[]): Segment[] => {
+    if (segments.length > 0 || pages.length === 0) {
+        return segments;
+    }
+    const firstPage = pages[0];
+    const lastPage = pages[pages.length - 1];
+    const allContent = normalizedContent.join('\n').trim();
+    if (!allContent) {
+        return segments;
+    }
+    const initialSeg: Segment = { content: allContent, from: firstPage.id };
+    if (lastPage.id !== firstPage.id) {
+        initialSeg.to = lastPage.id;
+    }
+    return [initialSeg];
+};
+
+const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, pageMap: PageMap): SplitPoint[] => {
+    const collectSplitPointsFromRule = (rule: SplitRule): SplitPoint[] => {
+        const { regex, usesCapture, captureNames, usesLineStartsAfter } = buildRuleRegex(rule);
+        const allMatches = findMatches(matchContent, regex, usesCapture, captureNames);
+        const constrainedMatches = filterByConstraints(allMatches, rule, pageMap.getId);
+        const finalMatches = filterByOccurrence(constrainedMatches, rule.occurrence);
+
+        return finalMatches.map((m) => {
+            const isLineStartsAfter = usesLineStartsAfter && m.captured !== undefined;
+            const markerLength = isLineStartsAfter ? m.end - m.captured!.length - m.start : 0;
+            return {
+                capturedContent: isLineStartsAfter ? undefined : m.captured,
+                contentStartOffset: isLineStartsAfter ? markerLength : undefined,
+                index: (rule.split ?? 'at') === 'at' ? m.start : m.end,
+                meta: rule.meta,
+                namedCaptures: m.namedCaptures,
+            };
+        });
+    };
+
+    return rules.flatMap(collectSplitPointsFromRule);
+};
+
+/**
  * Executes a regex against content and extracts match results with capture information.
  *
  * @param content - Full content string to search
@@ -445,472 +342,7 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
  * @param prefer - 'longer' for last match, 'shorter' for first match
  * @returns Processed segments with oversized ones broken up
  */
-const applyBreakpoints = (
-    segments: Segment[],
-    pages: Page[],
-    normalizedContent: string[], // OPTIMIZATION: Pre-normalized content from buildPageMap
-    maxPages: number,
-    breakpoints: Breakpoint[],
-    prefer: 'longer' | 'shorter',
-    logger?: Logger,
-): Segment[] => {
-    const findWindowEndPosition = (
-        remainingContent: string,
-        currentFromIdx: number,
-        windowEndIdx: number,
-        toIdx: number,
-        pageIds: number[],
-        normalizedPages: Map<number, NormalizedPage>,
-        cumulativeOffsets: number[],
-    ): number => {
-        // If the window already reaches the end of the segment, the window is the remaining content.
-        if (windowEndIdx >= toIdx) {
-            return remainingContent.length;
-        }
-
-        const findBoundaryNear = (nextIdx: number, expectedBoundary: number): number => {
-            const nextPageData = normalizedPages.get(pageIds[nextIdx]);
-            if (!nextPageData) {
-                return -1;
-            }
-
-            // Use progressively shorter prefixes until we find one that exists in remainingContent.
-            // This is important because the "next page" content might be truncated in the current
-            // segment due to structural split points early in that page (e.g. `##` headings).
-            const nextTrimmed = nextPageData.content.trimStart();
-            const candidateLengths = [80, 60, 40, 30, 20, 15];
-
-            // Anchor search near the expected boundary to avoid matching repeated phrases earlier in content.
-            const approx = Math.min(Math.max(0, expectedBoundary), remainingContent.length);
-            const searchStart = Math.max(0, approx - 10_000);
-            const searchEnd = Math.min(remainingContent.length, approx + 2_000);
-
-            for (const len of candidateLengths) {
-                const prefix = nextTrimmed.slice(0, Math.min(len, nextTrimmed.length)).trim();
-                if (!prefix) continue;
-
-                let pos = remainingContent.indexOf(prefix, searchStart);
-                while (pos !== -1 && pos <= searchEnd) {
-                    // Prefer matches that look like page boundaries (preceded by whitespace).
-                    if (pos > 0 && /\s/.test(remainingContent[pos - 1] ?? '')) {
-                        return pos;
-                    }
-                    pos = remainingContent.indexOf(prefix, pos + 1);
-                }
-
-                // Fallback: take the last occurrence at or before approx (still anchored).
-                const last = remainingContent.lastIndexOf(prefix, approx);
-                if (last > 0) {
-                    return last;
-                }
-            }
-
-            return -1;
-        };
-
-        // Desired boundary is the start of the page AFTER windowEndIdx.
-        // We locate that boundary within remainingContent using page prefix matching.
-        //
-        // IMPORTANT: We intentionally derive window boundaries from remainingContent, because
-        // structural rules (e.g. lineStartsAfter) can strip markers, shifting offsets relative
-        // to raw per-page concatenation. Using raw offsets can accidentally include text from
-        // the next page, violating maxPages.
-        const desiredNextIdx = windowEndIdx + 1;
-        const minNextIdx = currentFromIdx + 1;
-        const maxNextIdx = Math.min(desiredNextIdx, toIdx);
-
-        // Estimate how far into the current page `remainingContent` begins.
-        // This matters because remainingContent can start mid-page after a previous breakpoint split,
-        // so raw cumulativeOffsets (which assume page-start alignment) overestimate boundary positions.
-        let startOffsetInCurrentPage = 0;
-        const currentPageData = normalizedPages.get(pageIds[currentFromIdx]);
-        if (currentPageData) {
-            const remStart = remainingContent.trimStart().slice(0, Math.min(60, remainingContent.length));
-            const needle = remStart.slice(0, Math.min(30, remStart.length));
-            if (needle.length > 0) {
-                const idx = currentPageData.content.indexOf(needle);
-                if (idx > 0) {
-                    startOffsetInCurrentPage = idx;
-                }
-            }
-        }
-
-        // If we can't find the boundary for the desired next page, progressively fall back
-        // to earlier page boundaries (smaller window), which is conservative but still correct.
-        for (let nextIdx = maxNextIdx; nextIdx >= minNextIdx; nextIdx--) {
-            const expectedBoundary =
-                cumulativeOffsets[nextIdx] !== undefined && cumulativeOffsets[currentFromIdx] !== undefined
-                    ? Math.max(0, cumulativeOffsets[nextIdx] - cumulativeOffsets[currentFromIdx] - startOffsetInCurrentPage)
-                    : remainingContent.length;
-            const pos = findBoundaryNear(nextIdx, expectedBoundary);
-            if (pos > 0) return pos;
-        }
-
-        // As a last resort (should be rare), treat the entire remaining content as the window.
-        // This may under-enforce maxPages if boundary detection fails, but avoids infinite loops.
-        return remainingContent.length;
-    };
-
-    const findExclusionBreakPosition = (
-        currentFromIdx: number,
-        windowEndIdx: number,
-        toIdx: number,
-        pageIds: number[],
-        expandedBreakpoints: Array<{ excludeSet: Set<number> }>,
-        cumulativeOffsets: number[],
-    ): number => {
-        const startingPageId = pageIds[currentFromIdx];
-        const startingPageExcluded = expandedBreakpoints.some((bp) => bp.excludeSet.has(startingPageId));
-        if (startingPageExcluded && currentFromIdx < toIdx) {
-            // Output just this one page as a segment (break at next page boundary)
-            return cumulativeOffsets[currentFromIdx + 1] - cumulativeOffsets[currentFromIdx];
-        }
-
-        // Find the first excluded page AFTER the starting page (within window) and split BEFORE it
-        for (let pageIdx = currentFromIdx + 1; pageIdx <= windowEndIdx; pageIdx++) {
-            const pageId = pageIds[pageIdx];
-            const isExcluded = expandedBreakpoints.some((bp) => bp.excludeSet.has(pageId));
-            if (isExcluded) {
-                return cumulativeOffsets[pageIdx] - cumulativeOffsets[currentFromIdx];
-            }
-        }
-        return -1;
-    };
-
-    // Get page IDs in order
-    const pageIds = pages.map((p) => p.id);
-
-    // OPTIMIZATION: Build pageId to index Map for O(1) lookups instead of O(P) indexOf
-    const pageIdToIndex = new Map(pageIds.map((id, i) => [id, i]));
-
-    // OPTIMIZATION: Build normalized pages Map from pre-normalized content
-    const normalizedPages = new Map<number, NormalizedPage>();
-    for (let i = 0; i < pages.length; i++) {
-        const content = normalizedContent[i];
-        normalizedPages.set(pages[i].id, { content, index: i, length: content.length });
-    }
-
-    // OPTIMIZATION: Pre-compute cumulative offsets for O(1) window size calculation
-    const cumulativeOffsets: number[] = [0];
-    let totalOffset = 0;
-    for (let i = 0; i < pageIds.length; i++) {
-        const pageData = normalizedPages.get(pageIds[i]);
-        totalOffset += pageData ? pageData.length : 0;
-        if (i < pageIds.length - 1) {
-            totalOffset += 1; // separator between pages
-        }
-        cumulativeOffsets.push(totalOffset);
-    }
-
-    // Use extracted helper to expand breakpoints
-    // Create pattern processor function for breakpoint-utils
-    const patternProcessor = (p: string) => processPattern(p, false).pattern;
-    const expandedBreakpoints = expandBreakpoints(breakpoints, patternProcessor);
-
-    const result: Segment[] = [];
-
-    logger?.info?.('Starting breakpoint processing', { maxPages, segmentCount: segments.length });
-
-    for (const segment of segments) {
-        const fromIdx = pageIdToIndex.get(segment.from) ?? -1;
-        const toIdx = segment.to !== undefined ? (pageIdToIndex.get(segment.to) ?? fromIdx) : fromIdx;
-
-        logger?.debug?.('Processing segment', {
-            contentLength: segment.content.length,
-            contentPreview: segment.content.slice(0, 100),
-            from: segment.from,
-            fromIdx,
-            to: segment.to,
-            toIdx,
-        });
-
-        // Calculate span using actual page IDs (not array indices)
-        const segmentSpan = (segment.to ?? segment.from) - segment.from;
-        // If segment span is within limit AND no pages are excluded, keep as-is
-        // Check if any page in this segment is excluded by any breakpoint
-        const hasExclusions = expandedBreakpoints.some((bp) =>
-            hasExcludedPageInRange(bp.excludeSet, pageIds, fromIdx, toIdx),
-        );
-
-        if (segmentSpan <= maxPages && !hasExclusions) {
-            logger?.trace?.('Segment within limit, keeping as-is');
-
-            result.push(segment);
-            continue;
-        }
-
-        logger?.debug?.('Segment exceeds limit or has exclusions, breaking it up');
-
-        // Rebuild content for this segment from individual pages
-        // We need to work with the actual page content, not the merged segment content
-
-        // Process this segment, potentially breaking it into multiple
-        let remainingContent = segment.content;
-        let currentFromIdx = fromIdx;
-        let isFirstPiece = true;
-        let iterationCount = 0;
-        const maxIterations = 10000; // Safety limit
-
-        while (currentFromIdx <= toIdx) {
-            iterationCount++;
-            if (iterationCount > maxIterations) {
-                logger?.error?.('INFINITE LOOP DETECTED! Breaking out, you should report this bug', {
-                    iterationCount: maxIterations,
-                });
-                logger?.error?.('Loop state', {
-                    currentFromIdx,
-                    remainingContentLength: remainingContent.length,
-                    toIdx,
-                });
-                break;
-            }
-
-            // Calculate remaining span using actual page IDs (not array indices)
-            const remainingSpan = pageIds[toIdx] - pageIds[currentFromIdx];
-
-            logger?.trace?.('Loop iteration', {
-                currentFromIdx,
-                currentPageId: pageIds[currentFromIdx],
-                iterationCount,
-                remainingContentLength: remainingContent.length,
-                remainingContentPreview: remainingContent.slice(0, 80),
-                remainingSpan,
-                toIdx,
-                toPageId: pageIds[toIdx],
-            });
-
-            // Check if any page in remaining segment is excluded
-            const remainingHasExclusions = expandedBreakpoints.some((bp) =>
-                hasExcludedPageInRange(bp.excludeSet, pageIds, currentFromIdx, toIdx),
-            );
-
-            // If remaining span is within limit AND no exclusions, output and done
-            if (remainingSpan <= maxPages && !remainingHasExclusions) {
-                logger?.debug?.('Remaining span within limit, outputting final segment');
-
-                const finalSeg = createSegment(
-                    remainingContent,
-                    pageIds[currentFromIdx],
-                    currentFromIdx !== toIdx ? pageIds[toIdx] : undefined,
-                    isFirstPiece ? segment.meta : undefined,
-                );
-                if (finalSeg) {
-                    result.push(finalSeg);
-                }
-                break;
-            }
-
-            // Need to break within maxPages window (based on page IDs, not indices)
-            // Find the last page index where pageId <= currentPageId + maxPages
-            const currentPageId = pageIds[currentFromIdx];
-            const maxWindowPageId = currentPageId + maxPages;
-            let windowEndIdx = currentFromIdx;
-            for (let i = currentFromIdx; i <= toIdx; i++) {
-                if (pageIds[i] <= maxWindowPageId) {
-                    windowEndIdx = i;
-                } else {
-                    break;
-                }
-            }
-
-            const windowEndPosition = findWindowEndPosition(
-                remainingContent,
-                currentFromIdx,
-                windowEndIdx,
-                toIdx,
-                pageIds,
-                normalizedPages,
-                cumulativeOffsets,
-            );
-
-            logger?.trace?.('Window calculation', {
-                currentPageId,
-                maxWindowPageId,
-                windowEndIdx,
-                windowEndPageId: pageIds[windowEndIdx],
-                windowEndPosition,
-            });
-
-            // Special case: if we have exclusions IN THE CURRENT WINDOW, handle them
-            // Check if any page in the WINDOW (not entire segment) is excluded
-            const windowHasExclusions = expandedBreakpoints.some((bp) =>
-                hasExcludedPageInRange(bp.excludeSet, pageIds, currentFromIdx, windowEndIdx),
-            );
-
-            let breakPosition = -1;
-
-            if (windowHasExclusions) {
-                logger?.trace?.('Window has exclusions, finding exclusion break position');
-
-                breakPosition = findExclusionBreakPosition(
-                    currentFromIdx,
-                    windowEndIdx,
-                    toIdx,
-                    pageIds,
-                    expandedBreakpoints,
-                    cumulativeOffsets,
-                );
-
-                logger?.trace?.('Exclusion break position', { breakPosition });
-            }
-
-            // If no exclusion-based split found, use normal breakpoint finding
-            if (breakPosition <= 0) {
-                // Use extracted helper to find break position
-                const breakpointCtx: BreakpointContext = {
-                    expandedBreakpoints,
-                    normalizedPages,
-                    pageIds,
-                    prefer,
-                };
-
-                logger?.trace?.('Finding break position using patterns...');
-
-                breakPosition = findBreakPosition(
-                    remainingContent,
-                    currentFromIdx,
-                    toIdx,
-                    windowEndIdx,
-                    windowEndPosition,
-                    breakpointCtx,
-                );
-
-                logger?.trace?.('Pattern break position', { breakPosition });
-            }
-
-            if (breakPosition <= 0) {
-                logger?.debug?.('No pattern matched, falling back to page boundary');
-
-                // No pattern matched - fallback to page boundary split
-                // If only one page in window, output it and continue to next page
-                if (windowEndIdx === currentFromIdx) {
-                    logger?.trace?.('Single page window, outputting page and advancing');
-
-                    // Output this single page as a segment
-                    const pageBoundaryPos = findWindowEndPosition(
-                        remainingContent,
-                        currentFromIdx,
-                        currentFromIdx,
-                        toIdx,
-                        pageIds,
-                        normalizedPages,
-                        cumulativeOffsets,
-                    );
-                    const pageContent = remainingContent.slice(0, pageBoundaryPos);
-                    const pageSeg = createSegment(
-                        pageContent.trim(),
-                        pageIds[currentFromIdx],
-                        undefined,
-                        isFirstPiece ? segment.meta : undefined,
-                    );
-                    if (pageSeg) {
-                        result.push(pageSeg);
-                    }
-                    // Move to next page
-                    remainingContent = remainingContent.slice(pageContent.length).trim();
-                    currentFromIdx++;
-                    isFirstPiece = false;
-
-                    logger?.trace?.('After single page', {
-                        currentFromIdx,
-                        remainingContentLength: remainingContent.length,
-                    });
-
-                    continue;
-                }
-                // Multi-page window with no pattern match - output entire window and continue
-                breakPosition = windowEndPosition;
-                logger?.trace?.('Multi-page window, using full window break position', { breakPosition });
-            }
-
-            const pieceContent = remainingContent.slice(0, breakPosition).trim();
-
-            logger?.trace?.('Piece extracted', {
-                breakPosition,
-                pieceContentLength: pieceContent.length,
-                pieceContentPreview: pieceContent.slice(0, 80),
-            });
-
-            // Find the actual starting and ending pages for this piece content
-            // currentFromIdx might not be the actual starting page if content was split across pages
-            const actualStartIdx = pieceContent
-                ? findActualStartPage(pieceContent, currentFromIdx, toIdx, pageIds, normalizedPages)
-                : currentFromIdx;
-            const actualEndIdx = pieceContent
-                ? findActualEndPage(pieceContent, actualStartIdx, windowEndIdx, pageIds, normalizedPages)
-                : currentFromIdx;
-
-            logger?.trace?.('Actual page indices', {
-                actualEndIdx,
-                actualStartIdx,
-                pieceHasContent: !!pieceContent,
-            });
-
-            if (pieceContent) {
-                const pieceSeg = createSegment(
-                    pieceContent,
-                    pageIds[actualStartIdx],
-                    actualEndIdx > actualStartIdx ? pageIds[actualEndIdx] : undefined,
-                    isFirstPiece ? segment.meta : undefined,
-                );
-                if (pieceSeg) {
-                    result.push(pieceSeg);
-
-                    logger?.debug?.('Created segment', {
-                        contentLength: pieceSeg.content.length,
-                        from: pieceSeg.from,
-                        to: pieceSeg.to,
-                    });
-                }
-            }
-
-            // Update for next iteration
-            const prevRemainingLength = remainingContent.length;
-            remainingContent = remainingContent.slice(breakPosition).trim();
-
-            logger?.trace?.('After slicing remainingContent', {
-                newLength: remainingContent.length,
-                prevLength: prevRemainingLength,
-                slicedAmount: breakPosition,
-            });
-
-            // If no remaining content, we're done with this segment
-            if (!remainingContent) {
-                logger?.debug?.('No remaining content, breaking out of loop');
-                break;
-            }
-
-            // Find which page the remaining content actually starts on
-            // The next piece starts from actualEndIdx OR the next page if the break was at a page boundary
-            let nextFromIdx = actualEndIdx;
-
-            // Check if remaining content starts with content from the next page
-            if (remainingContent && actualEndIdx + 1 <= toIdx) {
-                const nextPageData = normalizedPages.get(pageIds[actualEndIdx + 1]);
-                if (nextPageData) {
-                    const nextPrefix = nextPageData.content.slice(0, Math.min(30, nextPageData.length));
-                    if (nextPrefix && remainingContent.startsWith(nextPrefix)) {
-                        nextFromIdx = actualEndIdx + 1;
-                        logger?.trace?.('Content starts with next page prefix', { advancingTo: nextFromIdx });
-                    }
-                }
-            }
-
-            logger?.trace?.('End of iteration', {
-                nextFromIdx,
-                prevCurrentFromIdx: currentFromIdx,
-                willAdvance: nextFromIdx !== currentFromIdx,
-            });
-
-            currentFromIdx = nextFromIdx;
-            isFirstPiece = false;
-        }
-    }
-
-    logger?.info?.('Breakpoint processing completed', { resultCount: result.length });
-
-    return result;
-};
+// applyBreakpoints implementation moved to breakpoint-processor.ts to reduce complexity in this module.
 
 /**
  * Segments pages of content based on pattern-matching rules.
@@ -961,84 +393,27 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
     }
 
     const { content: matchContent, normalizedPages: normalizedContent, pageMap } = buildPageMap(pages);
-    const splitPoints: SplitPoint[] = [];
-
-    // Process rules to find structural split points
-    for (const rule of rules) {
-        const { regex, usesCapture, captureNames, usesLineStartsAfter } = buildRuleRegex(rule);
-        const allMatches = findMatches(matchContent, regex, usesCapture, captureNames);
-
-        // Filter matches by page ID constraints
-        const constrainedMatches = filterByConstraints(allMatches, rule, pageMap.getId);
-
-        // Apply occurrence filtering (global)
-        const finalMatches = filterByOccurrence(constrainedMatches, rule.occurrence);
-
-        for (const m of finalMatches) {
-            // For lineStartsAfter: we want to exclude the marker from content.
-            // - Split at m.start so previous segment doesn't include the marker
-            // - Set contentStartOffset to skip the marker when slicing this segment
-            const isLineStartsAfter = usesLineStartsAfter && m.captured !== undefined;
-            const markerLength = isLineStartsAfter ? m.end - m.captured!.length - m.start : 0;
-
-            splitPoints.push({
-                // lineStartsAfter: DON'T use capturedContent, let normal slicing extend to next split
-                capturedContent: isLineStartsAfter ? undefined : m.captured,
-                // lineStartsAfter: skip the marker when slicing content
-                contentStartOffset: isLineStartsAfter ? markerLength : undefined,
-                index: (rule.split ?? 'at') === 'at' ? m.start : m.end,
-                meta: rule.meta,
-                namedCaptures: m.namedCaptures,
-            });
-        }
-    }
-
-    // Deduplicate split points by index, preferring ones with more information
-    // (contentStartOffset or meta over plain splits)
-    const byIndex = new Map<number, SplitPoint>();
-    for (const p of splitPoints) {
-        const existing = byIndex.get(p.index);
-        if (!existing) {
-            byIndex.set(p.index, p);
-        } else {
-            // Prefer split with contentStartOffset (for lineStartsAfter stripping)
-            // or with meta over one without
-            const hasMoreInfo =
-                (p.contentStartOffset !== undefined && existing.contentStartOffset === undefined) ||
-                (p.meta !== undefined && existing.meta === undefined);
-            if (hasMoreInfo) {
-                byIndex.set(p.index, p);
-            }
-        }
-    }
-    const unique = [...byIndex.values()];
-    unique.sort((a, b) => a.index - b.index);
+    const splitPoints = collectSplitPointsFromRules(rules, matchContent, pageMap);
+    const unique = dedupeSplitPoints(splitPoints);
 
     // Build initial segments from structural rules
     let segments = buildSegments(unique, matchContent, pageMap, rules);
 
-    // Handle case where no rules or no split points - create one segment from all content
-    // This allows breakpoints to still process the content
-    if (segments.length === 0 && pages.length > 0) {
-        const firstPage = pages[0];
-        const lastPage = pages[pages.length - 1];
-        // OPTIMIZATION: Reuse pre-normalized content from buildPageMap instead of re-normalizing
-        const allContent = normalizedContent.join('\n');
-        const initialSeg: Segment = {
-            content: allContent.trim(),
-            from: firstPage.id,
-        };
-        if (lastPage.id !== firstPage.id) {
-            initialSeg.to = lastPage.id;
-        }
-        if (initialSeg.content) {
-            segments = [initialSeg];
-        }
-    }
+    segments = ensureFallbackSegment(segments, pages, normalizedContent);
 
     // Apply breakpoints post-processing for oversized segments
     if (maxPages !== undefined && maxPages >= 0 && breakpoints?.length) {
-        return applyBreakpoints(segments, pages, normalizedContent, maxPages, breakpoints, prefer, logger);
+        const patternProcessor = (p: string) => processPattern(p, false).pattern;
+        return applyBreakpoints(
+            segments,
+            pages,
+            normalizedContent,
+            maxPages,
+            breakpoints,
+            prefer,
+            patternProcessor,
+            logger,
+        );
     }
 
     return segments;
