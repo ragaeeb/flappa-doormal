@@ -74,6 +74,18 @@ describe('tokens', () => {
             expect(containsTokens('{raqms}')).toBeFalse();
             expect(containsTokens('{{raqms')).toBeFalse();
         });
+
+        it('should detect template patterns', () => {
+            expect(containsTokens('{{raqm}}')).toBeTrue();
+            expect(containsTokens('، {{raqms}}')).toBeTrue();
+            expect(containsTokens('{{harf}}{{dash}}')).toBeTrue();
+        });
+
+        it('should reject non-template strings', () => {
+            expect(containsTokens('hello')).toBeFalse();
+            expect(containsTokens('/regex/')).toBeFalse();
+            expect(containsTokens('{incomplete}')).toBeFalse();
+        });
     });
 
     describe('expandTokens', () => {

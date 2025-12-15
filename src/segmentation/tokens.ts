@@ -148,6 +148,17 @@ const BASE_TOKENS: Record<string, string> = {
     harf: '[أ-ي]',
 
     /**
+     * One or more Arabic letters with optional spaces between them - matches sequences like "د ت سي ق".
+     *
+     * Useful for matching abbreviated author/narrator codes commonly found in
+     * hadith and narrator biography books. Requires at least one Arabic letter.
+     *
+     * @example '{{harfs}}' matches 'د ت سي ق' in '١١١٨ د ت سي ق: حجاج'
+     * @example '{{raqms:num}} {{harfs}}:' matches number + abbreviations + colon
+     */
+    harfs: '[أ-ي](?:[أ-ي\\s]*[أ-ي])?',
+
+    /**
      * Book marker - Arabic word for "book" (كتاب).
      *
      * Commonly used in hadith collections to mark major book divisions.

@@ -90,6 +90,7 @@ Replace regex with readable tokens:
 | `{{raqm}}` | Single Arabic digit | `[\\u0660-\\u0669]` |
 | `{{dash}}` | Dash variants | `[-–—ـ]` |
 | `{{harf}}` | Arabic letter | `[أ-ي]` |
+| `{{harfs}}` | Arabic letters with spaces | `[أ-ي](?:[أ-ي\s]*[أ-ي])?` |
 | `{{numbered}}` | Hadith numbering `٢٢ - ` | `{{raqms}} {{dash}} ` |
 | `{{fasl}}` | Section markers | `فصل\|مسألة` |
 | `{{tarqim}}` | Punctuation marks | `[.!?؟؛]` |
@@ -165,6 +166,10 @@ For full regex control (character classes, capturing groups), use the `regex` pa
 
 // Capturing group (test|text) matches either
 { regex: '^(test|text) ', split: 'at' }
+
+// Named capture groups extract metadata from raw regex too!
+{ regex: '^(?<num>[٠-٩]+)\\s+[أ-ي\\s]+:\\s*(.+)' }
+// meta.num = matched number, content = captured (.+) group
 ```
 
 ### 6. Page Constraints
@@ -288,6 +293,22 @@ const segments = segmentPages(pages, {
 // Input: '٥ أ - البند الأول'
 // meta: { num: '٥' }  // harf not captured (no :name suffix)
 ```
+
+### Narrator Abbreviation Codes
+
+Use `{{harfs}}` for matching Arabic letter abbreviations with spaces (common in narrator biography books):
+
+```typescript
+const segments = segmentPages(pages, {
+  rules: [{
+    lineStartsAfter: ['{{raqms:num}} {{harfs}}:'],
+    split: 'at'
+  }]
+});
+
+// Matches: ١١١٨ د ت سي ق: حجاج بن دينار
+// meta: { num: '١١١٨' }
+// content: 'حجاج بن دينار' (abbreviations stripped)
 
 ### Sentence-Based Splitting (Last Period Per Page)
 

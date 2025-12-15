@@ -71,9 +71,9 @@ describe('rule-regex', () => {
     });
 
     describe('determineUsesCapture', () => {
-        it('should return true when named captures exist even if no anonymous captures', () => {
+        it('should return false when only named captures exist (named captures are for metadata only)', () => {
             const { regex, captureNames } = buildTemplateRegexSource('^{{raqms:num}} {{dash}} ');
-            expect(determineUsesCapture(regex, captureNames)).toBe(true);
+            expect(determineUsesCapture(regex, captureNames)).toBe(false);
         });
     });
 
@@ -93,5 +93,3 @@ describe('rule-regex', () => {
         });
     });
 });
-
-
