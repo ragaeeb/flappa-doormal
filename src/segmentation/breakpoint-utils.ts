@@ -9,6 +9,12 @@
 
 import type { Breakpoint, BreakpointRule, PageRange, Segment } from './types.js';
 
+const WINDOW_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15] as const;
+// For page-join normalization we need to handle cases where only the very beginning of the next page
+// is present in the current segment (e.g. the segment ends right before the next structural marker).
+// That can be as short as a few words, so we allow shorter prefixes here.
+const JOINER_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15, 12, 10, 8, 6] as const;
+
 /**
  * Normalizes a breakpoint to the object form.
  * Strings are converted to { pattern: str } with no constraints.
@@ -207,6 +213,224 @@ export const expandBreakpoints = (breakpoints: Breakpoint[], processPattern: Pat
 export type NormalizedPage = { content: string; length: number; index: number };
 
 /**
+ * Applies a configured joiner at detected page boundaries within a multi-page content chunk.
+ *
+ * This is used for breakpoint-generated segments which don't have access to the original
+ * `pageMap.pageBreaks` offsets. We detect page starts sequentially by searching for each page's
+ * prefix after the previous boundary, then replace ONLY the single newline immediately before
+ * that page start.
+ *
+ * This avoids converting real in-page newlines, while still normalizing page joins consistently.
+ */
+export const applyPageJoinerBetweenPages = (
+    content: string,
+    fromIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    joiner: 'space' | 'newline',
+): string => {
+    if (joiner === 'newline' || fromIdx >= toIdx || !content.includes('\n')) {
+        return content;
+    }
+
+    let updated = content;
+    let searchFrom = 0;
+
+    for (let pi = fromIdx + 1; pi <= toIdx; pi++) {
+        const pageData = normalizedPages.get(pageIds[pi]);
+        if (!pageData) continue;
+
+        const trimmed = pageData.content.trimStart();
+        let found = -1;
+        for (const len of JOINER_PREFIX_LENGTHS) {
+            const prefix = trimmed.slice(0, Math.min(len, trimmed.length)).trim();
+            if (!prefix) continue;
+
+            const pos = updated.indexOf(prefix, searchFrom);
+            if (pos > 0) {
+                found = pos;
+                break;
+            }
+        }
+
+        if (found > 0) {
+            if (updated[found - 1] === '\n') {
+                updated = `${updated.slice(0, found - 1)} ${updated.slice(found)}`;
+            }
+            searchFrom = found;
+        }
+    }
+
+    return updated;
+};
+
+/**
+ * Estimates how far into the current page `remainingContent` begins.
+ *
+ * During breakpoint processing, `remainingContent` can begin mid-page after a previous split.
+ * When that happens, raw cumulative page offsets (computed from full page starts) can overestimate
+ * expected boundary positions. This helper computes an approximate starting offset by matching
+ * a short prefix of `remainingContent` inside the current page content.
+ */
+export const estimateStartOffsetInCurrentPage = (
+    remainingContent: string,
+    currentFromIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+): number => {
+    const currentPageData = normalizedPages.get(pageIds[currentFromIdx]);
+    if (!currentPageData) {
+        return 0;
+    }
+
+    const remStart = remainingContent.trimStart().slice(0, Math.min(60, remainingContent.length));
+    const needle = remStart.slice(0, Math.min(30, remStart.length));
+    if (!needle) {
+        return 0;
+    }
+
+    const idx = currentPageData.content.indexOf(needle);
+    return idx > 0 ? idx : 0;
+};
+
+/**
+ * Attempts to find the start position of a target page within remainingContent,
+ * anchored near an expected boundary position to reduce collisions.
+ *
+ * This is used to define breakpoint windows in terms of actual content being split, rather than
+ * raw per-page offsets which can desync when structural rules strip markers.
+ */
+export const findPageStartNearExpectedBoundary = (
+    remainingContent: string,
+    currentFromIdx: number,
+    targetPageIdx: number,
+    expectedBoundary: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+): number => {
+    const targetPageData = normalizedPages.get(pageIds[targetPageIdx]);
+    if (!targetPageData) {
+        return -1;
+    }
+
+    // Anchor search near the expected boundary to avoid matching repeated phrases earlier in content.
+    const approx = Math.min(Math.max(0, expectedBoundary), remainingContent.length);
+    const searchStart = Math.max(0, approx - 10_000);
+    const searchEnd = Math.min(remainingContent.length, approx + 2_000);
+
+    // The target page content might be truncated in the current segment due to structural split points
+    // early in that page (e.g. headings). Use progressively shorter prefixes.
+    const targetTrimmed = targetPageData.content.trimStart();
+    for (const len of WINDOW_PREFIX_LENGTHS) {
+        const prefix = targetTrimmed.slice(0, Math.min(len, targetTrimmed.length)).trim();
+        if (!prefix) continue;
+
+        let pos = remainingContent.indexOf(prefix, searchStart);
+        while (pos !== -1 && pos <= searchEnd) {
+            // Prefer matches that look like page boundaries (preceded by whitespace).
+            if (pos > 0 && /\s/.test(remainingContent[pos - 1] ?? '')) {
+                return pos;
+            }
+            pos = remainingContent.indexOf(prefix, pos + 1);
+        }
+
+        // Fallback: take the last occurrence at or before approx (still anchored).
+        const last = remainingContent.lastIndexOf(prefix, approx);
+        if (last > 0) {
+            return last;
+        }
+    }
+
+    return -1;
+};
+
+/**
+ * Finds the end position of a breakpoint window inside `remainingContent`.
+ *
+ * The window end is defined as the start of the page AFTER `windowEndIdx` (i.e. `windowEndIdx + 1`),
+ * found within the actual `remainingContent` string being split. This avoids relying on raw page offsets
+ * that can diverge when structural rules strip markers (e.g. `lineStartsAfter`).
+ */
+export const findBreakpointWindowEndPosition = (
+    remainingContent: string,
+    currentFromIdx: number,
+    windowEndIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    cumulativeOffsets: number[],
+): number => {
+    // If the window already reaches the end of the segment, the window is the remaining content.
+    if (windowEndIdx >= toIdx) {
+        return remainingContent.length;
+    }
+
+    const desiredNextIdx = windowEndIdx + 1;
+    const minNextIdx = currentFromIdx + 1;
+    const maxNextIdx = Math.min(desiredNextIdx, toIdx);
+
+    const startOffsetInCurrentPage = estimateStartOffsetInCurrentPage(remainingContent, currentFromIdx, pageIds, normalizedPages);
+
+    // If we can't find the boundary for the desired next page, progressively fall back
+    // to earlier page boundaries (smaller window), which is conservative but still correct.
+    for (let nextIdx = maxNextIdx; nextIdx >= minNextIdx; nextIdx--) {
+        const expectedBoundary =
+            cumulativeOffsets[nextIdx] !== undefined && cumulativeOffsets[currentFromIdx] !== undefined
+                ? Math.max(0, cumulativeOffsets[nextIdx] - cumulativeOffsets[currentFromIdx] - startOffsetInCurrentPage)
+                : remainingContent.length;
+
+        const pos = findPageStartNearExpectedBoundary(
+            remainingContent,
+            currentFromIdx,
+            nextIdx,
+            expectedBoundary,
+            pageIds,
+            normalizedPages,
+        );
+        if (pos > 0) {
+            return pos;
+        }
+    }
+
+    // As a last resort (should be rare), treat the entire remaining content as the window.
+    // This may under-enforce maxPages if boundary detection fails, but avoids infinite loops.
+    return remainingContent.length;
+};
+
+/**
+ * Finds exclusion-based break position using raw cumulative offsets.
+ *
+ * This is used to ensure pages excluded by breakpoints are never merged into the same output segment.
+ * Returns a break position relative to the start of `remainingContent` (i.e. the currentFromIdx start).
+ */
+export const findExclusionBreakPosition = (
+    currentFromIdx: number,
+    windowEndIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    expandedBreakpoints: Array<{ excludeSet: Set<number> }>,
+    cumulativeOffsets: number[],
+): number => {
+    const startingPageId = pageIds[currentFromIdx];
+    const startingPageExcluded = expandedBreakpoints.some((bp) => bp.excludeSet.has(startingPageId));
+    if (startingPageExcluded && currentFromIdx < toIdx) {
+        // Output just this one page as a segment (break at next page boundary)
+        return cumulativeOffsets[currentFromIdx + 1] - cumulativeOffsets[currentFromIdx];
+    }
+
+    // Find the first excluded page AFTER the starting page (within window) and split BEFORE it
+    for (let pageIdx = currentFromIdx + 1; pageIdx <= windowEndIdx; pageIdx++) {
+        const pageId = pageIds[pageIdx];
+        const isExcluded = expandedBreakpoints.some((bp) => bp.excludeSet.has(pageId));
+        if (isExcluded) {
+            return cumulativeOffsets[pageIdx] - cumulativeOffsets[currentFromIdx];
+        }
+    }
+    return -1;
+};
+
+/**
  * Finds the actual ending page index by searching backwards for page content prefix.
  * Used to determine which page a segment actually ends on based on content matching.
  *
@@ -289,7 +513,6 @@ export const findActualStartPage = (
 export type BreakpointContext = {
     pageIds: number[];
     normalizedPages: Map<number, NormalizedPage>;
-    cumulativeOffsets: number[];
     expandedBreakpoints: ExpandedBreakpoint[];
     prefer: 'longer' | 'shorter';
 };
@@ -384,9 +607,10 @@ export const findBreakPosition = (
     currentFromIdx: number,
     toIdx: number,
     windowEndIdx: number,
+    windowEndPosition: number,
     ctx: BreakpointContext,
 ): number => {
-    const { pageIds, normalizedPages, cumulativeOffsets, expandedBreakpoints, prefer } = ctx;
+    const { pageIds, normalizedPages, expandedBreakpoints, prefer } = ctx;
 
     for (const { rule, regex, excludeSet, skipWhenRegex } of expandedBreakpoints) {
         // Check if this breakpoint applies to the current segment's starting page
@@ -406,29 +630,23 @@ export const findBreakPosition = (
 
         // Handle page boundary (empty pattern)
         if (regex === null) {
+            // Break at the window boundary (i.e. start of the page AFTER windowEndIdx)
+            // Prefer using detected next-page position if available, but never exceed windowEndPosition.
             const nextPageIdx = windowEndIdx + 1;
             if (nextPageIdx <= toIdx) {
                 const nextPageData = normalizedPages.get(pageIds[nextPageIdx]);
                 if (nextPageData) {
                     const pos = findNextPagePosition(remainingContent, nextPageData);
                     if (pos > 0) {
-                        return pos;
+                        return Math.min(pos, windowEndPosition, remainingContent.length);
                     }
                 }
             }
-            // Fallback to cumulative offsets
-            return Math.min(
-                cumulativeOffsets[windowEndIdx + 1] - cumulativeOffsets[currentFromIdx],
-                remainingContent.length,
-            );
+            return Math.min(windowEndPosition, remainingContent.length);
         }
 
         // Find matches within window
-        const windowEndPosition = Math.min(
-            cumulativeOffsets[windowEndIdx + 1] - cumulativeOffsets[currentFromIdx],
-            remainingContent.length,
-        );
-        const windowContent = remainingContent.slice(0, windowEndPosition);
+        const windowContent = remainingContent.slice(0, Math.min(windowEndPosition, remainingContent.length));
         const breakPos = findPatternBreakPosition(windowContent, regex, prefer);
         if (breakPos > 0) {
             return breakPos;

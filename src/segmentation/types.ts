@@ -634,6 +634,20 @@ export type SegmentationOptions = {
     prefer?: 'longer' | 'shorter';
 
     /**
+     * How to join content across page boundaries in OUTPUT segments.
+     *
+     * Internally, pages are still concatenated with `\\n` for matching (multiline regex),
+     * but when a segment spans multiple pages, the inserted page-boundary separator is
+     * normalized for output.
+     *
+     * - `'space'`: Join pages with a single space (default)
+     * - `'newline'`: Preserve page boundary as a newline
+     *
+     * @default 'space'
+     */
+    pageJoiner?: 'space' | 'newline';
+
+    /**
      * Optional logger for debugging segmentation.
      *
      * Provide a logger to receive detailed information about the segmentation
