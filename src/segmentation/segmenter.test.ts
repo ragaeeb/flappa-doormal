@@ -133,6 +133,25 @@ describe('segmenter', () => {
             expect(result[1]).toMatchObject({ content: 'باب الزكاة', from: 2 });
         });
 
+        it('should respect min/max/exclude constraints for fuzzy token lineStartsWith', () => {
+            const pages: Page[] = [
+                { id: 1, content: 'بَابُ الإيمان\nx' },
+                { id: 2, content: 'بَابُ الطهارة\ny' },
+                { id: 3, content: 'بَابُ الزكاة\nz' },
+            ];
+
+            const rules: SplitRule[] = [
+                { fuzzy: true, lineStartsWith: ['{{bab}}'], split: 'at', meta: { type: 'chapter' }, min: 2, exclude: [3] },
+            ];
+
+            const result = segmentPages(pages, { rules });
+
+            // Only page 2 should match; page 1 excluded by min, page 3 excluded by exclude.
+            expect(result.some((s) => s.from === 2 && s.meta?.type === 'chapter')).toBe(true);
+            expect(result.some((s) => s.from === 1 && s.meta?.type === 'chapter')).toBe(false);
+            expect(result.some((s) => s.from === 3 && s.meta?.type === 'chapter')).toBe(false);
+        });
+
         // ─────────────────────────────────────────────────────────────
         // lineStartsWith syntax sugar tests
         // ─────────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@
 
 import { applyBreakpoints } from './breakpoint-processor.js';
 import { isPageExcluded } from './breakpoint-utils.js';
+import { compileFastFuzzyTokenRule, matchFastFuzzyTokenAt, type FastFuzzyTokenRule } from './fast-fuzzy-prefix.js';
 import {
     anyRuleAllowsId,
     extractNamedCaptures,
@@ -208,10 +209,21 @@ export const ensureFallbackSegment = (
 const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, pageMap: PageMap): SplitPoint[] => {
     const combinableRules: { rule: SplitRule; prefix: string; index: number }[] = [];
     const standaloneRules: SplitRule[] = [];
+    const fastFuzzyRules: Array<{ compiled: FastFuzzyTokenRule; rule: SplitRule; ruleIndex: number }> = [];
 
-    // Separate rules into combinable and standalone
+    // Separate rules into combinable, standalone, and fast-fuzzy
     rules.forEach((rule, index) => {
         let isCombinable = true;
+
+        // Fast-path: fuzzy + lineStartsWith + single token pattern like {{kitab}}
+        // If eligible, handle separately and do NOT include in combined OR standalone regex paths.
+        if ((rule as { fuzzy?: boolean }).fuzzy && 'lineStartsWith' in rule && Array.isArray(rule.lineStartsWith)) {
+            const compiled = rule.lineStartsWith.length === 1 ? compileFastFuzzyTokenRule(rule.lineStartsWith[0]) : null;
+            if (compiled) {
+                fastFuzzyRules.push({ compiled, rule, ruleIndex: index });
+                return; // handled by fast path
+            }
+        }
 
         // Raw regex rules are combinable ONLY if they don't use named captures, backreferences, or anonymous captures
         if ('regex' in rule && rule.regex) {
@@ -233,6 +245,57 @@ const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, p
 
     // Store split points by rule index to apply occurrence filtering later
     const splitPointsByRule = new Map<number, SplitPoint[]>();
+
+    // Fast fuzzy prefix scan at line starts (only for eligible fuzzy token rules)
+    if (fastFuzzyRules.length > 0) {
+        // Stream page boundary cursor to avoid O(log n) getId calls in hot loop.
+        let boundaryIdx = 0;
+        let currentBoundary = pageMap.boundaries[boundaryIdx];
+        const advanceBoundaryTo = (offset: number) => {
+            while (currentBoundary && offset > currentBoundary.end && boundaryIdx < pageMap.boundaries.length - 1) {
+                boundaryIdx++;
+                currentBoundary = pageMap.boundaries[boundaryIdx];
+            }
+        };
+
+        const recordSplitPoint = (ruleIndex: number, sp: SplitPoint) => {
+            if (!splitPointsByRule.has(ruleIndex)) splitPointsByRule.set(ruleIndex, []);
+            splitPointsByRule.get(ruleIndex)!.push(sp);
+        };
+
+        // Line starts are offset 0 and any char after '\n'
+        for (let lineStart = 0; lineStart <= matchContent.length; ) {
+            advanceBoundaryTo(lineStart);
+            const pageId = currentBoundary?.id ?? 0;
+
+            // If lineStart is at end-of-string, stop.
+            if (lineStart >= matchContent.length) break;
+
+            // Try each eligible rule (small set).
+            for (const { compiled, rule, ruleIndex } of fastFuzzyRules) {
+                // Apply min/max/exclude constraints
+                const passesConstraints =
+                    (rule.min === undefined || pageId >= rule.min) &&
+                    (rule.max === undefined || pageId <= rule.max) &&
+                    !isPageExcluded(pageId, rule.exclude);
+                if (!passesConstraints) continue;
+
+                const end = matchFastFuzzyTokenAt(matchContent, lineStart, compiled);
+                if (end === null) continue;
+
+                const splitIndex = (rule.split ?? 'at') === 'at' ? lineStart : end;
+                recordSplitPoint(ruleIndex, {
+                    index: splitIndex,
+                    meta: rule.meta,
+                    // No named captures / capturedContent for this fast-path
+                });
+            }
+
+            const nextNl = matchContent.indexOf('\n', lineStart);
+            if (nextNl === -1) break;
+            lineStart = nextNl + 1;
+        }
+    }
 
     // Process combinable rules in a single pass
     if (combinableRules.length > 0) {
