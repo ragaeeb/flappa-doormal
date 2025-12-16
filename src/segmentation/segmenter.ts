@@ -9,15 +9,16 @@
  */
 
 import { applyBreakpoints } from './breakpoint-processor.js';
+import { isPageExcluded } from './breakpoint-utils.js';
+import { compileFastFuzzyTokenRule, matchFastFuzzyTokenAt, type FastFuzzyTokenRule } from './fast-fuzzy-prefix.js';
 import {
     anyRuleAllowsId,
     extractNamedCaptures,
     filterByConstraints,
-    filterByOccurrence,
     getLastPositionalCapture,
     type MatchResult,
 } from './match-utils.js';
-import { buildRuleRegex, processPattern } from './rule-regex.js';
+import { buildRuleRegex, extractNamedCaptureNames, hasCapturingGroup, processPattern } from './rule-regex.js';
 import { normalizeLineEndings } from './textUtils.js';
 import type { Page, Segment, SegmentationOptions, SplitRule } from './types.js';
 
@@ -206,13 +207,191 @@ export const ensureFallbackSegment = (
 };
 
 const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, pageMap: PageMap): SplitPoint[] => {
-    const collectSplitPointsFromRule = (rule: SplitRule): SplitPoint[] => {
+    const combinableRules: { rule: SplitRule; prefix: string; index: number }[] = [];
+    const standaloneRules: SplitRule[] = [];
+    const fastFuzzyRules: Array<{ compiled: FastFuzzyTokenRule; rule: SplitRule; ruleIndex: number }> = [];
+
+    // Separate rules into combinable, standalone, and fast-fuzzy
+    rules.forEach((rule, index) => {
+        let isCombinable = true;
+
+        // Fast-path: fuzzy + lineStartsWith + single token pattern like {{kitab}}
+        // If eligible, handle separately and do NOT include in combined OR standalone regex paths.
+        if ((rule as { fuzzy?: boolean }).fuzzy && 'lineStartsWith' in rule && Array.isArray(rule.lineStartsWith)) {
+            const compiled = rule.lineStartsWith.length === 1 ? compileFastFuzzyTokenRule(rule.lineStartsWith[0]) : null;
+            if (compiled) {
+                fastFuzzyRules.push({ compiled, rule, ruleIndex: index });
+                return; // handled by fast path
+            }
+        }
+
+        // Raw regex rules are combinable ONLY if they don't use named captures, backreferences, or anonymous captures
+        if ('regex' in rule && rule.regex) {
+            const hasNamedCaptures = extractNamedCaptureNames(rule.regex).length > 0;
+            const hasBackreferences = /\\[1-9]/.test(rule.regex);
+            const hasAnonymousCaptures = hasCapturingGroup(rule.regex);
+
+            if (hasNamedCaptures || hasBackreferences || hasAnonymousCaptures) {
+                isCombinable = false;
+            }
+        }
+
+        if (isCombinable) {
+            combinableRules.push({ index, prefix: `r${index}_`, rule });
+        } else {
+            standaloneRules.push(rule);
+        }
+    });
+
+    // Store split points by rule index to apply occurrence filtering later
+    const splitPointsByRule = new Map<number, SplitPoint[]>();
+
+    // Fast fuzzy prefix scan at line starts (only for eligible fuzzy token rules)
+    if (fastFuzzyRules.length > 0) {
+        // Stream page boundary cursor to avoid O(log n) getId calls in hot loop.
+        let boundaryIdx = 0;
+        let currentBoundary = pageMap.boundaries[boundaryIdx];
+        const advanceBoundaryTo = (offset: number) => {
+            while (currentBoundary && offset > currentBoundary.end && boundaryIdx < pageMap.boundaries.length - 1) {
+                boundaryIdx++;
+                currentBoundary = pageMap.boundaries[boundaryIdx];
+            }
+        };
+
+        const recordSplitPoint = (ruleIndex: number, sp: SplitPoint) => {
+            if (!splitPointsByRule.has(ruleIndex)) splitPointsByRule.set(ruleIndex, []);
+            splitPointsByRule.get(ruleIndex)!.push(sp);
+        };
+
+        // Line starts are offset 0 and any char after '\n'
+        for (let lineStart = 0; lineStart <= matchContent.length; ) {
+            advanceBoundaryTo(lineStart);
+            const pageId = currentBoundary?.id ?? 0;
+
+            // If lineStart is at end-of-string, stop.
+            if (lineStart >= matchContent.length) break;
+
+            // Try each eligible rule (small set).
+            for (const { compiled, rule, ruleIndex } of fastFuzzyRules) {
+                // Apply min/max/exclude constraints
+                const passesConstraints =
+                    (rule.min === undefined || pageId >= rule.min) &&
+                    (rule.max === undefined || pageId <= rule.max) &&
+                    !isPageExcluded(pageId, rule.exclude);
+                if (!passesConstraints) continue;
+
+                const end = matchFastFuzzyTokenAt(matchContent, lineStart, compiled);
+                if (end === null) continue;
+
+                const splitIndex = (rule.split ?? 'at') === 'at' ? lineStart : end;
+                recordSplitPoint(ruleIndex, {
+                    index: splitIndex,
+                    meta: rule.meta,
+                    // No named captures / capturedContent for this fast-path
+                });
+            }
+
+            const nextNl = matchContent.indexOf('\n', lineStart);
+            if (nextNl === -1) break;
+            lineStart = nextNl + 1;
+        }
+    }
+
+    // Process combinable rules in a single pass
+    if (combinableRules.length > 0) {
+        const ruleRegexes = combinableRules.map(({ rule, prefix }) => {
+            const built = buildRuleRegex(rule, prefix);
+            return {
+                prefix,
+                source: `(?<${prefix}>${built.regex.source})`,
+                ...built,
+            };
+        });
+
+        const combinedSource = ruleRegexes.map((r) => r.source).join('|');
+        const combinedRegex = new RegExp(combinedSource, 'gm');
+
+        combinedRegex.lastIndex = 0;
+        let m = combinedRegex.exec(matchContent);
+
+        while (m !== null) {
+            // Find which rule matched by checking which prefix group is defined
+            const matchedRuleIndex = combinableRules.findIndex(({ prefix }) => m?.groups?.[prefix] !== undefined);
+
+            if (matchedRuleIndex !== -1) {
+                const { rule, prefix, index: originalIndex } = combinableRules[matchedRuleIndex];
+                const ruleInfo = ruleRegexes[matchedRuleIndex];
+
+                // Extract named captures for this specific rule (stripping the prefix)
+                const namedCaptures: Record<string, string> = {};
+                if (m.groups) {
+                    for (const prefixedName of ruleInfo.captureNames) {
+                        if (m.groups[prefixedName] !== undefined) {
+                            const cleanName = prefixedName.slice(prefix.length);
+                            namedCaptures[cleanName] = m.groups[prefixedName];
+                        }
+                    }
+                }
+
+                // Handle lineStartsAfter content capture
+                let capturedContent: string | undefined;
+                let contentStartOffset: number | undefined;
+
+                if (ruleInfo.usesLineStartsAfter) {
+                    // The content capture is named `${prefix}content`
+                    capturedContent = m.groups?.[`${prefix}content`];
+                    if (capturedContent !== undefined) {
+                        // Calculate marker length: (full match length) - (content length)
+                        // Note: m[0] is the full match of the combined group
+                        const fullMatch = m.groups?.[prefix] || m[0];
+                        const markerLength = fullMatch.length - capturedContent.length;
+                        contentStartOffset = markerLength;
+                    }
+                }
+
+                // Check constraints
+                const start = m.index;
+                const end = m.index + m[0].length;
+                const pageId = pageMap.getId(start);
+
+                // Apply min/max/exclude page constraints
+                const passesConstraints =
+                    (rule.min === undefined || pageId >= rule.min) &&
+                    (rule.max === undefined || pageId <= rule.max) &&
+                    !isPageExcluded(pageId, rule.exclude);
+
+                if (passesConstraints) {
+                    const sp: SplitPoint = {
+                        capturedContent: undefined, // For combinable rules, we don't use captured content for the segment text
+                        contentStartOffset,
+                        index: (rule.split ?? 'at') === 'at' ? start : end,
+                        meta: rule.meta,
+                        namedCaptures: Object.keys(namedCaptures).length > 0 ? namedCaptures : undefined,
+                    };
+
+                    if (!splitPointsByRule.has(originalIndex)) {
+                        splitPointsByRule.set(originalIndex, []);
+                    }
+                    splitPointsByRule.get(originalIndex)!.push(sp);
+                }
+            }
+
+            if (m[0].length === 0) {
+                combinedRegex.lastIndex++;
+            }
+            m = combinedRegex.exec(matchContent);
+        }
+    }
+
+    // Process standalone rules individually (legacy path)
+    const collectSplitPointsFromRule = (rule: SplitRule, ruleIndex: number): void => {
         const { regex, usesCapture, captureNames, usesLineStartsAfter } = buildRuleRegex(rule);
         const allMatches = findMatches(matchContent, regex, usesCapture, captureNames);
         const constrainedMatches = filterByConstraints(allMatches, rule, pageMap.getId);
-        const finalMatches = filterByOccurrence(constrainedMatches, rule.occurrence);
+        // We don't filter by occurrence here yet, we do it uniformly later
+        // But wait, filterByConstraints returns MatchResult, we need SplitPoint
 
-        return finalMatches.map((m) => {
+        const points = constrainedMatches.map((m) => {
             const isLineStartsAfter = usesLineStartsAfter && m.captured !== undefined;
             const markerLength = isLineStartsAfter ? m.end - m.captured!.length - m.start : 0;
             return {
@@ -223,9 +402,38 @@ const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, p
                 namedCaptures: m.namedCaptures,
             };
         });
+
+        if (!splitPointsByRule.has(ruleIndex)) {
+            splitPointsByRule.set(ruleIndex, []);
+        }
+        splitPointsByRule.get(ruleIndex)!.push(...points);
     };
 
-    return rules.flatMap(collectSplitPointsFromRule);
+    standaloneRules.forEach((rule) => {
+        // Find original index
+        const originalIndex = rules.indexOf(rule);
+        collectSplitPointsFromRule(rule, originalIndex);
+    });
+
+    // Apply occurrence filtering and flatten
+    const finalSplitPoints: SplitPoint[] = [];
+    rules.forEach((rule, index) => {
+        const points = splitPointsByRule.get(index);
+        if (!points || points.length === 0) {
+            return;
+        }
+
+        let filtered = points;
+        if (rule.occurrence === 'first') {
+            filtered = [points[0]];
+        } else if (rule.occurrence === 'last') {
+            filtered = [points[points.length - 1]];
+        }
+
+        finalSplitPoints.push(...filtered);
+    });
+
+    return finalSplitPoints;
 };
 
 /**

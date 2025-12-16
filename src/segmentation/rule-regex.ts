@@ -86,28 +86,36 @@ export const compileRuleRegex = (pattern: string): RegExp => {
  *
  * Brackets `()[]` outside `{{tokens}}` are auto-escaped.
  */
-export const processPattern = (pattern: string, fuzzy: boolean): ProcessedPattern => {
+export const processPattern = (pattern: string, fuzzy: boolean, capturePrefix?: string): ProcessedPattern => {
     const escaped = escapeTemplateBrackets(pattern);
     const fuzzyTransform = fuzzy ? makeDiacriticInsensitive : undefined;
-    const { pattern: expanded, captureNames } = expandTokensWithCaptures(escaped, fuzzyTransform);
+    const { pattern: expanded, captureNames } = expandTokensWithCaptures(escaped, fuzzyTransform, capturePrefix);
     return { captureNames, pattern: expanded };
 };
 
 export const buildLineStartsAfterRegexSource = (
     patterns: string[],
     fuzzy: boolean,
+    capturePrefix?: string,
 ): { regex: string; captureNames: string[] } => {
-    const processed = patterns.map((p) => processPattern(p, fuzzy));
+    const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
     const union = processed.map((p) => p.pattern).join('|');
     const captureNames = processed.flatMap((p) => p.captureNames);
-    return { captureNames, regex: `^(?:${union})(.*)` };
+    // For lineStartsAfter, we need to capture the content.
+    // If we have a prefix, we should name the content capture too.
+    const contentCapture = capturePrefix ? `(?<${capturePrefix}content>.*)` : '(.*)';
+    if (capturePrefix) {
+        captureNames.push(`${capturePrefix}content`);
+    }
+    return { captureNames, regex: `^(?:${union})${contentCapture}` };
 };
 
 export const buildLineStartsWithRegexSource = (
     patterns: string[],
     fuzzy: boolean,
+    capturePrefix?: string,
 ): { regex: string; captureNames: string[] } => {
-    const processed = patterns.map((p) => processPattern(p, fuzzy));
+    const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
     const union = processed.map((p) => p.pattern).join('|');
     const captureNames = processed.flatMap((p) => p.captureNames);
     return { captureNames, regex: `^(?:${union})` };
@@ -116,16 +124,20 @@ export const buildLineStartsWithRegexSource = (
 export const buildLineEndsWithRegexSource = (
     patterns: string[],
     fuzzy: boolean,
+    capturePrefix?: string,
 ): { regex: string; captureNames: string[] } => {
-    const processed = patterns.map((p) => processPattern(p, fuzzy));
+    const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
     const union = processed.map((p) => p.pattern).join('|');
     const captureNames = processed.flatMap((p) => p.captureNames);
     return { captureNames, regex: `(?:${union})$` };
 };
 
-export const buildTemplateRegexSource = (template: string): { regex: string; captureNames: string[] } => {
+export const buildTemplateRegexSource = (
+    template: string,
+    capturePrefix?: string,
+): { regex: string; captureNames: string[] } => {
     const escaped = escapeTemplateBrackets(template);
-    const { pattern, captureNames } = expandTokensWithCaptures(escaped);
+    const { pattern, captureNames } = expandTokensWithCaptures(escaped, undefined, capturePrefix);
     return { captureNames, regex: pattern };
 };
 
@@ -137,7 +149,7 @@ export const determineUsesCapture = (regexSource: string, _captureNames: string[
  *
  * Behavior mirrors the previous implementation in `segmenter.ts`.
  */
-export const buildRuleRegex = (rule: SplitRule): RuleRegex => {
+export const buildRuleRegex = (rule: SplitRule, capturePrefix?: string): RuleRegex => {
     const s: {
         lineStartsWith?: string[];
         lineStartsAfter?: string[];
@@ -151,7 +163,7 @@ export const buildRuleRegex = (rule: SplitRule): RuleRegex => {
 
     // lineStartsAfter: creates a capturing group to exclude the marker from content
     if (s.lineStartsAfter?.length) {
-        const { regex, captureNames } = buildLineStartsAfterRegexSource(s.lineStartsAfter, fuzzy);
+        const { regex, captureNames } = buildLineStartsAfterRegexSource(s.lineStartsAfter, fuzzy, capturePrefix);
         allCaptureNames = captureNames;
         return {
             captureNames: allCaptureNames,
@@ -162,17 +174,17 @@ export const buildRuleRegex = (rule: SplitRule): RuleRegex => {
     }
 
     if (s.lineStartsWith?.length) {
-        const { regex, captureNames } = buildLineStartsWithRegexSource(s.lineStartsWith, fuzzy);
+        const { regex, captureNames } = buildLineStartsWithRegexSource(s.lineStartsWith, fuzzy, capturePrefix);
         s.regex = regex;
         allCaptureNames = captureNames;
     }
     if (s.lineEndsWith?.length) {
-        const { regex, captureNames } = buildLineEndsWithRegexSource(s.lineEndsWith, fuzzy);
+        const { regex, captureNames } = buildLineEndsWithRegexSource(s.lineEndsWith, fuzzy, capturePrefix);
         s.regex = regex;
         allCaptureNames = captureNames;
     }
     if (s.template) {
-        const { regex, captureNames } = buildTemplateRegexSource(s.template);
+        const { regex, captureNames } = buildTemplateRegexSource(s.template, capturePrefix);
         s.regex = regex;
         allCaptureNames = [...allCaptureNames, ...captureNames];
     }
