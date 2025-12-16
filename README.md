@@ -309,6 +309,7 @@ const segments = segmentPages(pages, {
 // Matches: ١١١٨ د ت سي ق: حجاج بن دينار
 // meta: { num: '١١١٨' }
 // content: 'حجاج بن دينار' (abbreviations stripped)
+```
 
 ### Sentence-Based Splitting (Last Period Per Page)
 
