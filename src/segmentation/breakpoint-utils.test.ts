@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { computeNextFromIdx, computeWindowEndIdx } from './breakpoint-processor.js';
 import {
     applyPageJoinerBetweenPages,
     buildExcludeSet,
@@ -23,7 +24,6 @@ import {
     type NormalizedPage,
     normalizeBreakpoint,
 } from './breakpoint-utils.js';
-import { computeNextFromIdx, computeWindowEndIdx } from './breakpoint-processor.js';
 
 describe('breakpoint-utils', () => {
     describe('normalizeBreakpoint', () => {
@@ -427,6 +427,26 @@ describe('breakpoint-utils', () => {
             ]);
             const remainingContent = 'Something else';
             expect(computeNextFromIdx(remainingContent, 0, 1, pageIds, normalizedPages)).toBe(0);
+        });
+
+        it('should advance when remaining content is shorter than page prefix but page starts with remaining', () => {
+            // Reproduces bug: when remaining content is < 30 chars but IS at start of next page
+            // The original code only checked: remainingContent.startsWith(nextPrefix)
+            // This fails when remaining is shorter than the 30-char prefix
+            const pageIds = [2534, 2535];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [2534, { content: 'Page 2534 content...', index: 0, length: 20 }],
+                // Next page has more content than just the remaining
+                [2535, { content: 'Short text. More content after.', index: 1, length: 31 }],
+            ]);
+            // Remaining content is only 11 chars, but it's exactly the start of page 2535
+            const remainingContent = 'Short text.';
+
+            // Without the fix, this would return 0 (page 2534 idx) because:
+            // nextPrefix = "Short text. More content after" (30 chars)
+            // remainingContent.startsWith(nextPrefix) = false (remaining is only 11 chars)
+            // With the fix, we also check: pageContent.startsWith(remainingPrefix) = true
+            expect(computeNextFromIdx(remainingContent, 0, 1, pageIds, normalizedPages)).toBe(1);
         });
     });
 

@@ -858,6 +858,28 @@ describe('segmenter', () => {
 
                 expect(result).toHaveLength(2);
             });
+
+            it('should use named capture for metadata and anonymous capture for content', () => {
+                const pages: Page[] = [
+                    { content: '١١١٨ د ت سي ق: حجاج بن دينار الأشجعي، وقيل: السلمي، مولالاهم، الواسطي.\rline2', id: 1 },
+                    { content: '١٨ دق: حجاج بن دينار الأشجعي، وقيل: السلمي، مولالاهم، الواسطي.\rline2', id: 2 },
+                ];
+
+                // Clean pattern using {{harfs}} token - much simpler than verbose regex!
+                // {{raqms:num}} captures the number to meta.num
+                // {{harfs}} matches Arabic letters with optional spaces (e.g., "د ت سي ق")
+                // lineStartsAfter automatically captures everything AFTER the pattern
+                const rules: SplitRule[] = [{ lineStartsAfter: ['{{raqms:num}} {{harfs}}:'] }];
+
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0].meta?.num).toBe('١١١٨');
+                expect(result[0].content).toBe('حجاج بن دينار الأشجعي، وقيل: السلمي، مولالاهم، الواسطي.\nline2');
+
+                expect(result[1].meta?.num).toBe('١٨');
+                expect(result[1].content).toBe('حجاج بن دينار الأشجعي، وقيل: السلمي، مولالاهم، الواسطي.\nline2');
+            });
         });
 
         describe('lineEndsWith', () => {
@@ -1193,8 +1215,7 @@ describe('segmenter', () => {
                         id: 442,
                     },
                     {
-                        content:
-                            'ق: أَحْمَد بن مُحَمَّد بن يحيى بن سَعِيد بن فروخ القطان... عيسى الْبَغْدَادِيّ.',
+                        content: 'ق: أَحْمَد بن مُحَمَّد بن يحيى بن سَعِيد بن فروخ القطان... عيسى الْبَغْدَادِيّ.',
                         id: 443,
                     },
                     {

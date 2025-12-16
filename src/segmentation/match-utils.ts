@@ -248,74 +248,99 @@ export const groupBySpanAndFilter = (
     }
 
     // Precompute pageId per match once to avoid O(P×M) behavior for large inputs.
-    // Since match offsets are in concatenated page order, pageIds are expected to be non-decreasing.
     const matchPageIds = matches.map((m) => getId(m.start));
-
-    // If no pageIds provided, fall back to unique page IDs from matches
-    const uniquePageIds =
-        pageIds ?? [...new Set(matchPageIds)].sort((a, b) => a - b);
+    const uniquePageIds = pageIds ?? [...new Set(matchPageIds)].sort((a, b) => a - b);
 
     if (!uniquePageIds.length) {
         return filterByOccurrence(matches, occurrence);
     }
 
+    return collectWindowMatches(matches, matchPageIds, uniquePageIds, maxSpan, occurrence);
+};
+
+/**
+ * Collects matches from each sliding window, applying occurrence selection.
+ */
+const collectWindowMatches = (
+    matches: MatchResult[],
+    matchPageIds: number[],
+    uniquePageIds: number[],
+    maxSpan: number,
+    occurrence: 'first' | 'last' | 'all' | undefined,
+): MatchResult[] => {
     const result: MatchResult[] = [];
-    let windowStartIdx = 0; // Index into uniquePageIds
-    let matchIdx = 0; // Index into matches/matchPageIds
+    let windowStartIdx = 0;
+    let matchIdx = 0;
 
     while (windowStartIdx < uniquePageIds.length) {
         const windowStartPageId = uniquePageIds[windowStartIdx];
         const windowEndPageId = windowStartPageId + maxSpan;
 
         // Advance matchIdx to first match in or after the window start page.
-        while (matchIdx < matches.length && matchPageIds[matchIdx] < windowStartPageId) {
-            matchIdx++;
-        }
+        matchIdx = advanceToWindowStart(matchPageIds, matchIdx, windowStartPageId);
 
-        // No remaining matches anywhere
         if (matchIdx >= matches.length) {
             break;
         }
 
         // Find range of matches that fall within [windowStartPageId, windowEndPageId]
-        const windowMatchStart = matchIdx;
-        let windowMatchEndExclusive = windowMatchStart;
-        while (windowMatchEndExclusive < matches.length && matchPageIds[windowMatchEndExclusive] <= windowEndPageId) {
-            windowMatchEndExclusive++;
-        }
+        const windowMatchEnd = findWindowMatchEnd(matchPageIds, matchIdx, windowEndPageId);
 
-        if (windowMatchEndExclusive <= windowMatchStart) {
-            // No matches in this window, move to next page
+        if (windowMatchEnd <= matchIdx) {
             windowStartIdx++;
             continue;
         }
 
-        // Apply occurrence selection without allocating/filtering per window.
-        let selectedStart = windowMatchStart;
-        let selectedEndExclusive = windowMatchEndExclusive;
-        if (occurrence === 'first') {
-            selectedEndExclusive = selectedStart + 1;
-        } else if (occurrence === 'last') {
-            selectedStart = windowMatchEndExclusive - 1;
-        }
-
-        for (let i = selectedStart; i < selectedEndExclusive; i++) {
+        // Apply occurrence selection and add matches
+        const { selectedStart, selectedEnd } = selectOccurrenceRange(matchIdx, windowMatchEnd, occurrence);
+        for (let i = selectedStart; i < selectedEnd; i++) {
             result.push(matches[i]);
         }
 
-        const lastSelectedIndex = selectedEndExclusive - 1;
-        const lastMatchPageId = matchPageIds[lastSelectedIndex];
-
-        // Move window to start after the last selected match's page
+        // Advance window past the last selected match's page
+        const lastMatchPageId = matchPageIds[selectedEnd - 1];
         while (windowStartIdx < uniquePageIds.length && uniquePageIds[windowStartIdx] <= lastMatchPageId) {
             windowStartIdx++;
         }
-
-        // Matches before this index can never be selected again (windowStartPageId only increases)
-        matchIdx = lastSelectedIndex + 1;
+        matchIdx = selectedEnd;
     }
 
     return result;
+};
+
+/** Advances matchIdx to first match in or after windowStartPageId. */
+const advanceToWindowStart = (matchPageIds: number[], matchIdx: number, windowStartPageId: number): number => {
+    let idx = matchIdx;
+    while (idx < matchPageIds.length && matchPageIds[idx] < windowStartPageId) {
+        idx++;
+    }
+    return idx;
+};
+
+/** Finds the exclusive end index of matches within the window. */
+const findWindowMatchEnd = (matchPageIds: number[], startIdx: number, windowEndPageId: number): number => {
+    let endIdx = startIdx;
+    while (endIdx < matchPageIds.length && matchPageIds[endIdx] <= windowEndPageId) {
+        endIdx++;
+    }
+    return endIdx;
+};
+
+/**
+ * Computes the range of indices to select based on occurrence setting.
+ */
+const selectOccurrenceRange = (
+    start: number,
+    endExclusive: number,
+    occurrence: 'first' | 'last' | 'all' | undefined,
+): { selectedStart: number; selectedEnd: number } => {
+    if (occurrence === 'first') {
+        return { selectedEnd: start + 1, selectedStart: start };
+    }
+    if (occurrence === 'last') {
+        return { selectedEnd: endExclusive, selectedStart: endExclusive - 1 };
+    }
+    return { selectedEnd: endExclusive, selectedStart: start };
 };
 
 /**

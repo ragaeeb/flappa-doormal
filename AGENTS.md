@@ -79,6 +79,7 @@ docs/
 4. **`rule-regex.ts`** - SplitRule → compiled regex builder
    - `buildRuleRegex()` - Compiles rule patterns (`lineStartsWith`, `lineStartsAfter`, `lineEndsWith`, `template`, `regex`)
    - `processPattern()` - Token expansion + auto-escaping + optional fuzzy application
+   - `extractNamedCaptureNames()` - Extract `(?<name>...)` groups from raw regex patterns (NEW)
 
 5. **`breakpoint-processor.ts`** - Breakpoint post-processing engine
    - `applyBreakpoints()` - Splits oversized structural segments using breakpoint patterns + windowing
@@ -177,6 +178,22 @@ export const escapeTemplateBrackets = (pattern: string): string => {
 - `processPattern()` - handles `lineStartsWith`, `lineStartsAfter`, `lineEndsWith`
 - Direct `template` processing in `buildRuleRegex()`
 - **NOT** applied to `regex` patterns (user has full control)
+
+### Named Captures in Raw Regex Patterns (NEW)
+
+Raw `regex` patterns now support named capture groups for metadata extraction:
+
+```typescript
+// Named groups like (?<num>...) are automatically detected and extracted
+{ regex: '^(?<num>[٠-٩]+)\\s+[أ-ي\\s]+:\\s*(.+)' }
+// meta.num = matched number
+// content = the (.+) anonymous capture group
+```
+
+**How it works:**
+1. `extractNamedCaptureNames()` parses `(?<name>...)` from regex string
+2. Named captures go to `segment.meta`
+3. Anonymous `(...)` captures can still be used for content extraction
 
 ### Breakpoints Post-Processing Algorithm
 

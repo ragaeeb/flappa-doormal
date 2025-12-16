@@ -50,6 +50,26 @@ export const hasCapturingGroup = (pattern: string): boolean => {
 };
 
 /**
+ * Extracts named capture group names from a regex pattern.
+ *
+ * Parses patterns like `(?<num>[0-9]+)` and returns `['num']`.
+ *
+ * @example
+ * extractNamedCaptureNames('^(?<num>[٠-٩]+)\\s+') // ['num']
+ * extractNamedCaptureNames('^(?<a>\\d+)(?<b>\\w+)') // ['a', 'b']
+ * extractNamedCaptureNames('^\\d+') // []
+ */
+export const extractNamedCaptureNames = (pattern: string): string[] => {
+    const names: string[] = [];
+    // Match (?<name> where name is the capture group name
+    const namedGroupRegex = /\(\?<([^>]+)>/g;
+    for (const match of pattern.matchAll(namedGroupRegex)) {
+        names.push(match[1]);
+    }
+    return names;
+};
+
+/**
  * Safely compiles a regex pattern, throwing a helpful error if invalid.
  */
 export const compileRuleRegex = (pattern: string): RegExp => {
@@ -109,8 +129,8 @@ export const buildTemplateRegexSource = (template: string): { regex: string; cap
     return { captureNames, regex: pattern };
 };
 
-export const determineUsesCapture = (regexSource: string, captureNames: string[]): boolean =>
-    hasCapturingGroup(regexSource) || captureNames.length > 0;
+export const determineUsesCapture = (regexSource: string, _captureNames: string[]): boolean =>
+    hasCapturingGroup(regexSource);
 
 /**
  * Builds a compiled regex and metadata from a split rule.
@@ -163,6 +183,11 @@ export const buildRuleRegex = (rule: SplitRule): RuleRegex => {
         );
     }
 
+    // Extract named capture groups from raw regex patterns if not already populated
+    if (allCaptureNames.length === 0) {
+        allCaptureNames = extractNamedCaptureNames(s.regex);
+    }
+
     const usesCapture = determineUsesCapture(s.regex, allCaptureNames);
     return {
         captureNames: allCaptureNames,
@@ -171,5 +196,3 @@ export const buildRuleRegex = (rule: SplitRule): RuleRegex => {
         usesLineStartsAfter: false,
     };
 };
-
-

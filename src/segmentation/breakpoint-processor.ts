@@ -6,8 +6,8 @@
  */
 
 import {
-    type BreakpointContext,
     applyPageJoinerBetweenPages,
+    type BreakpointContext,
     createSegment,
     expandBreakpoints,
     findActualEndPage,
@@ -73,7 +73,8 @@ export const computeWindowEndIdx = (
     return windowEndIdx;
 };
 
-const computeRemainingSpan = (currentFromIdx: number, toIdx: number, pageIds: number[]) => pageIds[toIdx] - pageIds[currentFromIdx];
+const computeRemainingSpan = (currentFromIdx: number, toIdx: number, pageIds: number[]) =>
+    pageIds[toIdx] - pageIds[currentFromIdx];
 
 const createFinalSegment = (
     remainingContent: string,
@@ -121,7 +122,14 @@ export const computeNextFromIdx = (
         const nextPageData = normalizedPages.get(pageIds[actualEndIdx + 1]);
         if (nextPageData) {
             const nextPrefix = nextPageData.content.slice(0, Math.min(30, nextPageData.length));
-            if (nextPrefix && remainingContent.startsWith(nextPrefix)) {
+            const remainingPrefix = remainingContent.trimStart().slice(0, Math.min(30, remainingContent.length));
+            // Check both directions:
+            // 1. remainingContent starts with page prefix (page is longer or equal)
+            // 2. page content starts with remaining prefix (remaining is shorter)
+            if (
+                nextPrefix &&
+                (remainingContent.startsWith(nextPrefix) || nextPageData.content.startsWith(remainingPrefix))
+            ) {
                 nextFromIdx = actualEndIdx + 1;
             }
         }
@@ -175,8 +183,17 @@ const processOversizedSegment = (
         const remainingHasExclusions = hasAnyExclusionsInRange(expandedBreakpoints, pageIds, currentFromIdx, toIdx);
         const remainingSpan = computeRemainingSpan(currentFromIdx, toIdx, pageIds);
         if (remainingSpan <= maxPages && !remainingHasExclusions) {
-            const finalSeg = createFinalSegment(remainingContent, currentFromIdx, toIdx, pageIds, segment.meta, isFirstPiece);
-            if (finalSeg) result.push(finalSeg);
+            const finalSeg = createFinalSegment(
+                remainingContent,
+                currentFromIdx,
+                toIdx,
+                pageIds,
+                segment.meta,
+                isFirstPiece,
+            );
+            if (finalSeg) {
+                result.push(finalSeg);
+            }
             break;
         }
 
@@ -233,12 +250,23 @@ const processOversizedSegment = (
         );
 
         if (pieceContent) {
-            const pieceSeg = createPieceSegment(pieceContent, actualStartIdx, actualEndIdx, pageIds, segment.meta, isFirstPiece);
-            if (pieceSeg) result.push(pieceSeg);
+            const pieceSeg = createPieceSegment(
+                pieceContent,
+                actualStartIdx,
+                actualEndIdx,
+                pageIds,
+                segment.meta,
+                isFirstPiece,
+            );
+            if (pieceSeg) {
+                result.push(pieceSeg);
+            }
         }
 
         remainingContent = remainingContent.slice(breakPosition).trim();
-        if (!remainingContent) break;
+        if (!remainingContent) {
+            break;
+        }
 
         currentFromIdx = computeNextFromIdx(remainingContent, actualEndIdx, toIdx, pageIds, normalizedPages);
         isFirstPiece = false;
@@ -286,16 +314,16 @@ export const applyBreakpoints = (
         }
 
         const broken = processOversizedSegment(
-                segment,
-                fromIdx,
-                toIdx,
-                pageIds,
-                normalizedPages,
-                cumulativeOffsets,
-                expandedBreakpoints,
-                maxPages,
-                prefer,
-                logger,
+            segment,
+            fromIdx,
+            toIdx,
+            pageIds,
+            normalizedPages,
+            cumulativeOffsets,
+            expandedBreakpoints,
+            maxPages,
+            prefer,
+            logger,
         );
         // Normalize page joins for breakpoint-created pieces
         result.push(
@@ -305,7 +333,14 @@ export const applyBreakpoints = (
                 if (segFromIdx >= 0 && segToIdx > segFromIdx) {
                     return {
                         ...s,
-                        content: applyPageJoinerBetweenPages(s.content, segFromIdx, segToIdx, pageIds, normalizedPages, pageJoiner),
+                        content: applyPageJoinerBetweenPages(
+                            s.content,
+                            segFromIdx,
+                            segToIdx,
+                            pageIds,
+                            normalizedPages,
+                            pageJoiner,
+                        ),
                     };
                 }
                 return s;
@@ -316,5 +351,3 @@ export const applyBreakpoints = (
     logger?.info?.('Breakpoint processing completed', { resultCount: result.length });
     return result;
 };
-
-
