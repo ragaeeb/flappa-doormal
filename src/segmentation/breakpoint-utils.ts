@@ -239,30 +239,37 @@ export const applyPageJoinerBetweenPages = (
 
     for (let pi = fromIdx + 1; pi <= toIdx; pi++) {
         const pageData = normalizedPages.get(pageIds[pi]);
-        if (!pageData) continue;
-
-        const trimmed = pageData.content.trimStart();
-        let found = -1;
-        for (const len of JOINER_PREFIX_LENGTHS) {
-            const prefix = trimmed.slice(0, Math.min(len, trimmed.length)).trim();
-            if (!prefix) continue;
-
-            const pos = updated.indexOf(prefix, searchFrom);
-            if (pos > 0) {
-                found = pos;
-                break;
-            }
+        if (!pageData) {
+            continue;
         }
 
+        const found = findPrefixPositionInContent(updated, pageData.content.trimStart(), searchFrom);
+        if (found > 0 && updated[found - 1] === '\n') {
+            updated = `${updated.slice(0, found - 1)} ${updated.slice(found)}`;
+        }
         if (found > 0) {
-            if (updated[found - 1] === '\n') {
-                updated = `${updated.slice(0, found - 1)} ${updated.slice(found)}`;
-            }
             searchFrom = found;
         }
     }
 
     return updated;
+};
+
+/**
+ * Finds the position of a page prefix in content, trying multiple prefix lengths.
+ */
+const findPrefixPositionInContent = (content: string, trimmedPageContent: string, searchFrom: number): number => {
+    for (const len of JOINER_PREFIX_LENGTHS) {
+        const prefix = trimmedPageContent.slice(0, Math.min(len, trimmedPageContent.length)).trim();
+        if (!prefix) {
+            continue;
+        }
+        const pos = content.indexOf(prefix, searchFrom);
+        if (pos > 0) {
+            return pos;
+        }
+    }
+    return -1;
 };
 
 /**
@@ -303,7 +310,7 @@ export const estimateStartOffsetInCurrentPage = (
  */
 export const findPageStartNearExpectedBoundary = (
     remainingContent: string,
-    currentFromIdx: number,
+    _currentFromIdx: number, // unused but kept for API compatibility
     targetPageIdx: number,
     expectedBoundary: number,
     pageIds: number[],
@@ -324,7 +331,9 @@ export const findPageStartNearExpectedBoundary = (
     const targetTrimmed = targetPageData.content.trimStart();
     for (const len of WINDOW_PREFIX_LENGTHS) {
         const prefix = targetTrimmed.slice(0, Math.min(len, targetTrimmed.length)).trim();
-        if (!prefix) continue;
+        if (!prefix) {
+            continue;
+        }
 
         let pos = remainingContent.indexOf(prefix, searchStart);
         while (pos !== -1 && pos <= searchEnd) {
@@ -370,7 +379,12 @@ export const findBreakpointWindowEndPosition = (
     const minNextIdx = currentFromIdx + 1;
     const maxNextIdx = Math.min(desiredNextIdx, toIdx);
 
-    const startOffsetInCurrentPage = estimateStartOffsetInCurrentPage(remainingContent, currentFromIdx, pageIds, normalizedPages);
+    const startOffsetInCurrentPage = estimateStartOffsetInCurrentPage(
+        remainingContent,
+        currentFromIdx,
+        pageIds,
+        normalizedPages,
+    );
 
     // If we can't find the boundary for the desired next page, progressively fall back
     // to earlier page boundaries (smaller window), which is conservative but still correct.
@@ -592,6 +606,31 @@ export const findPatternBreakPosition = (
 };
 
 /**
+ * Handles page boundary breakpoint (empty pattern).
+ * Returns break position or -1 if no valid position found.
+ */
+const handlePageBoundaryBreak = (
+    remainingContent: string,
+    windowEndIdx: number,
+    windowEndPosition: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+): number => {
+    const nextPageIdx = windowEndIdx + 1;
+    if (nextPageIdx <= toIdx) {
+        const nextPageData = normalizedPages.get(pageIds[nextPageIdx]);
+        if (nextPageData) {
+            const pos = findNextPagePosition(remainingContent, nextPageData);
+            if (pos > 0) {
+                return Math.min(pos, windowEndPosition, remainingContent.length);
+            }
+        }
+    }
+    return Math.min(windowEndPosition, remainingContent.length);
+};
+
+/**
  * Tries to find a break position within the current window using breakpoint patterns.
  * Returns the break position or -1 if no suitable break was found.
  *
@@ -630,19 +669,14 @@ export const findBreakPosition = (
 
         // Handle page boundary (empty pattern)
         if (regex === null) {
-            // Break at the window boundary (i.e. start of the page AFTER windowEndIdx)
-            // Prefer using detected next-page position if available, but never exceed windowEndPosition.
-            const nextPageIdx = windowEndIdx + 1;
-            if (nextPageIdx <= toIdx) {
-                const nextPageData = normalizedPages.get(pageIds[nextPageIdx]);
-                if (nextPageData) {
-                    const pos = findNextPagePosition(remainingContent, nextPageData);
-                    if (pos > 0) {
-                        return Math.min(pos, windowEndPosition, remainingContent.length);
-                    }
-                }
-            }
-            return Math.min(windowEndPosition, remainingContent.length);
+            return handlePageBoundaryBreak(
+                remainingContent,
+                windowEndIdx,
+                windowEndPosition,
+                toIdx,
+                pageIds,
+                normalizedPages,
+            );
         }
 
         // Find matches within window
