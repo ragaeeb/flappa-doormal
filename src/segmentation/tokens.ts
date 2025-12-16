@@ -400,7 +400,11 @@ export type ExpandResult = {
  * expandTokensWithCaptures('{{bab}}', makeDiacriticInsensitive)
  * // → { pattern: 'بَ?ا?بٌ?', captureNames: [], hasCaptures: false }
  */
-export const expandTokensWithCaptures = (query: string, fuzzyTransform?: (pattern: string) => string): ExpandResult => {
+export const expandTokensWithCaptures = (
+    query: string,
+    fuzzyTransform?: (pattern: string) => string,
+    capturePrefix?: string,
+): ExpandResult => {
     const captureNames: string[] = [];
     // Track capture name usage counts to handle duplicates
     const captureNameCounts = new Map<string, number>();
@@ -458,8 +462,9 @@ export const expandTokensWithCaptures = (query: string, fuzzyTransform?: (patter
         // {{:name}} - capture anything with name
         if (!tokenName && captureName) {
             const uniqueName = getUniqueCaptureName(captureName);
-            captureNames.push(uniqueName);
-            return `(?<${uniqueName}>.+)`;
+            const prefixedName = capturePrefix ? `${capturePrefix}${uniqueName}` : uniqueName;
+            captureNames.push(prefixedName);
+            return `(?<${prefixedName}>.+)`;
         }
 
         // Get the token pattern
@@ -481,8 +486,9 @@ export const expandTokensWithCaptures = (query: string, fuzzyTransform?: (patter
         // {{token:name}} - capture with name
         if (captureName) {
             const uniqueName = getUniqueCaptureName(captureName);
-            captureNames.push(uniqueName);
-            return `(?<${uniqueName}>${tokenPattern})`;
+            const prefixedName = capturePrefix ? `${capturePrefix}${uniqueName}` : uniqueName;
+            captureNames.push(prefixedName);
+            return `(?<${prefixedName}>${tokenPattern})`;
         }
 
         // {{token}} - no capture, just expand
