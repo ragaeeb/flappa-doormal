@@ -7,7 +7,8 @@ describe('fast-fuzzy-prefix', () => {
         const content = 'بَابُ الإيمان\nالتالي';
         const end = matchFuzzyLiteralPrefixAt(content, 0, 'باب');
         expect(end).not.toBeNull();
-        expect(content.slice(0, end!)).toContain('ب');
+        // Should match 'بَابُ' (3 base chars + diacritics)
+        expect(content.slice(0, end!)).toBe('بَابُ');
     });
 
     it('treats alef variants as equivalent (أ/إ/آ/ا)', () => {
@@ -26,5 +27,3 @@ describe('fast-fuzzy-prefix', () => {
         expect(matchFuzzyLiteralPrefixAt('كتاب', 0, 'باب')).toBeNull();
     });
 });
-
-
