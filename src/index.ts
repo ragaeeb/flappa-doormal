@@ -74,3 +74,9 @@ export {
     generateTemplateFromText,
     suggestPatternConfig,
 } from './pattern-detection.js';
+
+// ─────────────────────────────────────────────────────────────
+// Analysis helpers
+// ─────────────────────────────────────────────────────────────
+export type { CommonLineStartPattern, LineStartAnalysisOptions, LineStartPatternExample } from './line-start-analysis.js';
+export { analyzeCommonLineStarts } from './line-start-analysis.js';
