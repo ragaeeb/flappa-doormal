@@ -55,6 +55,12 @@ describe('pattern-detection', () => {
             expect(hasStructural).toBe(true);
         });
 
+        it('should detect rumuz (source abbreviations)', () => {
+            const result = detectTokenPatterns('خت ٤:');
+            expect(result.length).toBeGreaterThanOrEqual(1);
+            expect(result.some((r) => r.token === 'rumuz')).toBe(true);
+        });
+
         it('should not overlap detected patterns', () => {
             const result = detectTokenPatterns('٣٤ - حدثنا');
             // Each position should only be covered by one pattern
@@ -96,6 +102,13 @@ describe('pattern-detection', () => {
             const template = generateTemplateFromText(text, detected);
             // Should have tokens - could be {{numbered}} (composite) or {{raqms}} + {{dash}}
             expect(template).toMatch(/\{\{(numbered|raqms)\}\}/);
+        });
+
+        it('should generate template using rumuz when present', () => {
+            const text = 'خت ٤:';
+            const detected = detectTokenPatterns(text);
+            const template = generateTemplateFromText(text, detected);
+            expect(template).toContain('{{rumuz}}');
         });
     });
 

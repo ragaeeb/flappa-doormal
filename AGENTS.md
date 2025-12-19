@@ -379,6 +379,8 @@ bunx biome lint .
 | `{{raqms}}` | Multiple Arabic-Indic numerals | ٧٥٦٣ |
 | `{{raqms:num}}` | Numerals with named capture | `meta.num = "٧٥٦٣"` |
 | `{{dash}}` | Various dash characters | - – — ـ |
+| `{{harfs}}` | Single-letter codes separated by spaces | `د ت س ي ق` |
+| `{{rumuz}}` | rijāl/takhrīj source abbreviations (matches blocks like `خت ٤`, `خ سي`) | `خت ٤` |
 | `{{numbered}}` | Composite: `{{raqms}} {{dash}}` | ٧٥٦٣ - |
 
 **Named captures**: Add `:name` suffix to capture into `meta`:

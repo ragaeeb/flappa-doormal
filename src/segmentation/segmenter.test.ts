@@ -884,11 +884,11 @@ describe('segmenter', () => {
                     { content: '١٨ دق: حجاج بن دينار الأشجعي، وقيل: السلمي، مولالاهم، الواسطي.\rline2', id: 2 },
                 ];
 
-                // Clean pattern using {{harfs}} token - much simpler than verbose regex!
+                // Clean pattern using {{rumuz}} token - much simpler than verbose regex!
                 // {{raqms:num}} captures the number to meta.num
-                // {{harfs}} matches Arabic letters with optional spaces (e.g., "د ت سي ق")
+                // {{rumuz}} matches known source abbreviations (e.g., "سي", "دق", "خت", "٤", ...)
                 // lineStartsAfter automatically captures everything AFTER the pattern
-                const rules: SplitRule[] = [{ lineStartsAfter: ['{{raqms:num}} {{harfs}}:'] }];
+                const rules: SplitRule[] = [{ lineStartsAfter: ['{{raqms:num}} {{rumuz}}:'] }];
 
                 const result = segmentPages(pages, { rules });
 
@@ -898,6 +898,52 @@ describe('segmenter', () => {
 
                 expect(result[1].meta?.num).toBe('١٨');
                 expect(result[1].content).toBe('حجاج بن دينار الأشجعي، وقيل: السلمي، مولالاهم، الواسطي.\nline2');
+            });
+
+            it('should not let {{harfs}} match arbitrary Arabic phrases at line start', () => {
+                const pages: Page[] = [
+                    {
+                        content: [
+                            // Not an abbreviation chunk; should NOT be matched by {{harfs}}:
+                            'وعلامة ما اتفق عليه الجماعة الستة في الكتب الستة: (ع)',
+                            // An actual abbreviation chunk; should still be supported in other rules:
+                            '١١١٨ د ت سي ق: حجاج بن دينار الأشجعي',
+                        ].join('\n'),
+                        id: 109,
+                    },
+                ];
+
+                // If {{harfs}} is too broad, this would match the first line and strip almost everything up to the colon,
+                // producing a tiny segment like "(ع)". We want to prevent that behavior.
+                const result = segmentPages(pages, {
+                    rules: [{ lineStartsAfter: ['{{harfs}}:\\s*'], split: 'at' }],
+                });
+
+                expect(result).toHaveLength(1);
+                expect(result[0].from).toBe(109);
+                expect(result[0].content).toContain('وعلامة ما اتفق عليه الجماعة الستة في الكتب الستة: (ع)');
+            });
+
+            it('should match multi-letter rumuz and digits via {{rumuz}}', () => {
+                const pages: Page[] = [
+                    {
+                        content: [
+                            'مد: كتاب المراسيل',
+                            'خت: تعليق البخاري',
+                            '٤: أصحاب السنن الأربعة',
+                        ].join('\n'),
+                        id: 1,
+                    },
+                ];
+
+                const result = segmentPages(pages, {
+                    rules: [{ lineStartsAfter: ['{{rumuz}}:\\s*'], split: 'at' }],
+                });
+
+                expect(result).toHaveLength(3);
+                expect(result[0].content).toBe('كتاب المراسيل');
+                expect(result[1].content).toBe('تعليق البخاري');
+                expect(result[2].content).toBe('أصحاب السنن الأربعة');
             });
         });
 

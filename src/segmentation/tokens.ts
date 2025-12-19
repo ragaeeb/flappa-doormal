@@ -69,7 +69,7 @@
 export const escapeTemplateBrackets = (pattern: string): string => {
     // Match either a token ({{...}}) or a bracket character
     // Tokens are preserved as-is, brackets are escaped
-    return pattern.replace(/(\{\{[^}]*\}\})|([()[\]])/g, (match, token, bracket) => {
+    return pattern.replace(/(\{\{[^}]*\}\})|([()[\]])/g, (_match, token, bracket) => {
         if (token) {
             return token; // Leave tokens intact
         }
@@ -89,6 +89,15 @@ export const escapeTemplateBrackets = (pattern: string): string => {
  *
  * @internal
  */
+// IMPORTANT:
+// - We include the Arabic-Indic digit `٤` as a rumuz code, but we do NOT match it when it's part of a larger number (e.g. "٣٤").
+// - We intentionally do NOT match ASCII `4`.
+// - For performance/clarity, the single-letter rumuz are represented as a character class.
+const RUMUZ_SINGLE_LETTER = '[خرزيمنصدفلتقع]';
+const RUMUZ_FOUR = '(?<![\\u0660-\\u0669])٤(?![\\u0660-\\u0669])';
+const RUMUZ_ATOM = `(?:خت|خغ|بخ|عخ|مق|مت|عس|سي|كن|مد|قد|خد|فد|دل|كد|غد|صد|تم|فق|دق|${RUMUZ_SINGLE_LETTER}|${RUMUZ_FOUR})`;
+const RUMUZ_BLOCK = `${RUMUZ_ATOM}(?:\\s+${RUMUZ_ATOM})*`;
+
 const BASE_TOKENS: Record<string, string> = {
     /**
      * Chapter marker - Arabic word for "chapter" (باب).
@@ -148,15 +157,21 @@ const BASE_TOKENS: Record<string, string> = {
     harf: '[أ-ي]',
 
     /**
-     * One or more Arabic letters with optional spaces between them - matches sequences like "د ت سي ق".
+     * One or more Arabic letters separated by spaces - matches sequences like "د ت س ي ق".
      *
-     * Useful for matching abbreviated author/narrator codes commonly found in
-     * hadith and narrator biography books. Requires at least one Arabic letter.
+     * Useful for matching abbreviation *lists* that are encoded as single-letter tokens
+     * separated by spaces.
      *
-     * @example '{{harfs}}' matches 'د ت سي ق' in '١١١٨ د ت سي ق: حجاج'
+     * IMPORTANT:
+     * - This token intentionally matches **single letters only** (with optional spacing).
+     * - It does NOT match multi-letter rumuz like "سي" or "خت". For those, use `{{rumuz}}`.
+     *
+     * @example '{{harfs}}' matches 'د ت س ي ق' in '١١١٨ د ت س ي ق: حجاج'
      * @example '{{raqms:num}} {{harfs}}:' matches number + abbreviations + colon
      */
-    harfs: '[أ-ي](?:[أ-ي\\s]*[أ-ي])?',
+    // Example matches: "د ت س ي ق"
+    // Example non-matches: "وعلامة ...", "في", "لا", "سي", "خت"
+    harfs: '[أ-ي](?:\\s+[أ-ي])*',
 
     /**
      * Book marker - Arabic word for "book" (كتاب).
@@ -201,6 +216,26 @@ const BASE_TOKENS: Record<string, string> = {
      * @example '{{raqms}}' matches '٦٦٩٦' in '٦٦٩٦ - حدثنا'
      */
     raqms: '[\\u0660-\\u0669]+',
+
+    /**
+     * Rumuz (source abbreviations) used in rijāl / takhrīj texts.
+     *
+     * This token matches the known abbreviation set used to denote sources like:
+     * - All six books: (ع)
+     * - The four Sunan: (٤)
+     * - Bukhari: خ / خت / خغ / بخ / عخ / ز / ي
+     * - Muslim: م / مق / مت
+     * - Nasa'i: س / ن / ص / عس / سي / كن
+     * - Abu Dawud: د / مد / قد / خد / ف / فد / ل / دل / كد / غد / صد
+     * - Tirmidhi: ت / تم
+     * - Ibn Majah: ق / فق
+     *
+     * Notes:
+     * - Order matters: longer alternatives must come before shorter ones (e.g., "خد" before "خ")
+     * - This token matches a rumuz *block*: one or more codes separated by whitespace
+     *   (e.g., "خ سي", "خ فق", "خت ٤", "د ت سي ق")
+     */
+    rumuz: RUMUZ_BLOCK,
 
     /**
      * Punctuation characters.
