@@ -32,7 +32,7 @@ export { escapeRegex, makeDiacriticInsensitive } from './segmentation/fuzzy.js';
 // Core segmentation
 export { segmentPages } from './segmentation/segmenter.js';
 // Text utilities
-export { normalizeLineEndings, stripHtmlTags } from './segmentation/textUtils.js';
+export { normalizeLineEndings, normalizeTitleSpans, stripHtmlTags } from './segmentation/textUtils.js';
 
 // Token expansion types
 export type { ExpandResult } from './segmentation/tokens.js';

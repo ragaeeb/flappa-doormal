@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { normalizeLineEndings, stripHtmlTags } from './textUtils.js';
+import { normalizeLineEndings, normalizeTitleSpans, stripHtmlTags } from './textUtils.js';
 
 describe('textUtils', () => {
     describe('stripHtmlTags', () => {
@@ -71,6 +71,35 @@ describe('textUtils', () => {
 
         it('should handle Arabic text with line endings', () => {
             expect(normalizeLineEndings('بسم الله\r\nالرحمن الرحيم')).toBe('بسم الله\nالرحمن الرحيم');
+        });
+    });
+
+    describe('normalizeTitleSpans', () => {
+        const html =
+            '<span data-type="title" id=toc-5424>باب الميم </span><span data-type="title" id=toc-5425>من اسمه مُحَمَّد</span>';
+
+        it('should split adjacent title spans onto separate lines', () => {
+            const out = normalizeTitleSpans(html, { strategy: 'splitLines' });
+            expect(out).toContain('\n');
+            expect(out).toContain('toc-5424');
+            expect(out).toContain('toc-5425');
+        });
+
+        it('should merge adjacent title spans into one title span', () => {
+            const out = normalizeTitleSpans(html, { separator: ' — ', strategy: 'merge' });
+            expect(out).toContain('data-type="title"');
+            // should only have one title span after merge
+            expect((out.match(/data-type="title"/g) ?? []).length).toBe(1);
+            expect(out).toContain('باب الميم');
+            expect(out).toContain('من اسمه مُحَمَّد');
+            expect(out).toContain('—');
+        });
+
+        it('should convert subsequent adjacent title spans to subtitle for hierarchy', () => {
+            const out = normalizeTitleSpans(html, { strategy: 'hierarchy' });
+            expect((out.match(/data-type="title"/g) ?? []).length).toBe(1);
+            expect((out.match(/data-type="subtitle"/g) ?? []).length).toBe(1);
+            expect(out).toContain('\n');
         });
     });
 });
