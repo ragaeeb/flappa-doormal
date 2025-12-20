@@ -10,7 +10,7 @@
 
 import { applyBreakpoints } from './breakpoint-processor.js';
 import { isPageExcluded } from './breakpoint-utils.js';
-import { compileFastFuzzyTokenRule, matchFastFuzzyTokenAt, type FastFuzzyTokenRule } from './fast-fuzzy-prefix.js';
+import { compileFastFuzzyTokenRule, type FastFuzzyTokenRule, matchFastFuzzyTokenAt } from './fast-fuzzy-prefix.js';
 import {
     anyRuleAllowsId,
     extractNamedCaptures,
@@ -207,9 +207,70 @@ export const ensureFallbackSegment = (
 };
 
 const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, pageMap: PageMap): SplitPoint[] => {
+    const pageStartToBoundaryIndex = new Map<number, number>();
+    for (let i = 0; i < pageMap.boundaries.length; i++) {
+        pageStartToBoundaryIndex.set(pageMap.boundaries[i].start, i);
+    }
+
+    const compiledPageStartPrev = new Map<number, RegExp | null>();
+    const getPageStartPrevRegex = (rule: SplitRule, ruleIndex: number): RegExp | null => {
+        if (compiledPageStartPrev.has(ruleIndex)) {
+            return compiledPageStartPrev.get(ruleIndex) ?? null;
+        }
+        const pattern = (rule as { pageStartGuard?: string }).pageStartGuard;
+        if (!pattern) {
+            compiledPageStartPrev.set(ruleIndex, null);
+            return null;
+        }
+        const expanded = processPattern(pattern, false).pattern;
+        const re = new RegExp(`(?:${expanded})$`, 'u');
+        compiledPageStartPrev.set(ruleIndex, re);
+        return re;
+    };
+
+    const getPrevPageLastNonWsChar = (boundaryIndex: number): string => {
+        if (boundaryIndex <= 0) {
+            return '';
+        }
+        const prevBoundary = pageMap.boundaries[boundaryIndex - 1];
+        // prevBoundary.end points at the inserted page-break newline; the last content char is end-1.
+        for (let i = prevBoundary.end - 1; i >= prevBoundary.start; i--) {
+            const ch = matchContent[i];
+            if (!ch) {
+                continue;
+            }
+            if (/\s/u.test(ch)) {
+                continue;
+            }
+            return ch;
+        }
+        return '';
+    };
+
+    const passesPageStartGuard = (rule: SplitRule, ruleIndex: number, matchStart: number): boolean => {
+        const boundaryIndex = pageStartToBoundaryIndex.get(matchStart);
+        if (boundaryIndex === undefined || boundaryIndex === 0) {
+            return true; // not a page start, or the very first page
+        }
+        const prevReq = getPageStartPrevRegex(rule, ruleIndex);
+        if (!prevReq) {
+            return true;
+        }
+        const lastChar = getPrevPageLastNonWsChar(boundaryIndex);
+        if (!lastChar) {
+            return false;
+        }
+        return prevReq.test(lastChar);
+    };
+
     const combinableRules: { rule: SplitRule; prefix: string; index: number }[] = [];
     const standaloneRules: SplitRule[] = [];
-    const fastFuzzyRules: Array<{ compiled: FastFuzzyTokenRule; rule: SplitRule; ruleIndex: number }> = [];
+    const fastFuzzyRules: Array<{
+        compiled: FastFuzzyTokenRule;
+        rule: SplitRule;
+        ruleIndex: number;
+        kind: 'startsWith' | 'startsAfter';
+    }> = [];
 
     // Separate rules into combinable, standalone, and fast-fuzzy
     rules.forEach((rule, index) => {
@@ -218,9 +279,21 @@ const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, p
         // Fast-path: fuzzy + lineStartsWith + single token pattern like {{kitab}}
         // If eligible, handle separately and do NOT include in combined OR standalone regex paths.
         if ((rule as { fuzzy?: boolean }).fuzzy && 'lineStartsWith' in rule && Array.isArray(rule.lineStartsWith)) {
-            const compiled = rule.lineStartsWith.length === 1 ? compileFastFuzzyTokenRule(rule.lineStartsWith[0]) : null;
+            const compiled =
+                rule.lineStartsWith.length === 1 ? compileFastFuzzyTokenRule(rule.lineStartsWith[0]) : null;
             if (compiled) {
-                fastFuzzyRules.push({ compiled, rule, ruleIndex: index });
+                fastFuzzyRules.push({ compiled, kind: 'startsWith', rule, ruleIndex: index });
+                return; // handled by fast path
+            }
+        }
+
+        // Fast-path: fuzzy + lineStartsAfter + single token pattern like {{naql}}
+        // This avoids expensive fuzzy-expanded regex with (.*) that can be very slow on large books.
+        if ((rule as { fuzzy?: boolean }).fuzzy && 'lineStartsAfter' in rule && Array.isArray(rule.lineStartsAfter)) {
+            const compiled =
+                rule.lineStartsAfter.length === 1 ? compileFastFuzzyTokenRule(rule.lineStartsAfter[0]) : null;
+            if (compiled) {
+                fastFuzzyRules.push({ compiled, kind: 'startsAfter', rule, ruleIndex: index });
                 return; // handled by fast path
             }
         }
@@ -259,7 +332,9 @@ const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, p
         };
 
         const recordSplitPoint = (ruleIndex: number, sp: SplitPoint) => {
-            if (!splitPointsByRule.has(ruleIndex)) splitPointsByRule.set(ruleIndex, []);
+            if (!splitPointsByRule.has(ruleIndex)) {
+                splitPointsByRule.set(ruleIndex, []);
+            }
             splitPointsByRule.get(ruleIndex)!.push(sp);
         };
 
@@ -267,32 +342,59 @@ const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, p
         for (let lineStart = 0; lineStart <= matchContent.length; ) {
             advanceBoundaryTo(lineStart);
             const pageId = currentBoundary?.id ?? 0;
+            const boundaryIndex = currentBoundary ? pageStartToBoundaryIndex.get(currentBoundary.start) : undefined;
 
             // If lineStart is at end-of-string, stop.
-            if (lineStart >= matchContent.length) break;
+            if (lineStart >= matchContent.length) {
+                break;
+            }
 
             // Try each eligible rule (small set).
-            for (const { compiled, rule, ruleIndex } of fastFuzzyRules) {
+            for (const { compiled, kind, rule, ruleIndex } of fastFuzzyRules) {
                 // Apply min/max/exclude constraints
                 const passesConstraints =
                     (rule.min === undefined || pageId >= rule.min) &&
                     (rule.max === undefined || pageId <= rule.max) &&
                     !isPageExcluded(pageId, rule.exclude);
-                if (!passesConstraints) continue;
+                if (!passesConstraints) {
+                    continue;
+                }
+                // Page-start guard (fast path): only relevant when lineStart is the start of a page.
+                if (boundaryIndex !== undefined && lineStart === currentBoundary?.start) {
+                    if (!passesPageStartGuard(rule, ruleIndex, lineStart)) {
+                        continue;
+                    }
+                }
 
                 const end = matchFastFuzzyTokenAt(matchContent, lineStart, compiled);
-                if (end === null) continue;
+                if (end === null) {
+                    continue;
+                }
 
-                const splitIndex = (rule.split ?? 'at') === 'at' ? lineStart : end;
-                recordSplitPoint(ruleIndex, {
-                    index: splitIndex,
-                    meta: rule.meta,
-                    // No named captures / capturedContent for this fast-path
-                });
+                if (kind === 'startsWith') {
+                    const splitIndex = (rule.split ?? 'at') === 'at' ? lineStart : end;
+                    recordSplitPoint(ruleIndex, {
+                        index: splitIndex,
+                        meta: rule.meta,
+                        // No named captures / capturedContent for this fast-path
+                    });
+                } else {
+                    // lineStartsAfter: split at the marker start, but segment content starts after marker.
+                    const splitIndex = (rule.split ?? 'at') === 'at' ? lineStart : end;
+                    const markerLength = end - lineStart;
+                    recordSplitPoint(ruleIndex, {
+                        contentStartOffset: (rule.split ?? 'at') === 'at' ? markerLength : undefined,
+                        index: splitIndex,
+                        meta: rule.meta,
+                        // No named captures / capturedContent for this fast-path
+                    });
+                }
             }
 
             const nextNl = matchContent.indexOf('\n', lineStart);
-            if (nextNl === -1) break;
+            if (nextNl === -1) {
+                break;
+            }
             lineStart = nextNl + 1;
         }
     }
@@ -361,6 +463,11 @@ const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, p
                     !isPageExcluded(pageId, rule.exclude);
 
                 if (passesConstraints) {
+                    if (!passesPageStartGuard(rule, originalIndex, start)) {
+                        // Skip false positives caused purely by page wrap.
+                        // Mid-page line starts are unaffected.
+                        continue;
+                    }
                     const sp: SplitPoint = {
                         capturedContent: undefined, // For combinable rules, we don't use captured content for the segment text
                         contentStartOffset,
@@ -388,10 +495,11 @@ const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, p
         const { regex, usesCapture, captureNames, usesLineStartsAfter } = buildRuleRegex(rule);
         const allMatches = findMatches(matchContent, regex, usesCapture, captureNames);
         const constrainedMatches = filterByConstraints(allMatches, rule, pageMap.getId);
+        const guarded = constrainedMatches.filter((m) => passesPageStartGuard(rule, ruleIndex, m.start));
         // We don't filter by occurrence here yet, we do it uniformly later
         // But wait, filterByConstraints returns MatchResult, we need SplitPoint
 
-        const points = constrainedMatches.map((m) => {
+        const points = guarded.map((m) => {
             const isLineStartsAfter = usesLineStartsAfter && m.captured !== undefined;
             const markerLength = isLineStartsAfter ? m.end - m.captured!.length - m.start : 0;
             return {
@@ -601,10 +709,7 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
  * });
  */
 export const segmentPages = (pages: Page[], options: SegmentationOptions): Segment[] => {
-    const { rules = [], maxPages, breakpoints, prefer = 'longer', pageJoiner = 'space', logger } = options;
-    if (!pages.length) {
-        return [];
-    }
+    const { rules = [], maxPages = 0, breakpoints = [], prefer = 'longer', pageJoiner = 'space', logger } = options;
 
     const { content: matchContent, normalizedPages: normalizedContent, pageMap } = buildPageMap(pages);
     const splitPoints = collectSplitPointsFromRules(rules, matchContent, pageMap);
@@ -616,7 +721,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
     segments = ensureFallbackSegment(segments, pages, normalizedContent, pageJoiner);
 
     // Apply breakpoints post-processing for oversized segments
-    if (maxPages !== undefined && maxPages >= 0 && breakpoints?.length) {
+    if (maxPages >= 0 && breakpoints.length) {
         const patternProcessor = (p: string) => processPattern(p, false).pattern;
         return applyBreakpoints(
             segments,

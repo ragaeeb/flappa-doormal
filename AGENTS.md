@@ -389,3 +389,30 @@ bunx biome lint .
 // → segment.meta.hadithNum = "٧٥٦٣"
 ```
 
+## Page-start Guard (`pageStartGuard`)
+
+Some books contain page-wrap continuations where a new page starts with a common line-start marker (e.g. `{{naql}}`) but it is not a true new segment.
+
+Use `pageStartGuard` on a rule to allow matches at the start of a page **only if** the previous page’s last non-whitespace character matches a pattern (tokens supported):
+
+```typescript
+{
+  fuzzy: true,
+  lineStartsWith: ['{{naql}}'],
+  split: 'at',
+  pageStartGuard: '{{tarqim}}'
+}
+```
+
+Notes:
+- Applies only at page starts; mid-page line starts are unaffected.
+- Implemented in `src/segmentation/segmenter.ts` match filtering.
+
+## HTML Title Span Normalization (`normalizeTitleSpans`)
+
+Shamela HTML sometimes has adjacent title spans. Use `normalizeTitleSpans(html, { strategy })` from `src/segmentation/textUtils.ts` before converting spans to markdown headers.
+
+## Analysis Helper (`analyzeCommonLineStarts`)
+
+`analyzeCommonLineStarts(pages)` scans lines across pages and returns common template-like line-start signatures (tokenized with `TOKEN_PATTERNS`). It’s intended to help you quickly discover rule candidates without using an LLM.
+

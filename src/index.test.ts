@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
-import { type Page, type Segment, type SegmentationOptions, segmentPages } from './index';
+import { splitPageBodyFromFooter } from 'shamela';
+import { analyzeCommonLineStarts, type Page, type Segment, type SegmentationOptions, segmentPages } from './index';
 
 const htmlToMarkdown = (html: string): string => {
     return (
@@ -778,6 +779,36 @@ describe('index', () => {
                 from: 108,
                 to: 109,
             });
+        });
+
+        it.only('should not create a segment for a naql mid-sentence', () => {
+            pages = [
+                { content: 'أَخْبَرَنَا أَبُو الْحَسَنِ بْنُ الْبُخَارِيِّ، قال:', id: 1 },
+                // Starts with naql but previous page did NOT end with tarqim => should be treated as continuation (no split)
+                { content: 'أخبرنا بِهِ إِسْمَاعِيلُ بْنُ إِبْرَاهِيمَ.', id: 2 },
+                // Starts with naql and previous page ends with tarqim => should split here
+                { content: 'أَخْبَرَنَا بِهِ أَبُو إِسْحَاقَ ابْنُ الدَّرَجِيِّ', id: 3 },
+            ];
+
+            const segments = segmentPages(pages, {
+                rules: [{ fuzzy: true, lineStartsWith: ['{{naql}}'], pageStartGuard: '{{tarqim}}', split: 'at' }],
+            });
+
+            expect(segments).toHaveLength(2);
+            testSegment(segments[0], { beginsWith: 'أَخْبَرَنَا أَبُو', endsWith: 'إِبْرَاهِيمَ.', from: 1, to: 2 });
+            testSegment(segments[1], { content: pages.at(-1)!.content, from: 3 });
+        });
+    });
+
+    describe('commonLineStarts', () => {
+        it('should try it on a book', async () => {
+            let { pages }: { pages: Page[] } = await Bun.file('book.json').json();
+            pages = pages
+                .map(mapPageToMarkdown)
+                .map((p) => ({ content: splitPageBodyFromFooter(p.content)[0], id: p.id }));
+            const result = analyzeCommonLineStarts(pages);
+
+            console.log('result', result);
         });
     });
 });

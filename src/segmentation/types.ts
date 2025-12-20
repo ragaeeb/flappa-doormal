@@ -328,6 +328,28 @@ type RuleConstraints = {
      * - undefined: No fallback (current behavior)
      */
     fallback?: 'page';
+
+    /**
+     * Page-start guard: only allow this rule to match at the START of a page if the
+     * previous page's last non-whitespace character matches this pattern.
+     *
+     * This is useful for avoiding false positives caused purely by page wrap.
+     *
+     * Example use-case:
+     * - Split on `{{naql}}` at line starts (e.g. "أخبرنا ...")
+     * - BUT if a new page starts with "أخبرنا ..." and the previous page did NOT
+     *   end with sentence-ending punctuation, treat it as a continuation and do not split.
+     *
+     * Notes:
+     * - This guard applies ONLY at page starts, not mid-page line starts.
+     * - This is a template pattern (tokens allowed). It is checked against the LAST
+     *   non-whitespace character of the previous page's content.
+     *
+     * @example
+     * // Allow split at page start only if previous page ends with sentence punctuation
+     * { lineStartsWith: ['{{naql}}'], fuzzy: true, pageStartGuard: '{{tarqim}}' }
+     */
+    pageStartGuard?: string;
 };
 
 // ─────────────────────────────────────────────────────────────

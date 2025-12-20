@@ -145,6 +145,26 @@ const rules = [{
 | `template` | Depends | Custom pattern with full control |
 | `regex` | Depends | Raw regex for complex cases |
 
+### 4.1 Page-start Guard (avoid page-wrap false positives)
+
+When matching at line starts (e.g., `{{naql}}`), a new page can begin with a marker that is actually a **continuation** of the previous page (page wrap), not a true new segment.
+
+Use `pageStartGuard` to allow a rule to match at the start of a page **only if** the previous page’s last non-whitespace character matches a pattern (tokens supported):
+
+```typescript
+const segments = segmentPages(pages, {
+  rules: [{
+    fuzzy: true,
+    lineStartsWith: ['{{naql}}'],
+    split: 'at',
+    // Only allow a split at the start of a new page if the previous page ended with sentence punctuation:
+    pageStartGuard: '{{tarqim}}'
+  }]
+});
+```
+
+This guard applies **only at page starts**. Mid-page line starts are unaffected.
+
 ### 5. Auto-Escaping Brackets
 
 In `lineStartsWith`, `lineStartsAfter`, `lineEndsWith`, and `template` patterns, parentheses `()` and square brackets `[]` are **automatically escaped**. This means you can write intuitive patterns without manual escaping:
@@ -313,6 +333,41 @@ const segments = segmentPages(pages, {
 ```
 
 If your data uses *only single-letter codes separated by spaces* (e.g., `د ت س ي ق`), you can also use `{{harfs}}`.
+
+### HTML Title Span Normalization (Shamela)
+
+Some Shamela HTML exports contain adjacent title spans like:
+
+`<span data-type="title">باب الميم</span><span data-type="title">من اسمه محمد</span>`
+
+If you convert each title span to a markdown header, you can end up with `## باب الميم ## من اسمه محمد`.
+
+Use `normalizeTitleSpans(html, { strategy })` (exported from the library) before converting title spans to markdown:
+
+```typescript
+import { normalizeTitleSpans } from 'flappa-doormal';
+
+const html = '<span data-type="title">باب الميم</span><span data-type="title">من اسمه محمد</span>';
+const normalized = normalizeTitleSpans(html, { strategy: 'splitLines' });
+// => "<span data-type=\"title\">باب الميم</span>\n<span data-type=\"title\">من اسمه محمد</span>"
+```
+
+Strategies:
+- `splitLines`: each title span becomes its own line (recommended default)
+- `merge`: merge adjacent titles into one (join with a separator)
+- `hierarchy`: keep first as title, convert subsequent to `data-type="subtitle"` (you decide how to map subtitles in your converter)
+
+## Analysis Helpers (no LLM required)
+
+Use `analyzeCommonLineStarts(pages)` to discover common line-start signatures across a book, useful for rule authoring:
+
+```typescript
+import { analyzeCommonLineStarts } from 'flappa-doormal';
+
+const patterns = analyzeCommonLineStarts(pages);
+// [{ pattern: "{{numbered}}", count: 1234, examples: [...] }, ...]
+```
+
 
 ## Prompting LLMs / Agents to Generate Rules (Shamela books)
 
