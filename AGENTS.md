@@ -416,3 +416,32 @@ Shamela HTML sometimes has adjacent title spans. Use `normalizeTitleSpans(html, 
 
 `analyzeCommonLineStarts(pages)` scans lines across pages and returns common template-like line-start signatures (tokenized with `TOKEN_PATTERNS`). It’s intended to help you quickly discover rule candidates without using an LLM.
 
+Useful options (recent additions):
+- **`sortBy`**: `'specificity'` (default) or `'count'` (highest-frequency first). `topK` is applied **after** sorting.
+- **`lineFilter`**: restrict which lines are analyzed (e.g. only markdown headings).
+- **`prefixMatchers`**: consume syntactic prefixes before tokenization (default includes headings via `/^#+/u`).
+  - This is how you see variations *after* prefixes like `##` instead of collapsing to just `"##"`.
+- **`normalizeArabicDiacritics`**: `true` by default so tokens match diacritized forms (e.g. `وأَخْبَرَنَا` → `{{naql}}`).
+
+Examples:
+
+```typescript
+import { analyzeCommonLineStarts } from 'flappa-doormal';
+
+// Top 20 by frequency
+const top20 = analyzeCommonLineStarts(pages, { sortBy: 'count', topK: 20 });
+
+// Only headings (## / ### / ...)
+const headings = analyzeCommonLineStarts(pages, {
+  lineFilter: (line) => line.startsWith('#'),
+  sortBy: 'count',
+});
+
+// Custom prefixes (e.g. blockquotes + headings)
+const quoted = analyzeCommonLineStarts(pages, {
+  lineFilter: (line) => line.startsWith('>') || line.startsWith('#'),
+  prefixMatchers: [/^>+/u, /^#+/u],
+  sortBy: 'count',
+});
+```
+

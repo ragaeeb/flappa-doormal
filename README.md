@@ -368,6 +368,41 @@ const patterns = analyzeCommonLineStarts(pages);
 // [{ pattern: "{{numbered}}", count: 1234, examples: [...] }, ...]
 ```
 
+You can control **what gets analyzed** and **how results are ranked**:
+
+```typescript
+import { analyzeCommonLineStarts } from 'flappa-doormal';
+
+// Top 20 most common line-start signatures (by frequency)
+const topByCount = analyzeCommonLineStarts(pages, {
+  sortBy: 'count',
+  topK: 20,
+});
+
+// Only analyze markdown H2 headings (lines beginning with "##")
+// This shows what comes AFTER the heading marker (e.g. "## {{bab}}", "## {{numbered}}\\[", etc.)
+const headingVariants = analyzeCommonLineStarts(pages, {
+  lineFilter: (line) => line.startsWith('##'),
+  sortBy: 'count',
+  topK: 40,
+});
+
+// Support additional prefix styles without changing library code
+// (e.g. markdown blockquotes ">> ..." + headings)
+const quotedHeadings = analyzeCommonLineStarts(pages, {
+  lineFilter: (line) => line.startsWith('>') || line.startsWith('#'),
+  prefixMatchers: [/^>+/u, /^#+/u],
+  sortBy: 'count',
+  topK: 40,
+});
+```
+
+Key options:
+- `sortBy`: `'specificity'` (default) or `'count'` (highest frequency first)
+- `lineFilter`: restrict which lines are counted (e.g. only headings)
+- `prefixMatchers`: consume syntactic prefixes (default includes headings via `/^#+/u`) so you can see variations *after* the prefix
+- `normalizeArabicDiacritics`: `true` by default (helps token matching like `وأَخْبَرَنَا` → `{{naql}}`)
+
 
 ## Prompting LLMs / Agents to Generate Rules (Shamela books)
 

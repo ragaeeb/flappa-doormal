@@ -99,4 +99,94 @@ describe('line-start-analysis', () => {
         expect(result[0].pattern).toContain('{{numbered}}');
         expect(result[0].pattern).toContain('\\[');
     });
+
+    it('should support sorting by count (highest frequency first) before applying topK', () => {
+        const pages: Page[] = [
+            {
+                content: [
+                    // 10x less specific
+                    '١ - نص',
+                    '٢ - نص',
+                    '٣ - نص',
+                    '٤ - نص',
+                    '٥ - نص',
+                    '٦ - نص',
+                    '٧ - نص',
+                    '٨ - نص',
+                    '٩ - نص',
+                    '١٠ - نص',
+                    // 2x more specific
+                    '١١ - [X] نص',
+                    '١٢ - [X] نص',
+                ].join('\n'),
+                id: 1,
+            },
+        ];
+
+        const result = analyzeCommonLineStarts(pages, {
+            includeFirstWordFallback: false,
+            minCount: 2,
+            sortBy: 'count',
+            topK: 1,
+        });
+
+        // With sortBy=count, the frequent (less specific) numbered prefix should win.
+        expect(result).toHaveLength(1);
+        expect(result[0].pattern).toContain('{{numbered}}');
+        expect(result[0].pattern).not.toContain('\\[');
+        expect(result[0].count).toBe(10);
+    });
+
+    it('should support filtering to only analyze lines starting with ## (markdown headings)', () => {
+        const pages: Page[] = [
+            {
+                content: [
+                    '## باب الصلاة',
+                    '## باب الصيام',
+                    '### not included',
+                    '١ - حدثنا فلان',
+                    '## ١ - [X] عنوان',
+                    'هذا سطر عادي',
+                ].join('\n'),
+                id: 1,
+            },
+        ];
+
+        const result = analyzeCommonLineStarts(pages, {
+            lineFilter: (line) => line.startsWith('## '),
+            maxExamples: 5,
+            minCount: 1,
+            prefixChars: 80,
+            sortBy: 'count',
+            topK: 20,
+        });
+
+        // Every pattern should be a "## ..." variant because we filtered the input lines.
+        expect(result.length).toBeGreaterThan(0);
+        expect(result.every((r) => r.examples.every((e) => e.line.startsWith('## ')))).toBe(true);
+        // We should see patterns that include what comes AFTER the heading marker (not just "##").
+        const patterns = result.map((r) => r.pattern);
+        expect(patterns).toContain('##\\s*{{bab}}');
+        expect(patterns.some((p) => p.startsWith('##\\s*') && p.length > '##\\s*'.length)).toBe(true);
+    });
+
+    it('should allow callers to define custom prefixes via prefixMatchers', () => {
+        const pages: Page[] = [
+            {
+                content: ['>> باب الصلاة', '>> باب الصيام', '>> ١ - نص'].join('\n'),
+                id: 1,
+            },
+        ];
+
+        const result = analyzeCommonLineStarts(pages, {
+            lineFilter: (line) => line.startsWith('>>'),
+            minCount: 1,
+            prefixChars: 80,
+            prefixMatchers: [/^>+/u], // consume ">>" as a prefix, then tokenize what comes after
+            topK: 20,
+        });
+
+        const patterns = result.map((r) => r.pattern);
+        expect(patterns.some((p) => p.startsWith('>>\\s*{{bab}}'))).toBe(true);
+    });
 });

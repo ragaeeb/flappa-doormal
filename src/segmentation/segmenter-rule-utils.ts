@@ -25,7 +25,7 @@ export const partitionRulesForMatching = (rules: SplitRule[]): PartitionedRules 
     // Separate rules into combinable, standalone, and fast-fuzzy
     rules.forEach((rule, index) => {
         // Fast-path: fuzzy + lineStartsWith + single token pattern like {{kitab}}
-        if ((rule as { fuzzy?: boolean }).fuzzy && 'lineStartsWith' in rule && Array.isArray(rule.lineStartsWith)) {
+        if ((rule as { fuzzy?: boolean }).fuzzy && 'lineStartsWith' in rule) {
             const compiled =
                 rule.lineStartsWith.length === 1 ? compileFastFuzzyTokenRule(rule.lineStartsWith[0]) : null;
             if (compiled) {
@@ -35,7 +35,7 @@ export const partitionRulesForMatching = (rules: SplitRule[]): PartitionedRules 
         }
 
         // Fast-path: fuzzy + lineStartsAfter + single token pattern like {{naql}}
-        if ((rule as { fuzzy?: boolean }).fuzzy && 'lineStartsAfter' in rule && Array.isArray(rule.lineStartsAfter)) {
+        if ((rule as { fuzzy?: boolean }).fuzzy && 'lineStartsAfter' in rule) {
             const compiled =
                 rule.lineStartsAfter.length === 1 ? compileFastFuzzyTokenRule(rule.lineStartsAfter[0]) : null;
             if (compiled) {
