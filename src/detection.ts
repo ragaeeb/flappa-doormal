@@ -27,7 +27,7 @@ export type DetectedPattern = {
  *
  * Tokens not in this list are appended in alphabetical order from TOKEN_PATTERNS.
  */
-const TOKEN_PRIORITY_ORDER: string[] = [
+const TOKEN_PRIORITY_ORDER = [
     'basmalah', // Most specific - full phrase
     'kitab',
     'bab',
@@ -47,11 +47,31 @@ const TOKEN_PRIORITY_ORDER: string[] = [
  * Gets the token detection priority order.
  * Returns tokens in priority order, with any TOKEN_PATTERNS not in the priority list appended.
  */
-const getTokenPriority = (): string[] => {
+const getTokenPriority = () => {
     const allTokens = getAvailableTokens();
     const prioritized = TOKEN_PRIORITY_ORDER.filter((t) => allTokens.includes(t));
     const remaining = allTokens.filter((t) => !TOKEN_PRIORITY_ORDER.includes(t)).sort();
     return [...prioritized, ...remaining];
+};
+
+const isRumuzStandalone = (text: string, startIndex: number, endIndex: number): boolean => {
+    // We want rumuz to behave like a standalone marker (e.g. "س:" or "خت ٤:"),
+    // not a substring match inside normal Arabic words (e.g. "إِبْرَاهِيم").
+    const before = startIndex > 0 ? text[startIndex - 1] : '';
+    const after = endIndex < text.length ? text[endIndex] : '';
+
+    const isWhitespace = (ch: string): boolean => !!ch && /\s/u.test(ch);
+    const isOpenBracket = (ch: string): boolean => !!ch && /[([{]/u.test(ch);
+    const isRightDelimiter = (ch: string): boolean => !!ch && /[:：\-–—ـ،؛.?!؟)\]}]/u.test(ch);
+
+    // Treat any Arabic-block codepoint (letters + diacritics + digits) as "wordy" context.
+    // Unicode Script properties can classify some combining marks as "Inherited", so we avoid \p{Script=Arabic}.
+    const isArabicWordy = (ch: string): boolean => !!ch && /[\u0600-\u06FF]/u.test(ch);
+
+    const leftOk = !before || isWhitespace(before) || isOpenBracket(before) || !isArabicWordy(before);
+    const rightOk = !after || isWhitespace(after) || isRightDelimiter(after) || !isArabicWordy(after);
+
+    return leftOk && rightOk;
 };
 
 /**
@@ -69,7 +89,7 @@ const getTokenPriority = (): string[] => {
  * //   { token: 'naql', match: 'حدثنا', index: 5, endIndex: 10 }
  * // ]
  */
-export const detectTokenPatterns = (text: string): DetectedPattern[] => {
+export const detectTokenPatterns = (text: string) => {
     if (!text) {
         return [];
     }
@@ -101,6 +121,10 @@ export const detectTokenPatterns = (text: string): DetectedPattern[] => {
                 const startIndex = match.index;
                 const endIndex = startIndex + match[0].length;
 
+                if (tokenName === 'rumuz' && !isRumuzStandalone(text, startIndex, endIndex)) {
+                    continue;
+                }
+
                 // Skip if this range overlaps with an already detected pattern
                 if (isPositionCovered(startIndex, endIndex)) {
                     continue;
@@ -129,7 +153,7 @@ export const detectTokenPatterns = (text: string): DetectedPattern[] => {
  * generateTemplateFromText("٣٤ - ", detected);
  * // Returns: "{{raqms}} {{dash}} "
  */
-export const generateTemplateFromText = (text: string, detected: DetectedPattern[]): string => {
+export const generateTemplateFromText = (text: string, detected: DetectedPattern[]) => {
     if (!text || detected.length === 0) {
         return text;
     }

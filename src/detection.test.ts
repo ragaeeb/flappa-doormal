@@ -56,6 +56,22 @@ describe('detection', () => {
             expect(result.some((r) => r.token === 'rumuz')).toBe(true);
         });
 
+        it('should detect single-letter rumuz like س in "١٥٦ - س:"', () => {
+            const text = '١٥٦ - س: إِبْرَاهِيم بن أَبي بكر (١) الأخنسي المكي.';
+            const result = detectTokenPatterns(text);
+
+            expect(result.some((r) => r.token === 'rumuz' && r.match === 'س')).toBe(true);
+            // The numbered prefix should also be detected (either as composite or as parts).
+            expect(result.some((r) => r.token === 'numbered' || r.token === 'raqms')).toBe(true);
+        });
+
+        it('should not detect rumuz letters inside normal Arabic words', () => {
+            // Without boundary filtering, rumuz would match common letters inside names.
+            const text = 'إِبْرَاهِيم';
+            const result = detectTokenPatterns(text);
+            expect(result.some((r) => r.token === 'rumuz')).toBe(false);
+        });
+
         it('should not overlap detected patterns', () => {
             const result = detectTokenPatterns('٣٤ - حدثنا');
             // Each position should only be covered by one pattern
@@ -104,6 +120,18 @@ describe('detection', () => {
             const detected = detectTokenPatterns(text);
             const template = generateTemplateFromText(text, detected);
             expect(template).toContain('{{rumuz}}');
+        });
+
+        it('should generate a template that includes numbered + rumuz for "١٥٦ - س:"', () => {
+            const text = '١٥٦ - س: إِبْرَاهِيم بن أَبي بكر (١) الأخنسي المكي.';
+            const detected = detectTokenPatterns(text);
+            const template = generateTemplateFromText(text, detected);
+
+            // Note: {{numbered}} already includes the dash + trailing space in its expansion,
+            // so the token placeholders may appear adjacent in the generated template.
+            expect(template).toContain('{{numbered}}');
+            expect(template).toContain('{{rumuz}}');
+            expect(template).toContain(':');
         });
     });
 

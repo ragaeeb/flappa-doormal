@@ -14,6 +14,8 @@ describe('analysis', () => {
                     '٢ - حدثنا فلان',
                     '١١٢٨ ع: حجاج بن المنهال',
                     '١١٢٩ ع: رجل آخر',
+                    '١٥٦ - س: إِبْرَاهِيم بن أَبي بكر (١) الأخنسي المكي.',
+                    '١٥٧ - س: رَجُلٌ آخَر.',
                     'هذا سطر عادي',
                     'هذا سطر عادي',
                 ].join('\n'),
@@ -37,6 +39,11 @@ describe('analysis', () => {
 
         // Rumuz + colon entry
         expect(patterns.some((p) => p.startsWith('{{raqms}}\\s*{{rumuz}}'))).toBe(true);
+
+        // Numbered + rumuz + colon entry (e.g., "١٥٦ - س:")
+        expect(patterns.some((p) => p.includes('{{numbered}}') && p.includes('{{rumuz}}') && p.includes(':'))).toBe(
+            true,
+        );
 
         // Each entry should have examples
         for (const r of result) {
