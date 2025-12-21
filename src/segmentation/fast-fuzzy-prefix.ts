@@ -44,7 +44,9 @@ const equivKey = (ch: string): string => {
 export const matchFuzzyLiteralPrefixAt = (content: string, offset: number, literal: string): number | null => {
     let i = offset;
     // Skip leading diacritics in content (rare but possible)
-    while (i < content.length && isArabicDiacriticCode(content.charCodeAt(i))) i++;
+    while (i < content.length && isArabicDiacriticCode(content.charCodeAt(i))) {
+        i++;
+    }
 
     for (let j = 0; j < literal.length; j++) {
         const litCh = literal[j];
@@ -52,17 +54,25 @@ export const matchFuzzyLiteralPrefixAt = (content: string, offset: number, liter
         // In literal, we treat whitespace literally (no collapsing).
         // (Tokens like kitab/bab/fasl/naql/basmalah do not rely on fuzzy spaces.)
         // Skip diacritics in content before matching each char.
-        while (i < content.length && isArabicDiacriticCode(content.charCodeAt(i))) i++;
+        while (i < content.length && isArabicDiacriticCode(content.charCodeAt(i))) {
+            i++;
+        }
 
-        if (i >= content.length) return null;
+        if (i >= content.length) {
+            return null;
+        }
 
         const cCh = content[i];
-        if (equivKey(cCh) !== equivKey(litCh)) return null;
+        if (equivKey(cCh) !== equivKey(litCh)) {
+            return null;
+        }
         i++;
     }
 
     // Allow trailing diacritics immediately after the matched prefix.
-    while (i < content.length && isArabicDiacriticCode(content.charCodeAt(i))) i++;
+    while (i < content.length && isArabicDiacriticCode(content.charCodeAt(i))) {
+        i++;
+    }
     return i;
 };
 
@@ -78,10 +88,19 @@ export type CompiledLiteralAlternation = {
 };
 
 export const compileLiteralAlternation = (pattern: string): CompiledLiteralAlternation | null => {
-    if (!pattern) return null;
-    if (!isLiteralOnly(pattern)) return null;
-    const alternatives = pattern.split('|').map((s) => s.trim()).filter(Boolean);
-    if (!alternatives.length) return null;
+    if (!pattern) {
+        return null;
+    }
+    if (!isLiteralOnly(pattern)) {
+        return null;
+    }
+    const alternatives = pattern
+        .split('|')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    if (!alternatives.length) {
+        return null;
+    }
     return { alternatives };
 };
 
@@ -96,12 +115,18 @@ export type FastFuzzyTokenRule = {
  */
 export const compileFastFuzzyTokenRule = (tokenTemplate: string): FastFuzzyTokenRule | null => {
     const m = tokenTemplate.match(/^\{\{(\w+)\}\}$/);
-    if (!m) return null;
+    if (!m) {
+        return null;
+    }
     const token = m[1];
     const tokenPattern = getTokenPattern(token);
-    if (!tokenPattern) return null;
+    if (!tokenPattern) {
+        return null;
+    }
     const compiled = compileLiteralAlternation(tokenPattern);
-    if (!compiled) return null;
+    if (!compiled) {
+        return null;
+    }
     return { alternatives: compiled.alternatives, token };
 };
 
@@ -112,9 +137,9 @@ export const compileFastFuzzyTokenRule = (tokenTemplate: string): FastFuzzyToken
 export const matchFastFuzzyTokenAt = (content: string, offset: number, compiled: FastFuzzyTokenRule): number | null => {
     for (const alt of compiled.alternatives) {
         const end = matchFuzzyLiteralPrefixAt(content, offset, alt);
-        if (end !== null) return end;
+        if (end !== null) {
+            return end;
+        }
     }
     return null;
 };
-
-

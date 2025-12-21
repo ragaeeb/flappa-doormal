@@ -59,6 +59,13 @@ export type LineStartAnalysisOptions = {
      * { prefixMatchers: [/^>+/u, /^#+/u] }
      */
     prefixMatchers?: RegExp[];
+    /**
+     * How to represent whitespace in returned `pattern` signatures.
+     *
+     * - `regex` (default): use `\\s*` placeholders between tokens (useful if you paste patterns into regex-ish templates).
+     * - `space`: use literal single spaces (`' '`) between tokens (safer if you don't want `\\s` to match newlines when reused as regex).
+     */
+    whitespace?: 'regex' | 'space';
 };
 
 export type LineStartPatternExample = { line: string; pageId: number };
@@ -71,7 +78,9 @@ export type CommonLineStartPattern = {
 
 const countTokenMarkers = (pattern: string): number => (pattern.match(/\{\{/g) ?? []).length;
 
-const stripWhitespacePlaceholders = (pattern: string): string => pattern.replace(/\\s\*/g, '');
+const stripWhitespacePlaceholders = (pattern: string): string =>
+    // Remove both the regex placeholder and literal spaces/tabs since they are not meaningful "constraints"
+    pattern.replace(/\\s\*/g, '').replace(/[ \t]+/g, '');
 
 // Heuristic: higher is "more precise".
 // - More tokens usually means more structured prefix
@@ -98,6 +107,7 @@ const DEFAULT_OPTIONS: ResolvedLineStartAnalysisOptions = {
     prefixMatchers: [/^#+/u],
     sortBy: 'specificity',
     topK: 40,
+    whitespace: 'regex',
 };
 
 const escapeRegexLiteral = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -151,13 +161,22 @@ const compileTokenRegexes = (tokenNames: string[]): CompiledTokenRegex[] => {
     return compiled;
 };
 
-const appendWs = (out: string): string => (out && !out.endsWith('\\s*') ? `${out}\\s*` : out);
+const appendWs = (out: string, mode: 'regex' | 'space'): string => {
+    if (!out) {
+        return out;
+    }
+    if (mode === 'space') {
+        return out.endsWith(' ') ? out : `${out} `;
+    }
+    return out.endsWith('\\s*') ? out : `${out}\\s*`;
+};
 
 const consumeLeadingPrefixes = (
     s: string,
     pos: number,
     out: string,
     prefixMatchers: RegExp[],
+    whitespace: 'regex' | 'space',
 ): { matchedAny: boolean; out: string; pos: number } => {
     let matchedAny = false;
     let currentPos = pos;
@@ -179,7 +198,7 @@ const consumeLeadingPrefixes = (
         const wsAfter = /^[ \t]+/u.exec(s.slice(currentPos));
         if (wsAfter) {
             currentPos += wsAfter[0].length;
-            currentOut = appendWs(currentOut);
+            currentOut = appendWs(currentOut, whitespace);
         }
     }
 
@@ -222,6 +241,7 @@ const tokenizeLineStart = (
     includeFirstWordFallback: boolean,
     normalizeArabicDiacritics: boolean,
     prefixMatchers: RegExp[],
+    whitespace: 'regex' | 'space',
 ): string | null => {
     const trimmed = collapseWhitespace(line);
     if (!trimmed) {
@@ -241,7 +261,7 @@ const tokenizeLineStart = (
     const isCommonDelimiter = (ch: string): boolean => /[:：\-–—ـ،؛.?!؟()[\]{}]/u.test(ch);
 
     {
-        const consumed = consumeLeadingPrefixes(s, pos, out, prefixMatchers);
+        const consumed = consumeLeadingPrefixes(s, pos, out, prefixMatchers, whitespace);
         pos = consumed.pos;
         out = consumed.out;
         matchedAny = consumed.matchedAny;
@@ -253,7 +273,7 @@ const tokenizeLineStart = (
         const wsMatch = /^[ \t]+/u.exec(s.slice(pos));
         if (wsMatch) {
             pos += wsMatch[0].length;
-            out = appendWs(out);
+            out = appendWs(out, whitespace);
             continue;
         }
 
@@ -311,8 +331,14 @@ const tokenizeLineStart = (
         return null;
     }
     // Avoid trailing whitespace placeholder noise.
-    while (out.endsWith('\\s*')) {
-        out = out.slice(0, -3);
+    if (whitespace === 'regex') {
+        while (out.endsWith('\\s*')) {
+            out = out.slice(0, -3);
+        }
+    } else {
+        while (out.endsWith(' ')) {
+            out = out.slice(0, -1);
+        }
     }
     return out;
 };
@@ -333,6 +359,7 @@ export const analyzeCommonLineStarts = (
         // Ensure defaults are kept if caller doesn't pass these (or passes undefined).
         lineFilter: options.lineFilter ?? DEFAULT_OPTIONS.lineFilter,
         prefixMatchers: options.prefixMatchers ?? DEFAULT_OPTIONS.prefixMatchers,
+        whitespace: options.whitespace ?? DEFAULT_OPTIONS.whitespace,
     };
     const tokenPriority = buildTokenPriority();
 
@@ -357,6 +384,7 @@ export const analyzeCommonLineStarts = (
                 o.includeFirstWordFallback,
                 o.normalizeArabicDiacritics,
                 o.prefixMatchers,
+                o.whitespace,
             );
             if (!sig) {
                 continue;

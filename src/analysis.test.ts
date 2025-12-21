@@ -196,4 +196,26 @@ describe('analysis', () => {
         const patterns = result.map((r) => r.pattern);
         expect(patterns.some((p) => p.startsWith('>>\\s*{{bab}}'))).toBe(true);
     });
+
+    it('should allow callers to prefer literal spaces instead of \\\\s* in patterns', () => {
+        const pages: Page[] = [
+            {
+                content: ['١١٢٨ ع: حجاج بن المنهال', '١١٢٩ ع: رجل آخر'].join('\n'),
+                id: 1,
+            },
+        ];
+
+        const result = analyzeCommonLineStarts(pages, {
+            maxExamples: 2,
+            minCount: 1,
+            prefixChars: 40,
+            topK: 10,
+            whitespace: 'space',
+        });
+
+        const patterns = result.map((r) => r.pattern);
+        // In space mode we expect literal spaces between tokens (and no \\s* placeholders)
+        expect(patterns.some((p) => p.includes('{{raqms}} {{rumuz}}:'))).toBe(true);
+        expect(patterns.every((p) => !p.includes('\\s*'))).toBe(true);
+    });
 });
