@@ -334,29 +334,6 @@ const segments = segmentPages(pages, {
 
 If your data uses *only single-letter codes separated by spaces* (e.g., `د ت س ي ق`), you can also use `{{harfs}}`.
 
-### HTML Title Span Normalization (Shamela)
-
-Some Shamela HTML exports contain adjacent title spans like:
-
-`<span data-type="title">باب الميم</span><span data-type="title">من اسمه محمد</span>`
-
-If you convert each title span to a markdown header, you can end up with `## باب الميم ## من اسمه محمد`.
-
-Use `normalizeTitleSpans(html, { strategy })` (exported from the library) before converting title spans to markdown:
-
-```typescript
-import { normalizeTitleSpans } from 'flappa-doormal';
-
-const html = '<span data-type="title">باب الميم</span><span data-type="title">من اسمه محمد</span>';
-const normalized = normalizeTitleSpans(html, { strategy: 'splitLines' });
-// => "<span data-type=\"title\">باب الميم</span>\n<span data-type=\"title\">من اسمه محمد</span>"
-```
-
-Strategies:
-- `splitLines`: each title span becomes its own line (recommended default)
-- `merge`: merge adjacent titles into one (join with a separator)
-- `hierarchy`: keep first as title, convert subsequent to `data-type="subtitle"` (you decide how to map subtitles in your converter)
-
 ## Analysis Helpers (no LLM required)
 
 Use `analyzeCommonLineStarts(pages)` to discover common line-start signatures across a book, useful for rule authoring:
@@ -405,6 +382,68 @@ Key options:
 
 
 ## Prompting LLMs / Agents to Generate Rules (Shamela books)
+
+### Pre-analysis (no LLM required): generate “hints” from the book
+
+Before prompting an LLM, you can quickly extract **high-signal pattern hints** from the book using:
+- `analyzeCommonLineStarts(pages, options)` (from `src/line-start-analysis.ts`): common **line-start signatures** (tokenized)
+- `analyzeTextForRule(text)` / `detectTokenPatterns(text)` (from `src/pattern-detection.ts`): turn a **single representative line** into a token template suggestion
+
+These help the LLM avoid guessing and focus on the patterns actually present.
+
+#### Step 1: top line-start signatures (frequency-first)
+
+```typescript
+import { analyzeCommonLineStarts } from 'flappa-doormal';
+
+const top = analyzeCommonLineStarts(pages, {
+  sortBy: 'count',
+  topK: 40,
+  minCount: 10,
+});
+
+console.log(top.map((p) => ({ pattern: p.pattern, count: p.count, example: p.examples[0] })));
+```
+
+Typical output (example):
+
+```text
+[
+  { pattern: "{{numbered}}", count: 1200, example: { pageId: 50, line: "١ - حَدَّثَنَا ..." } },
+  { pattern: "{{bab}}",      count:  180, example: { pageId: 66, line: "باب ..." } },
+  { pattern: "##\\s*{{bab}}",count:  140, example: { pageId: 69, line: "## باب ..." } }
+]
+```
+
+If you only want to analyze headings (to see what comes *after* `##`):
+
+```typescript
+const headingVariants = analyzeCommonLineStarts(pages, {
+  lineFilter: (line) => line.startsWith('##'),
+  sortBy: 'count',
+  topK: 40,
+});
+```
+
+#### Step 2: convert a few representative lines into token templates
+
+Pick 3–10 representative line prefixes from the book (often from the examples returned above) and run:
+
+```typescript
+import { analyzeTextForRule } from 'flappa-doormal';
+
+console.log(analyzeTextForRule("٢٩- خ سي: أحمد بن حميد ..."));
+// -> { template: "{{raqms}}- {{rumuz}}: أحمد...", patternType: "lineStartsAfter", fuzzy: false, ... }
+```
+
+#### Step 3: paste the “hints” into your LLM prompt
+
+When you prompt the LLM, include a short “Hints” section:
+- Top 20–50 `analyzeCommonLineStarts` patterns (with counts + 1–2 examples)
+- 3–10 `analyzeTextForRule(...)` results
+- A small sample of pages (not the full book)
+
+Then instruct the LLM to **prioritize rules that align with those hints**.
 
 You can use an LLM to generate `SegmentationOptions` by pasting it a random subset of pages and asking it to infer robust segmentation rules. Here’s a ready-to-copy plain-text prompt:
 

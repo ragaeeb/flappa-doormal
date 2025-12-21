@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { analyzeCommonLineStarts } from './line-start-analysis.js';
+import { analyzeCommonLineStarts } from './analysis.js';
 import type { Page } from './segmentation/types.js';
 
-describe('line-start-analysis', () => {
+describe('analysis', () => {
     it('should find common tokenized line-start patterns', () => {
         const pages: Page[] = [
             {

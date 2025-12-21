@@ -1,12 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import {
-    analyzeTextForRule,
-    detectTokenPatterns,
-    generateTemplateFromText,
-    suggestPatternConfig,
-} from './pattern-detection';
+import { analyzeTextForRule, detectTokenPatterns, generateTemplateFromText, suggestPatternConfig } from './detection';
 
-describe('pattern-detection', () => {
+describe('detection', () => {
     describe('detectTokenPatterns', () => {
         it('should return empty array for empty input', () => {
             expect(detectTokenPatterns('')).toEqual([]);

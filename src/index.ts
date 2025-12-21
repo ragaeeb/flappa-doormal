@@ -31,8 +31,6 @@
 export { escapeRegex, makeDiacriticInsensitive } from './segmentation/fuzzy.js';
 // Core segmentation
 export { segmentPages } from './segmentation/segmenter.js';
-// Text utilities
-export { normalizeLineEndings, normalizeTitleSpans, stripHtmlTags } from './segmentation/textUtils.js';
 
 // Token expansion types
 export type { ExpandResult } from './segmentation/tokens.js';
@@ -65,18 +63,21 @@ export type {
 // Pattern Detection
 // ─────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────
+// Analysis helpers
+// ─────────────────────────────────────────────────────────────
+export type {
+    CommonLineStartPattern,
+    LineStartAnalysisOptions,
+    LineStartPatternExample,
+} from './analysis.js';
+export { analyzeCommonLineStarts } from './analysis.js';
 // Pattern detection types
-export type { DetectedPattern } from './pattern-detection.js';
+export type { DetectedPattern } from './detection.js';
 // Pattern detection utilities
 export {
     analyzeTextForRule,
     detectTokenPatterns,
     generateTemplateFromText,
     suggestPatternConfig,
-} from './pattern-detection.js';
-
-// ─────────────────────────────────────────────────────────────
-// Analysis helpers
-// ─────────────────────────────────────────────────────────────
-export type { CommonLineStartPattern, LineStartAnalysisOptions, LineStartPatternExample } from './line-start-analysis.js';
-export { analyzeCommonLineStarts } from './line-start-analysis.js';
+} from './detection.js';
