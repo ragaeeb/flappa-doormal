@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-
 import {
     collectFastFuzzySplitPoints,
     createPageStartGuardChecker,
     partitionRulesForMatching,
 } from './segmenter-rule-utils';
-import type { PageMap } from './segmenter-internals';
+import type { PageMap } from './segmenter-types';
 import type { SplitRule } from './types';
 
 const makePageMap = (pages: Array<{ id: number; content: string }>): { matchContent: string; pageMap: PageMap } => {
@@ -29,7 +28,9 @@ const makePageMap = (pages: Array<{ id: number; content: string }>): { matchCont
     const matchContent = parts.join('\n');
     const getId = (off: number) => {
         for (const b of boundaries) {
-            if (off >= b.start && off <= b.end) return b.id;
+            if (off >= b.start && off <= b.end) {
+                return b.id;
+            }
         }
         return boundaries.at(-1)?.id ?? 0;
     };
@@ -69,8 +70,8 @@ describe('segmenter-rule-utils', () => {
     describe('createPageStartGuardChecker', () => {
         it('should allow page-start match only when previous page ends with the guard pattern', () => {
             const { matchContent, pageMap } = makePageMap([
-                { id: 1, content: 'A:' }, // not tarqim
-                { id: 2, content: 'B' },
+                { content: 'A:', id: 1 }, // not tarqim
+                { content: 'B', id: 2 },
             ]);
             const passes = createPageStartGuardChecker(matchContent, pageMap);
             const rule: SplitRule = { lineStartsWith: ['X'], pageStartGuard: '{{tarqim}}' };
@@ -79,8 +80,8 @@ describe('segmenter-rule-utils', () => {
             expect(passes(rule, 0, 3)).toBe(false);
 
             const { matchContent: matchContent2, pageMap: pageMap2 } = makePageMap([
-                { id: 1, content: 'A.' }, // tarqim
-                { id: 2, content: 'B' },
+                { content: 'A.', id: 1 }, // tarqim
+                { content: 'B', id: 2 },
             ]);
             const passes2 = createPageStartGuardChecker(matchContent2, pageMap2);
             expect(passes2(rule, 0, 3)).toBe(true);
@@ -89,9 +90,7 @@ describe('segmenter-rule-utils', () => {
 
     describe('collectFastFuzzySplitPoints', () => {
         it('should collect split points at line starts for fast-fuzzy startsWith and startsAfter', () => {
-            const { matchContent, pageMap } = makePageMap([
-                { id: 1, content: 'أَخْبَرَنَا X\nأَخْبَرَنَا Y' },
-            ]);
+            const { matchContent, pageMap } = makePageMap([{ content: 'أَخْبَرَنَا X\nأَخْبَرَنَا Y', id: 1 }]);
 
             const rules: SplitRule[] = [
                 { fuzzy: true, lineStartsWith: ['{{naql}}'], split: 'at' },
@@ -113,5 +112,3 @@ describe('segmenter-rule-utils', () => {
         });
     });
 });
-
-

@@ -414,7 +414,7 @@ Notes:
 
 Useful options (recent additions):
 - **`sortBy`**: `'specificity'` (default) or `'count'` (highest-frequency first). `topK` is applied **after** sorting.
-- **`lineFilter`**: restrict which lines are analyzed (e.g. only markdown headings).
+- **`lineFilter`**: restrict which lines are analyzed (e.g. only Markdown headings).
 - **`prefixMatchers`**: consume syntactic prefixes before tokenization (default includes headings via `/^#+/u`).
   - This is how you see variations *after* prefixes like `##` instead of collapsing to just `"##"`.
 - **`normalizeArabicDiacritics`**: `true` by default so tokens match diacritized forms (e.g. `وأَخْبَرَنَا` → `{{naql}}`).
