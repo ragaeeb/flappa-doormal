@@ -33,6 +33,7 @@ const TOKEN_PRIORITY_ORDER: string[] = [
     'bab',
     'fasl',
     'naql',
+    'rumuz', // Source abbreviations (e.g., "خت", "خ سي", "٤")
     'numbered', // Composite: raqms + dash
     'raqms', // Multiple digits before single digit
     'raqm',

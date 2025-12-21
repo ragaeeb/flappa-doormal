@@ -10,7 +10,6 @@
 
 import { applyBreakpoints } from './breakpoint-processor.js';
 import { isPageExcluded } from './breakpoint-utils.js';
-import { compileFastFuzzyTokenRule, matchFastFuzzyTokenAt, type FastFuzzyTokenRule } from './fast-fuzzy-prefix.js';
 import {
     anyRuleAllowsId,
     extractNamedCaptures,
@@ -18,42 +17,17 @@ import {
     getLastPositionalCapture,
     type MatchResult,
 } from './match-utils.js';
-import { buildRuleRegex, extractNamedCaptureNames, hasCapturingGroup, processPattern } from './rule-regex.js';
+import { buildRuleRegex, processPattern } from './rule-regex.js';
+import {
+    collectFastFuzzySplitPoints,
+    createPageStartGuardChecker,
+    partitionRulesForMatching,
+} from './segmenter-rule-utils.js';
+import type { PageBoundary, PageMap, SplitPoint } from './segmenter-types.js';
 import { normalizeLineEndings } from './textUtils.js';
 import type { Page, Segment, SegmentationOptions, SplitRule } from './types.js';
 
 // buildRuleRegex + processPattern extracted to src/segmentation/rule-regex.ts
-
-/**
- * Represents the byte offset boundaries of a single page within concatenated content.
- */
-type PageBoundary = {
-    /** Start offset (inclusive) in the concatenated content string */
-    start: number;
-    /** End offset (inclusive) in the concatenated content string */
-    end: number;
-    /** Page ID from the original `Page` */
-    id: number;
-};
-
-/**
- * Page mapping utilities for tracking positions across concatenated pages.
- */
-type PageMap = {
-    /**
-     * Returns the page ID for a given offset in the concatenated content.
-     *
-     * @param offset - Character offset in concatenated content
-     * @returns Page ID containing that offset
-     */
-    getId: (offset: number) => number;
-    /** Array of page boundaries in order */
-    boundaries: PageBoundary[];
-    /** Sorted array of offsets where page breaks occur (for binary search) */
-    pageBreaks: number[];
-    /** Array of all page IDs in order (for sliding window algorithm) */
-    pageIds: number[];
-};
 
 /**
  * Builds a concatenated content string and page mapping from input pages.
@@ -132,27 +106,6 @@ const buildPageMap = (pages: Page[]): { content: string; normalizedPages: string
 };
 
 /**
- * Represents a position where content should be split, with associated metadata.
- */
-type SplitPoint = {
-    /** Character index in the concatenated content where the split occurs */
-    index: number;
-    /** Static metadata from the matched rule */
-    meta?: Record<string, unknown>;
-    /** Content captured by regex patterns with capturing groups */
-    capturedContent?: string;
-    /** Named captures from `{{token:name}}` patterns */
-    namedCaptures?: Record<string, string>;
-    /**
-     * Offset from index where content actually starts (for lineStartsAfter).
-     * If set, the segment content starts at `index + contentStartOffset`.
-     * This allows excluding the marker from content while keeping the split index
-     * at the match start so previous segment doesn't include the marker.
-     */
-    contentStartOffset?: number;
-};
-
-/**
  * Deduplicate split points by index, preferring ones with more information.
  *
  * Preference rules (when same index):
@@ -207,95 +160,12 @@ export const ensureFallbackSegment = (
 };
 
 const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, pageMap: PageMap): SplitPoint[] => {
-    const combinableRules: { rule: SplitRule; prefix: string; index: number }[] = [];
-    const standaloneRules: SplitRule[] = [];
-    const fastFuzzyRules: Array<{ compiled: FastFuzzyTokenRule; rule: SplitRule; ruleIndex: number }> = [];
+    const passesPageStartGuard = createPageStartGuardChecker(matchContent, pageMap);
+    const { combinableRules, fastFuzzyRules, standaloneRules } = partitionRulesForMatching(rules);
 
-    // Separate rules into combinable, standalone, and fast-fuzzy
-    rules.forEach((rule, index) => {
-        let isCombinable = true;
-
-        // Fast-path: fuzzy + lineStartsWith + single token pattern like {{kitab}}
-        // If eligible, handle separately and do NOT include in combined OR standalone regex paths.
-        if ((rule as { fuzzy?: boolean }).fuzzy && 'lineStartsWith' in rule && Array.isArray(rule.lineStartsWith)) {
-            const compiled = rule.lineStartsWith.length === 1 ? compileFastFuzzyTokenRule(rule.lineStartsWith[0]) : null;
-            if (compiled) {
-                fastFuzzyRules.push({ compiled, rule, ruleIndex: index });
-                return; // handled by fast path
-            }
-        }
-
-        // Raw regex rules are combinable ONLY if they don't use named captures, backreferences, or anonymous captures
-        if ('regex' in rule && rule.regex) {
-            const hasNamedCaptures = extractNamedCaptureNames(rule.regex).length > 0;
-            const hasBackreferences = /\\[1-9]/.test(rule.regex);
-            const hasAnonymousCaptures = hasCapturingGroup(rule.regex);
-
-            if (hasNamedCaptures || hasBackreferences || hasAnonymousCaptures) {
-                isCombinable = false;
-            }
-        }
-
-        if (isCombinable) {
-            combinableRules.push({ index, prefix: `r${index}_`, rule });
-        } else {
-            standaloneRules.push(rule);
-        }
-    });
-
-    // Store split points by rule index to apply occurrence filtering later
-    const splitPointsByRule = new Map<number, SplitPoint[]>();
-
-    // Fast fuzzy prefix scan at line starts (only for eligible fuzzy token rules)
-    if (fastFuzzyRules.length > 0) {
-        // Stream page boundary cursor to avoid O(log n) getId calls in hot loop.
-        let boundaryIdx = 0;
-        let currentBoundary = pageMap.boundaries[boundaryIdx];
-        const advanceBoundaryTo = (offset: number) => {
-            while (currentBoundary && offset > currentBoundary.end && boundaryIdx < pageMap.boundaries.length - 1) {
-                boundaryIdx++;
-                currentBoundary = pageMap.boundaries[boundaryIdx];
-            }
-        };
-
-        const recordSplitPoint = (ruleIndex: number, sp: SplitPoint) => {
-            if (!splitPointsByRule.has(ruleIndex)) splitPointsByRule.set(ruleIndex, []);
-            splitPointsByRule.get(ruleIndex)!.push(sp);
-        };
-
-        // Line starts are offset 0 and any char after '\n'
-        for (let lineStart = 0; lineStart <= matchContent.length; ) {
-            advanceBoundaryTo(lineStart);
-            const pageId = currentBoundary?.id ?? 0;
-
-            // If lineStart is at end-of-string, stop.
-            if (lineStart >= matchContent.length) break;
-
-            // Try each eligible rule (small set).
-            for (const { compiled, rule, ruleIndex } of fastFuzzyRules) {
-                // Apply min/max/exclude constraints
-                const passesConstraints =
-                    (rule.min === undefined || pageId >= rule.min) &&
-                    (rule.max === undefined || pageId <= rule.max) &&
-                    !isPageExcluded(pageId, rule.exclude);
-                if (!passesConstraints) continue;
-
-                const end = matchFastFuzzyTokenAt(matchContent, lineStart, compiled);
-                if (end === null) continue;
-
-                const splitIndex = (rule.split ?? 'at') === 'at' ? lineStart : end;
-                recordSplitPoint(ruleIndex, {
-                    index: splitIndex,
-                    meta: rule.meta,
-                    // No named captures / capturedContent for this fast-path
-                });
-            }
-
-            const nextNl = matchContent.indexOf('\n', lineStart);
-            if (nextNl === -1) break;
-            lineStart = nextNl + 1;
-        }
-    }
+    // Store split points by rule index to apply occurrence filtering later.
+    // Start with fast-fuzzy matches (if any) and then add regex-based matches.
+    const splitPointsByRule = collectFastFuzzySplitPoints(matchContent, pageMap, fastFuzzyRules, passesPageStartGuard);
 
     // Process combinable rules in a single pass
     if (combinableRules.length > 0) {
@@ -361,6 +231,11 @@ const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, p
                     !isPageExcluded(pageId, rule.exclude);
 
                 if (passesConstraints) {
+                    if (!passesPageStartGuard(rule, originalIndex, start)) {
+                        // Skip false positives caused purely by page wrap.
+                        // Mid-page line starts are unaffected.
+                        continue;
+                    }
                     const sp: SplitPoint = {
                         capturedContent: undefined, // For combinable rules, we don't use captured content for the segment text
                         contentStartOffset,
@@ -388,10 +263,11 @@ const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, p
         const { regex, usesCapture, captureNames, usesLineStartsAfter } = buildRuleRegex(rule);
         const allMatches = findMatches(matchContent, regex, usesCapture, captureNames);
         const constrainedMatches = filterByConstraints(allMatches, rule, pageMap.getId);
+        const guarded = constrainedMatches.filter((m) => passesPageStartGuard(rule, ruleIndex, m.start));
         // We don't filter by occurrence here yet, we do it uniformly later
         // But wait, filterByConstraints returns MatchResult, we need SplitPoint
 
-        const points = constrainedMatches.map((m) => {
+        const points = guarded.map((m) => {
             const isLineStartsAfter = usesLineStartsAfter && m.captured !== undefined;
             const markerLength = isLineStartsAfter ? m.end - m.captured!.length - m.start : 0;
             return {
@@ -601,10 +477,7 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
  * });
  */
 export const segmentPages = (pages: Page[], options: SegmentationOptions): Segment[] => {
-    const { rules = [], maxPages, breakpoints, prefer = 'longer', pageJoiner = 'space', logger } = options;
-    if (!pages.length) {
-        return [];
-    }
+    const { rules = [], maxPages = 0, breakpoints = [], prefer = 'longer', pageJoiner = 'space', logger } = options;
 
     const { content: matchContent, normalizedPages: normalizedContent, pageMap } = buildPageMap(pages);
     const splitPoints = collectSplitPointsFromRules(rules, matchContent, pageMap);
@@ -616,7 +489,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
     segments = ensureFallbackSegment(segments, pages, normalizedContent, pageJoiner);
 
     // Apply breakpoints post-processing for oversized segments
-    if (maxPages !== undefined && maxPages >= 0 && breakpoints?.length) {
+    if (maxPages >= 0 && breakpoints.length) {
         const patternProcessor = (p: string) => processPattern(p, false).pattern;
         return applyBreakpoints(
             segments,

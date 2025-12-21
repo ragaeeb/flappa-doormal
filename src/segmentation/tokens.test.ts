@@ -198,6 +198,7 @@ describe('tokens', () => {
             expect(tokens).toContain('dash');
             expect(tokens).toContain('bab');
             expect(tokens).toContain('naql');
+            expect(tokens).toContain('rumuz');
         });
     });
 
@@ -213,6 +214,15 @@ describe('tokens', () => {
         it('should return correct pattern for Arabic phrase tokens', () => {
             expect(getTokenPattern('bab')).toBe('باب');
             expect(getTokenPattern('kitab')).toBe('كتاب');
+        });
+
+        it('should return a pattern for rumuz', () => {
+            const pat = getTokenPattern('rumuz');
+            expect(pat).toBeDefined();
+            // A couple of representative codes
+            expect(templateToRegex(`^${pat}$`)?.test('خت')).toBeTrue();
+            expect(templateToRegex(`^${pat}$`)?.test('مد')).toBeTrue();
+            expect(templateToRegex(`^${pat}$`)?.test('٤')).toBeTrue();
         });
     });
 

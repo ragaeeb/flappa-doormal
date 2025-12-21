@@ -90,7 +90,8 @@ Replace regex with readable tokens:
 | `{{raqm}}` | Single Arabic digit | `[\\u0660-\\u0669]` |
 | `{{dash}}` | Dash variants | `[-–—ـ]` |
 | `{{harf}}` | Arabic letter | `[أ-ي]` |
-| `{{harfs}}` | Arabic letters with spaces | `[أ-ي](?:[أ-ي\s]*[أ-ي])?` |
+| `{{harfs}}` | Single-letter codes separated by spaces | `[أ-ي](?:\s+[أ-ي])*` |
+| `{{rumuz}}` | Source abbreviations (rijāl/takhrīj rumuz), incl. multi-code blocks | e.g. `خت ٤`, `خ سي`, `خ فق`, `د ت سي ق` |
 | `{{numbered}}` | Hadith numbering `٢٢ - ` | `{{raqms}} {{dash}} ` |
 | `{{fasl}}` | Section markers | `فصل\|مسألة` |
 | `{{tarqim}}` | Punctuation marks | `[.!?؟؛]` |
@@ -143,6 +144,26 @@ const rules = [{
 | `lineEndsWith` | ✅ Included | Match patterns at end of line |
 | `template` | Depends | Custom pattern with full control |
 | `regex` | Depends | Raw regex for complex cases |
+
+### 4.1 Page-start Guard (avoid page-wrap false positives)
+
+When matching at line starts (e.g., `{{naql}}`), a new page can begin with a marker that is actually a **continuation** of the previous page (page wrap), not a true new segment.
+
+Use `pageStartGuard` to allow a rule to match at the start of a page **only if** the previous page’s last non-whitespace character matches a pattern (tokens supported):
+
+```typescript
+const segments = segmentPages(pages, {
+  rules: [{
+    fuzzy: true,
+    lineStartsWith: ['{{naql}}'],
+    split: 'at',
+    // Only allow a split at the start of a new page if the previous page ended with sentence punctuation:
+    pageStartGuard: '{{tarqim}}'
+  }]
+});
+```
+
+This guard applies **only at page starts**. Mid-page line starts are unaffected.
 
 ### 5. Auto-Escaping Brackets
 
@@ -296,19 +317,250 @@ const segments = segmentPages(pages, {
 
 ### Narrator Abbreviation Codes
 
-Use `{{harfs}}` for matching Arabic letter abbreviations with spaces (common in narrator biography books):
+Use `{{rumuz}}` for matching rijāl/takhrīj source abbreviations (common in narrator biography books and takhrīj notes):
 
 ```typescript
 const segments = segmentPages(pages, {
   rules: [{
-    lineStartsAfter: ['{{raqms:num}} {{harfs}}:'],
+    lineStartsAfter: ['{{raqms:num}} {{rumuz}}:'],
     split: 'at'
   }]
 });
 
-// Matches: ١١١٨ د ت سي ق: حجاج بن دينار
+// Matches: ١١١٨ ع: ...   /   ١١١٨ خ سي: ...  /  ١١١٨ خ فق: ...
 // meta: { num: '١١١٨' }
-// content: 'حجاج بن دينار' (abbreviations stripped)
+// content: '...' (rumuz stripped)
+```
+
+If your data uses *only single-letter codes separated by spaces* (e.g., `د ت س ي ق`), you can also use `{{harfs}}`.
+
+## Analysis Helpers (no LLM required)
+
+Use `analyzeCommonLineStarts(pages)` to discover common line-start signatures across a book, useful for rule authoring:
+
+```typescript
+import { analyzeCommonLineStarts } from 'flappa-doormal';
+
+const patterns = analyzeCommonLineStarts(pages);
+// [{ pattern: "{{numbered}}", count: 1234, examples: [...] }, ...]
+```
+
+You can control **what gets analyzed** and **how results are ranked**:
+
+```typescript
+import { analyzeCommonLineStarts } from 'flappa-doormal';
+
+// Top 20 most common line-start signatures (by frequency)
+const topByCount = analyzeCommonLineStarts(pages, {
+  sortBy: 'count',
+  topK: 20,
+});
+
+// Only analyze markdown H2 headings (lines beginning with "##")
+// This shows what comes AFTER the heading marker (e.g. "## {{bab}}", "## {{numbered}}\\[", etc.)
+const headingVariants = analyzeCommonLineStarts(pages, {
+  lineFilter: (line) => line.startsWith('##'),
+  sortBy: 'count',
+  topK: 40,
+});
+
+// Support additional prefix styles without changing library code
+// (e.g. markdown blockquotes ">> ..." + headings)
+const quotedHeadings = analyzeCommonLineStarts(pages, {
+  lineFilter: (line) => line.startsWith('>') || line.startsWith('#'),
+  prefixMatchers: [/^>+/u, /^#+/u],
+  sortBy: 'count',
+  topK: 40,
+});
+```
+
+Key options:
+- `sortBy`: `'specificity'` (default) or `'count'` (highest frequency first)
+- `lineFilter`: restrict which lines are counted (e.g. only headings)
+- `prefixMatchers`: consume syntactic prefixes (default includes headings via `/^#+/u`) so you can see variations *after* the prefix
+- `normalizeArabicDiacritics`: `true` by default (helps token matching like `وأَخْبَرَنَا` → `{{naql}}`)
+
+
+## Prompting LLMs / Agents to Generate Rules (Shamela books)
+
+### Pre-analysis (no LLM required): generate “hints” from the book
+
+Before prompting an LLM, you can quickly extract **high-signal pattern hints** from the book using:
+- `analyzeCommonLineStarts(pages, options)` (from `src/line-start-analysis.ts`): common **line-start signatures** (tokenized)
+- `analyzeTextForRule(text)` / `detectTokenPatterns(text)` (from `src/pattern-detection.ts`): turn a **single representative line** into a token template suggestion
+
+These help the LLM avoid guessing and focus on the patterns actually present.
+
+#### Step 1: top line-start signatures (frequency-first)
+
+```typescript
+import { analyzeCommonLineStarts } from 'flappa-doormal';
+
+const top = analyzeCommonLineStarts(pages, {
+  sortBy: 'count',
+  topK: 40,
+  minCount: 10,
+});
+
+console.log(top.map((p) => ({ pattern: p.pattern, count: p.count, example: p.examples[0] })));
+```
+
+Typical output (example):
+
+```text
+[
+  { pattern: "{{numbered}}", count: 1200, example: { pageId: 50, line: "١ - حَدَّثَنَا ..." } },
+  { pattern: "{{bab}}",      count:  180, example: { pageId: 66, line: "باب ..." } },
+  { pattern: "##\\s*{{bab}}",count:  140, example: { pageId: 69, line: "## باب ..." } }
+]
+```
+
+If you only want to analyze headings (to see what comes *after* `##`):
+
+```typescript
+const headingVariants = analyzeCommonLineStarts(pages, {
+  lineFilter: (line) => line.startsWith('##'),
+  sortBy: 'count',
+  topK: 40,
+});
+```
+
+#### Step 2: convert a few representative lines into token templates
+
+Pick 3–10 representative line prefixes from the book (often from the examples returned above) and run:
+
+```typescript
+import { analyzeTextForRule } from 'flappa-doormal';
+
+console.log(analyzeTextForRule("٢٩- خ سي: أحمد بن حميد ..."));
+// -> { template: "{{raqms}}- {{rumuz}}: أحمد...", patternType: "lineStartsAfter", fuzzy: false, ... }
+```
+
+#### Step 3: paste the “hints” into your LLM prompt
+
+When you prompt the LLM, include a short “Hints” section:
+- Top 20–50 `analyzeCommonLineStarts` patterns (with counts + 1–2 examples)
+- 3–10 `analyzeTextForRule(...)` results
+- A small sample of pages (not the full book)
+
+Then instruct the LLM to **prioritize rules that align with those hints**.
+
+You can use an LLM to generate `SegmentationOptions` by pasting it a random subset of pages and asking it to infer robust segmentation rules. Here’s a ready-to-copy plain-text prompt:
+
+```text
+You are helping me generate JSON configuration for a text-segmentation function called segmentPages(pages, options).
+It segments Arabic book pages (e.g., Shamela) into logical segments (books/chapters/sections/entries/hadiths).
+
+I will give you a random subset of pages so you can infer patterns. You must respond with ONLY JSON (no prose).
+
+I will paste a random subset of pages. Each page has:
+- id: page number (not necessarily consecutive)
+- content: plain text; line breaks are \n
+
+Output ONLY a JSON object compatible with SegmentationOptions (no prose, no code fences).
+
+SegmentationOptions shape:
+- rules: SplitRule[]
+- optional: maxPages, breakpoints, prefer
+
+SplitRule constraints:
+- Each rule must use exactly ONE of: lineStartsWith, lineStartsAfter, lineEndsWith, template, regex
+- Optional fields: split ("at" | "after"), meta, min, max, exclude, occurrence ("first" | "last"), fuzzy
+
+Important behaviors:
+- lineStartsAfter matches at line start but strips the marker from segment.content.
+- Template patterns (lineStartsWith/After/EndsWith/template) auto-escape ()[] outside tokens.
+- Raw regex patterns do NOT auto-escape and can include groups, named captures, etc.
+
+Available tokens you may use in templates:
+- {{basmalah}}  (بسم الله / ﷽)
+- {{kitab}}     (كتاب)
+- {{bab}}       (باب)
+- {{fasl}}      (فصل | مسألة)
+- {{naql}}      (حدثنا/أخبرنا/... narration phrases)
+- {{raqm}}      (single Arabic-Indic digit)
+- {{raqms}}     (Arabic-Indic digits)
+- {{dash}}      (dash variants)
+- {{tarqim}}    (punctuation [. ! ? ؟ ؛])
+- {{harf}}      (Arabic letter)
+- {{harfs}}     (single-letter codes separated by spaces; e.g. "د ت س ي ق")
+- {{rumuz}}     (rijāl/takhrīj source abbreviations; matches blocks like "خت ٤", "خ سي", "خ فق")
+
+Named captures:
+- {{raqms:num}} captures to meta.num
+- {{:name}} captures arbitrary text to meta.name
+
+Your tasks:
+1) Identify document structure from the sample:
+   - book headers (كتاب), chapter headers (باب), sections (فصل/مسألة), hadith numbering, biography entries, etc.
+2) Propose a minimal but robust ordered ruleset:
+   - Put most-specific rules first.
+   - Use fuzzy:true for Arabic headings where diacritics vary.
+   - Use lineStartsAfter when you want to remove the marker (e.g., hadith numbers, rumuz prefixes).
+3) Use constraints:
+   - Use min/max/exclude when front matter differs or specific pages are noisy.
+4) If segments can span many pages:
+   - Set maxPages and breakpoints.
+   - Suggested breakpoints (in order): "{{tarqim}}\\s*", "\\n", "" (page boundary)
+   - Prefer "longer" unless there’s a reason to prefer shorter segments.
+5) Capture useful metadata:
+   - For numbering patterns, capture the number into meta.num (e.g., {{raqms:num}}).
+
+Examples (what good answers look like):
+
+Example A: hadith-style numbered segments
+Input pages:
+PAGE 10:
+٣٤ - حَدَّثَنَا ...\n... (rest of hadith)
+PAGE 11:
+٣٥ - حَدَّثَنَا ...\n... (rest of hadith)
+
+Good JSON answer:
+{
+  "rules": [
+    {
+      "lineStartsAfter": ["{{raqms:num}} {{dash}}\\s*"],
+      "split": "at",
+      "meta": { "type": "hadith" }
+    }
+  ]
+}
+
+Example B: chapter markers + hadith numbers
+Input pages:
+PAGE 50:
+كتاب الصلاة\nباب فضل الصلاة\n١ - حَدَّثَنَا ...\n...
+PAGE 51:
+٢ - حَدَّثَنَا ...\n...
+
+Good JSON answer:
+{
+  "rules": [
+    { "fuzzy": true, "lineStartsWith": ["{{kitab}}"], "split": "at", "meta": { "type": "book" } },
+    { "fuzzy": true, "lineStartsWith": ["{{bab}}"], "split": "at", "meta": { "type": "chapter" } },
+    { "lineStartsAfter": ["{{raqms:num}}\\s*{{dash}}\\s*"], "split": "at", "meta": { "type": "hadith" } }
+  ]
+}
+
+Example C: narrator/rijāl entries with rumuz (codes) + colon
+Input pages:
+PAGE 257:
+٢٩- خ سي: أحمد بن حميد...\nوكان من حفاظ الكوفة.
+PAGE 258:
+١٠٢- ق: تمييز ولهم شيخ آخر...\n...
+
+Good JSON answer:
+{
+  "rules": [
+    {
+      "lineStartsAfter": ["{{raqms:num}}\\s*{{dash}}\\s*{{rumuz}}:\\s*"],
+      "split": "at",
+      "meta": { "type": "entry" }
+    }
+  ]
+}
+
+Now wait for the pages.
 ```
 
 ### Sentence-Based Splitting (Last Period Per Page)

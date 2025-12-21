@@ -135,13 +135,20 @@ describe('segmenter', () => {
 
         it('should respect min/max/exclude constraints for fuzzy token lineStartsWith', () => {
             const pages: Page[] = [
-                { id: 1, content: 'بَابُ الإيمان\nx' },
-                { id: 2, content: 'بَابُ الطهارة\ny' },
-                { id: 3, content: 'بَابُ الزكاة\nz' },
+                { content: 'بَابُ الإيمان\nx', id: 1 },
+                { content: 'بَابُ الطهارة\ny', id: 2 },
+                { content: 'بَابُ الزكاة\nz', id: 3 },
             ];
 
             const rules: SplitRule[] = [
-                { fuzzy: true, lineStartsWith: ['{{bab}}'], split: 'at', meta: { type: 'chapter' }, min: 2, exclude: [3] },
+                {
+                    exclude: [3],
+                    fuzzy: true,
+                    lineStartsWith: ['{{bab}}'],
+                    meta: { type: 'chapter' },
+                    min: 2,
+                    split: 'at',
+                },
             ];
 
             const result = segmentPages(pages, { rules });
@@ -884,11 +891,11 @@ describe('segmenter', () => {
                     { content: '١٨ دق: حجاج بن دينار الأشجعي، وقيل: السلمي، مولالاهم، الواسطي.\rline2', id: 2 },
                 ];
 
-                // Clean pattern using {{harfs}} token - much simpler than verbose regex!
+                // Clean pattern using {{rumuz}} token - much simpler than verbose regex!
                 // {{raqms:num}} captures the number to meta.num
-                // {{harfs}} matches Arabic letters with optional spaces (e.g., "د ت سي ق")
+                // {{rumuz}} matches known source abbreviations (e.g., "سي", "دق", "خت", "٤", ...)
                 // lineStartsAfter automatically captures everything AFTER the pattern
-                const rules: SplitRule[] = [{ lineStartsAfter: ['{{raqms:num}} {{harfs}}:'] }];
+                const rules: SplitRule[] = [{ lineStartsAfter: ['{{raqms:num}} {{rumuz}}:'] }];
 
                 const result = segmentPages(pages, { rules });
 
@@ -898,6 +905,48 @@ describe('segmenter', () => {
 
                 expect(result[1].meta?.num).toBe('١٨');
                 expect(result[1].content).toBe('حجاج بن دينار الأشجعي، وقيل: السلمي، مولالاهم، الواسطي.\nline2');
+            });
+
+            it('should not let {{harfs}} match arbitrary Arabic phrases at line start', () => {
+                const pages: Page[] = [
+                    {
+                        content: [
+                            // Not an abbreviation chunk; should NOT be matched by {{harfs}}:
+                            'وعلامة ما اتفق عليه الجماعة الستة في الكتب الستة: (ع)',
+                            // An actual abbreviation chunk; should still be supported in other rules:
+                            '١١١٨ د ت سي ق: حجاج بن دينار الأشجعي',
+                        ].join('\n'),
+                        id: 109,
+                    },
+                ];
+
+                // If {{harfs}} is too broad, this would match the first line and strip almost everything up to the colon,
+                // producing a tiny segment like "(ع)". We want to prevent that behavior.
+                const result = segmentPages(pages, {
+                    rules: [{ lineStartsAfter: ['{{harfs}}:\\s*'], split: 'at' }],
+                });
+
+                expect(result).toHaveLength(1);
+                expect(result[0].from).toBe(109);
+                expect(result[0].content).toContain('وعلامة ما اتفق عليه الجماعة الستة في الكتب الستة: (ع)');
+            });
+
+            it('should match multi-letter rumuz and digits via {{rumuz}}', () => {
+                const pages: Page[] = [
+                    {
+                        content: ['مد: كتاب المراسيل', 'خت: تعليق البخاري', '٤: أصحاب السنن الأربعة'].join('\n'),
+                        id: 1,
+                    },
+                ];
+
+                const result = segmentPages(pages, {
+                    rules: [{ lineStartsAfter: ['{{rumuz}}:\\s*'], split: 'at' }],
+                });
+
+                expect(result).toHaveLength(3);
+                expect(result[0].content).toBe('كتاب المراسيل');
+                expect(result[1].content).toBe('تعليق البخاري');
+                expect(result[2].content).toBe('أصحاب السنن الأربعة');
             });
         });
 
@@ -1777,6 +1826,76 @@ describe('segmenter', () => {
 
                 expect(() => segmentPages(pages, { rules })).toThrow(/must specify exactly one pattern type/);
             });
+        });
+    });
+
+    describe('page-start guard (pageStartGuard)', () => {
+        it('should avoid splitting at page start when previous page does not end with tarqim', () => {
+            const pages: Page[] = [
+                { content: 'وَقَال أَبُو الْعَبَّاس: حَدَّثَنَا عَبْدُ الرَّحْمَنِ،', id: 1 }, // ends with comma
+                { content: 'أَخْبَرَنَا أَحْمَد بْن الأَزْهَر وسمعت مُحَمَّد بْن يحيى.', id: 2 },
+                { content: '١٩٦١ - خ م د ت ق: الزبير بن الخريت.', id: 3 }, // ends with period
+                { content: 'أَخْبَرَنَا أَبُو الْحَسَنِ بْنُ الْبُخَارِيِّ، قال: أَخْبَرَنَا...', id: 4 },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [
+                    // Structural entry header (always split at page 3)
+                    { lineStartsWith: ['{{raqms:num}}\\s*{{dash}}\\s*{{rumuz}}:\\s*'], split: 'at' },
+                    // Naql-based starts are allowed at page start only if previous page ended with tarqim (e.g. '.')
+                    { fuzzy: true, lineStartsWith: ['{{naql}}'], pageStartGuard: '{{tarqim}}', split: 'at' },
+                ],
+            });
+
+            // Page 2 starts with naql but page 1 ended with comma, so NO split at page 2.
+            // Page 4 starts with naql and page 3 ended with '.', so split at page 4.
+            expect(result).toHaveLength(3);
+            expect(result[0]).toMatchObject({ from: 1, to: 2 });
+            expect(result[1]).toMatchObject({ from: 3 });
+            expect(result[2]).toMatchObject({ from: 4 });
+        });
+
+        it('should still split on mid-page line starts even when previous line does not end with tarqim', () => {
+            const pages: Page[] = [
+                {
+                    content: ['أَخْبَرَنَا الزبير', 'أَخْبَرَنَا الْقُرَشِيُّ', 'أَخْبَرَنَا إِبْرَاهِيمُ'].join('\n'),
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [{ fuzzy: true, lineStartsWith: ['{{naql}}'], pageStartGuard: '{{tarqim}}', split: 'at' }],
+            });
+
+            expect(result).toHaveLength(3);
+            expect(result[0].content).toContain('أَخْبَرَنَا الزبير');
+            expect(result[1].content).toContain('أَخْبَرَنَا الْقُرَشِيُّ');
+            expect(result[2].content).toContain('أَخْبَرَنَا إِبْرَاهِيمُ');
+        });
+    });
+
+    describe('fast fuzzy lineStartsAfter (regression: avoid hangs on {{naql}})', () => {
+        it('should segment without hanging when using fuzzy lineStartsAfter with a single-token {{naql}} pattern', () => {
+            const pages: Page[] = [
+                { content: 'أَخْبَرَنَا أَبُو الْحَسَنِ بْنُ الْبُخَارِيِّ، قال:', id: 1 },
+                { content: 'أخبرنا بِهِ إِبْرَاهِيمُ بْنُ إِسْمَاعِيلَ.', id: 2 }, // page-wrap continuation (no tarqim on prev)
+                {
+                    content:
+                        'وَقَال أيضا : وأما الخليل بْن أَحْمَدَ أَبُو عَبْد الرَّحْمَنِ الأزدي الفراهيدي، فقد كان الغاية فِي استخراج مسائل النحو، وتصحيح القياس.',
+                    id: 3,
+                },
+                { content: 'أَخْبَرَنَا بِهِ أَبُو إِسْحَاقَ ابْنُ الدَّرَجِيِّ', id: 4 },
+            ];
+
+            const segments = segmentPages(pages, {
+                rules: [{ fuzzy: true, lineStartsAfter: ['{{naql}}'], pageStartGuard: '{{tarqim}}', split: 'at' }],
+            });
+
+            // page 2 is a continuation (prev page ends with ':', not tarqim) => no new segment at page 2 start
+            // page 4 follows a '.' on page 3 => allow segment at page 4
+            expect(segments).toHaveLength(2);
+            expect(segments[0]).toMatchObject({ from: 1, to: 3 });
+            expect(segments[1]).toMatchObject({ from: 4 });
         });
     });
 

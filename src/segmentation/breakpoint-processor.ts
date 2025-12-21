@@ -198,6 +198,17 @@ const processOversizedSegment = (
         }
 
         const windowEndIdx = computeWindowEndIdx(currentFromIdx, toIdx, pageIds, maxPages);
+        logger?.debug?.(`[breakpoints] iteration=${iterationCount}`, {
+            currentFromIdx,
+            currentFromPageId: pageIds[currentFromIdx],
+            remainingContentStart: remainingContent.slice(0, 50),
+            remainingContentLength: remainingContent.length,
+            remainingSpan,
+            toIdx,
+            toPageId: pageIds[toIdx],
+            windowEndIdx,
+            windowEndPageId: pageIds[windowEndIdx],
+        });
         const windowEndPosition = findBreakpointWindowEndPosition(
             remainingContent,
             currentFromIdx,
@@ -240,6 +251,13 @@ const processOversizedSegment = (
         }
 
         const pieceContent = remainingContent.slice(0, breakPosition).trim();
+        logger?.debug?.('[breakpoints] selectedBreak', {
+            breakPosition,
+            pieceContentEnd: pieceContent.slice(-50),
+            pieceContentLength: pieceContent.length,
+            windowEndPosition,
+        });
+
         const { actualEndIdx, actualStartIdx } = computePiecePages(
             pieceContent,
             currentFromIdx,
@@ -264,14 +282,25 @@ const processOversizedSegment = (
         }
 
         remainingContent = remainingContent.slice(breakPosition).trim();
+        logger?.debug?.('[breakpoints] afterSlice', {
+            actualEndIdx,
+            remainingContentLength: remainingContent.length,
+            remainingContentStart: remainingContent.slice(0, 60),
+        });
         if (!remainingContent) {
+            logger?.debug?.('[breakpoints] done: no remaining content');
             break;
         }
 
         currentFromIdx = computeNextFromIdx(remainingContent, actualEndIdx, toIdx, pageIds, normalizedPages);
+        logger?.debug?.('[breakpoints] nextIteration', {
+            currentFromIdx,
+            currentFromPageId: pageIds[currentFromIdx],
+        });
         isFirstPiece = false;
     }
 
+    logger?.debug?.('[breakpoints] processOversizedSegmentDone', { resultCount: result.length });
     return result;
 };
 
@@ -300,6 +329,11 @@ export const applyBreakpoints = (
     const result: Segment[] = [];
 
     logger?.info?.('Starting breakpoint processing', { maxPages, segmentCount: segments.length });
+
+    logger?.debug?.('[breakpoints] inputSegments', {
+        segmentCount: segments.length,
+        segments: segments.map((s) => ({ contentLength: s.content.length, from: s.from, to: s.to })),
+    });
 
     for (const segment of segments) {
         const fromIdx = pageIdToIndex.get(segment.from) ?? -1;

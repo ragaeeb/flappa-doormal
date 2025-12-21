@@ -379,11 +379,65 @@ bunx biome lint .
 | `{{raqms}}` | Multiple Arabic-Indic numerals | ٧٥٦٣ |
 | `{{raqms:num}}` | Numerals with named capture | `meta.num = "٧٥٦٣"` |
 | `{{dash}}` | Various dash characters | - – — ـ |
+| `{{harfs}}` | Single-letter codes separated by spaces | `د ت س ي ق` |
+| `{{rumuz}}` | rijāl/takhrīj source abbreviations (matches blocks like `خت ٤`, `خ سي`) | `خت ٤` |
 | `{{numbered}}` | Composite: `{{raqms}} {{dash}}` | ٧٥٦٣ - |
 
 **Named captures**: Add `:name` suffix to capture into `meta`:
 ```typescript
 '{{raqms:hadithNum}} {{dash}}' 
 // → segment.meta.hadithNum = "٧٥٦٣"
+```
+
+## Page-start Guard (`pageStartGuard`)
+
+Some books contain page-wrap continuations where a new page starts with a common line-start marker (e.g. `{{naql}}`) but it is not a true new segment.
+
+Use `pageStartGuard` on a rule to allow matches at the start of a page **only if** the previous page’s last non-whitespace character matches a pattern (tokens supported):
+
+```typescript
+{
+  fuzzy: true,
+  lineStartsWith: ['{{naql}}'],
+  split: 'at',
+  pageStartGuard: '{{tarqim}}'
+}
+```
+
+Notes:
+- Applies only at page starts; mid-page line starts are unaffected.
+- Implemented in `src/segmentation/segmenter.ts` match filtering.
+
+## Analysis Helper (`analyzeCommonLineStarts`)
+
+`analyzeCommonLineStarts(pages)` scans lines across pages and returns common template-like line-start signatures (tokenized with `TOKEN_PATTERNS`). It’s intended to help you quickly discover rule candidates without using an LLM.
+
+Useful options (recent additions):
+- **`sortBy`**: `'specificity'` (default) or `'count'` (highest-frequency first). `topK` is applied **after** sorting.
+- **`lineFilter`**: restrict which lines are analyzed (e.g. only Markdown headings).
+- **`prefixMatchers`**: consume syntactic prefixes before tokenization (default includes headings via `/^#+/u`).
+  - This is how you see variations *after* prefixes like `##` instead of collapsing to just `"##"`.
+- **`normalizeArabicDiacritics`**: `true` by default so tokens match diacritized forms (e.g. `وأَخْبَرَنَا` → `{{naql}}`).
+
+Examples:
+
+```typescript
+import { analyzeCommonLineStarts } from 'flappa-doormal';
+
+// Top 20 by frequency
+const top20 = analyzeCommonLineStarts(pages, { sortBy: 'count', topK: 20 });
+
+// Only headings (## / ### / ...)
+const headings = analyzeCommonLineStarts(pages, {
+  lineFilter: (line) => line.startsWith('#'),
+  sortBy: 'count',
+});
+
+// Custom prefixes (e.g. blockquotes + headings)
+const quoted = analyzeCommonLineStarts(pages, {
+  lineFilter: (line) => line.startsWith('>') || line.startsWith('#'),
+  prefixMatchers: [/^>+/u, /^#+/u],
+  sortBy: 'count',
+});
 ```
 
