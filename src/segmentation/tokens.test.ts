@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
     containsTokens,
     escapeTemplateBrackets,
+    expandCompositeTokensInTemplate,
     expandTokens,
     expandTokensWithCaptures,
     getAvailableTokens,
@@ -241,6 +242,20 @@ describe('tokens', () => {
         it('should expand numbered token to raqms + dash pattern', () => {
             // numbered is defined as '{{raqms}} {{dash}} ' which should expand to the raw patterns
             expect(TOKEN_PATTERNS.numbered).toBe('[\\u0660-\\u0669]+ [-–—ـ] ');
+        });
+    });
+
+    describe('expandCompositeTokensInTemplate', () => {
+        it('should expand the numbered composite token into base token template', () => {
+            expect(expandCompositeTokensInTemplate('{{numbered}}')).toBe('{{raqms}} {{dash}} ');
+        });
+
+        it('should leave non-composite tokens unchanged', () => {
+            expect(expandCompositeTokensInTemplate('{{raqms}} {{dash}} ')).toBe('{{raqms}} {{dash}} ');
+        });
+
+        it('should not expand capture syntax like {{numbered:num}}', () => {
+            expect(expandCompositeTokensInTemplate('{{numbered:num}}')).toBe('{{numbered:num}}');
         });
     });
 

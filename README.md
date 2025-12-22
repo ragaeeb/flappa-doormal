@@ -777,6 +777,23 @@ const rule = {
 };
 ```
 
+### Expanding composite tokens (for adding named captures)
+
+Some tokens are **composites** (e.g. `{{numbered}}`), which are great for quick signatures but less convenient when you want to add named captures (e.g. capture the number).
+
+You can expand composites back into their underlying template form:
+
+```typescript
+import { expandCompositeTokensInTemplate } from 'flappa-doormal';
+
+const base = expandCompositeTokensInTemplate('{{numbered}}');
+// base === '{{raqms}} {{dash}} '
+
+// Now you can add a named capture:
+const withCapture = base.replace('{{raqms}}', '{{raqms:num}}');
+// withCapture === '{{raqms:num}} {{dash}} '
+```
+
 ## Types
 
 ### `SplitRule`

@@ -95,7 +95,7 @@ export const escapeTemplateBrackets = (pattern: string): string => {
 // - For performance/clarity, the single-letter rumuz are represented as a character class.
 const RUMUZ_SINGLE_LETTER = '[خرزيمنصسدفلتقع]';
 const RUMUZ_FOUR = '(?<![\\u0660-\\u0669])٤(?![\\u0660-\\u0669])';
-const RUMUZ_ATOM = `(?:خت|خغ|بخ|عخ|مق|مت|عس|سي|كن|مد|قد|خد|فد|دل|كد|غد|صد|دت|تم|فق|دق|${RUMUZ_SINGLE_LETTER}|${RUMUZ_FOUR})`;
+const RUMUZ_ATOM = `(?:خت|خغ|بخ|عخ|مق|مت|عس|سي|سن|كن|مد|قد|خد|فد|دل|كد|غد|صد|دت|تم|فق|دق|${RUMUZ_SINGLE_LETTER}|${RUMUZ_FOUR})`;
 const RUMUZ_BLOCK = `${RUMUZ_ATOM}(?:\\s+${RUMUZ_ATOM})*`;
 
 const BASE_TOKENS: Record<string, string> = {
@@ -284,6 +284,35 @@ const COMPOSITE_TOKENS: Record<string, string> = {
 };
 
 /**
+ * Expands any *composite* tokens (like `{{numbered}}`) into their underlying template form
+ * (like `{{raqms}} {{dash}} `).
+ *
+ * This is useful when you want to take a signature produced by `analyzeCommonLineStarts()`
+ * and turn it into an editable template where you can add named captures, e.g.:
+ *
+ * - `{{numbered}}` → `{{raqms}} {{dash}} `
+ * - then: `{{raqms:num}} {{dash}} ` to capture the number
+ *
+ * Notes:
+ * - This only expands the plain `{{token}}` form (not `{{token:name}}`).
+ * - Expansion is repeated a few times to support nested composites.
+ */
+export const expandCompositeTokensInTemplate = (template: string): string => {
+    let out = template;
+    for (let i = 0; i < 10; i++) {
+        const next = out.replace(/\{\{(\w+)\}\}/g, (m, tokenName: string) => {
+            const replacement = COMPOSITE_TOKENS[tokenName];
+            return replacement ?? m;
+        });
+        if (next === out) {
+            break;
+        }
+        out = next;
+    }
+    return out;
+};
+
+/**
  * Expands base tokens in a template string.
  * Used internally to pre-expand composite tokens.
  *
@@ -399,6 +428,114 @@ export type ExpandResult = {
     hasCaptures: boolean;
 };
 
+type TemplateSegment = { type: 'token' | 'text'; value: string };
+
+const splitTemplateIntoSegments = (query: string): TemplateSegment[] => {
+    const segments: TemplateSegment[] = [];
+    let lastIndex = 0;
+    TOKEN_WITH_CAPTURE_REGEX.lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    // biome-ignore lint/suspicious/noAssignInExpressions: standard regex exec loop pattern
+    while ((match = TOKEN_WITH_CAPTURE_REGEX.exec(query)) !== null) {
+        if (match.index > lastIndex) {
+            segments.push({ type: 'text', value: query.slice(lastIndex, match.index) });
+        }
+        segments.push({ type: 'token', value: match[0] });
+        lastIndex = match.index + match[0].length;
+    }
+
+    if (lastIndex < query.length) {
+        segments.push({ type: 'text', value: query.slice(lastIndex) });
+    }
+
+    return segments;
+};
+
+const maybeApplyFuzzyToText = (text: string, fuzzyTransform?: (pattern: string) => string): string => {
+    if (fuzzyTransform && /[\u0600-\u06FF]/u.test(text)) {
+        return fuzzyTransform(text);
+    }
+    return text;
+};
+
+// NOTE: This intentionally preserves the previous behavior:
+// it applies fuzzy per `|`-separated alternative (best-effort) to avoid corrupting regex metacharacters.
+const maybeApplyFuzzyToTokenPattern = (tokenPattern: string, fuzzyTransform?: (pattern: string) => string): string => {
+    if (!fuzzyTransform) {
+        return tokenPattern;
+    }
+    return tokenPattern
+        .split('|')
+        .map((part) => (/[\u0600-\u06FF]/u.test(part) ? fuzzyTransform(part) : part))
+        .join('|');
+};
+
+const parseTokenLiteral = (literal: string): { tokenName: string; captureName: string } | null => {
+    TOKEN_WITH_CAPTURE_REGEX.lastIndex = 0;
+    const tokenMatch = TOKEN_WITH_CAPTURE_REGEX.exec(literal);
+    if (!tokenMatch) {
+        return null;
+    }
+    const [, tokenName, captureName] = tokenMatch;
+    return { captureName, tokenName };
+};
+
+const createCaptureRegistry = (capturePrefix?: string) => {
+    const captureNames: string[] = [];
+    const captureNameCounts = new Map<string, number>();
+
+    const register = (baseName: string): string => {
+        const count = captureNameCounts.get(baseName) ?? 0;
+        captureNameCounts.set(baseName, count + 1);
+        const uniqueName = count === 0 ? baseName : `${baseName}_${count + 1}`;
+        const prefixedName = capturePrefix ? `${capturePrefix}${uniqueName}` : uniqueName;
+        captureNames.push(prefixedName);
+        return prefixedName;
+    };
+
+    return { captureNames, register };
+};
+
+const expandTokenLiteral = (
+    literal: string,
+    opts: {
+        fuzzyTransform?: (pattern: string) => string;
+        registerCapture: (baseName: string) => string;
+        capturePrefix?: string;
+    },
+): string => {
+    const parsed = parseTokenLiteral(literal);
+    if (!parsed) {
+        return literal;
+    }
+
+    const { tokenName, captureName } = parsed;
+
+    // {{:name}} - capture anything with name
+    if (!tokenName && captureName) {
+        const name = opts.registerCapture(captureName);
+        return `(?<${name}>.+)`;
+    }
+
+    let tokenPattern = TOKEN_PATTERNS[tokenName];
+    if (!tokenPattern) {
+        // Unknown token - leave as-is
+        return literal;
+    }
+
+    tokenPattern = maybeApplyFuzzyToTokenPattern(tokenPattern, opts.fuzzyTransform);
+
+    // {{token:name}} - capture with name
+    if (captureName) {
+        const name = opts.registerCapture(captureName);
+        return `(?<${name}>${tokenPattern})`;
+    }
+
+    // {{token}} - no capture, just expand
+    return tokenPattern;
+};
+
 /**
  * Expands template tokens with support for named captures.
  *
@@ -440,99 +577,23 @@ export const expandTokensWithCaptures = (
     fuzzyTransform?: (pattern: string) => string,
     capturePrefix?: string,
 ): ExpandResult => {
-    const captureNames: string[] = [];
-    // Track capture name usage counts to handle duplicates
-    const captureNameCounts = new Map<string, number>();
+    const segments = splitTemplateIntoSegments(query);
+    const registry = createCaptureRegistry(capturePrefix);
 
-    /**
-     * Gets a unique capture name, appending _2, _3, etc. for duplicates.
-     * This prevents invalid regex with duplicate named groups.
-     */
-    const getUniqueCaptureName = (baseName: string): string => {
-        const count = captureNameCounts.get(baseName) ?? 0;
-        captureNameCounts.set(baseName, count + 1);
-        return count === 0 ? baseName : `${baseName}_${count + 1}`;
-    };
-
-    // Split the query into token matches and non-token segments
-    const segments: Array<{ type: 'token' | 'text'; value: string }> = [];
-    let lastIndex = 0;
-    TOKEN_WITH_CAPTURE_REGEX.lastIndex = 0;
-    let match: RegExpExecArray | null;
-
-    // biome-ignore lint/suspicious/noAssignInExpressions: standard regex exec loop pattern
-    while ((match = TOKEN_WITH_CAPTURE_REGEX.exec(query)) !== null) {
-        // Add text before this token
-        if (match.index > lastIndex) {
-            segments.push({ type: 'text', value: query.slice(lastIndex, match.index) });
-        }
-        // Add the token
-        segments.push({ type: 'token', value: match[0] });
-        lastIndex = match.index + match[0].length;
-    }
-    // Add remaining text after last token
-    if (lastIndex < query.length) {
-        segments.push({ type: 'text', value: query.slice(lastIndex) });
-    }
-
-    // Process each segment
     const processedParts = segments.map((segment) => {
         if (segment.type === 'text') {
-            // Plain text - apply fuzzy if it contains Arabic and fuzzyTransform is provided
-            if (fuzzyTransform && /[\u0600-\u06FF]/.test(segment.value)) {
-                return fuzzyTransform(segment.value);
-            }
-            return segment.value;
+            return maybeApplyFuzzyToText(segment.value, fuzzyTransform);
         }
-
-        // Token - extract tokenName and captureName
-        TOKEN_WITH_CAPTURE_REGEX.lastIndex = 0;
-        const tokenMatch = TOKEN_WITH_CAPTURE_REGEX.exec(segment.value);
-        if (!tokenMatch) {
-            return segment.value;
-        }
-
-        const [, tokenName, captureName] = tokenMatch;
-
-        // {{:name}} - capture anything with name
-        if (!tokenName && captureName) {
-            const uniqueName = getUniqueCaptureName(captureName);
-            const prefixedName = capturePrefix ? `${capturePrefix}${uniqueName}` : uniqueName;
-            captureNames.push(prefixedName);
-            return `(?<${prefixedName}>.+)`;
-        }
-
-        // Get the token pattern
-        let tokenPattern = TOKEN_PATTERNS[tokenName];
-        if (!tokenPattern) {
-            // Unknown token - leave as-is
-            return segment.value;
-        }
-
-        // Apply fuzzy transform to the token pattern
-        if (fuzzyTransform) {
-            // For tokens with alternation, apply fuzzy to each alternative
-            tokenPattern = tokenPattern
-                .split('|')
-                .map((part) => (/[\u0600-\u06FF]/.test(part) ? fuzzyTransform(part) : part))
-                .join('|');
-        }
-
-        // {{token:name}} - capture with name
-        if (captureName) {
-            const uniqueName = getUniqueCaptureName(captureName);
-            const prefixedName = capturePrefix ? `${capturePrefix}${uniqueName}` : uniqueName;
-            captureNames.push(prefixedName);
-            return `(?<${prefixedName}>${tokenPattern})`;
-        }
-
-        // {{token}} - no capture, just expand
-        return tokenPattern;
+        return expandTokenLiteral(segment.value, {
+            capturePrefix,
+            fuzzyTransform,
+            registerCapture: registry.register,
+        });
     });
 
     return {
-        captureNames,
-        hasCaptures: captureNames.length > 0,
+        captureNames: registry.captureNames,
+        hasCaptures: registry.captureNames.length > 0,
         pattern: processedParts.join(''),
     };
 };

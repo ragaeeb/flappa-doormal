@@ -39,6 +39,7 @@ export type { ExpandResult } from './segmentation/tokens.js';
 export {
     containsTokens,
     escapeTemplateBrackets,
+    expandCompositeTokensInTemplate,
     expandTokens,
     expandTokensWithCaptures,
     getAvailableTokens,
