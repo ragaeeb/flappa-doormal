@@ -102,11 +102,10 @@ export const buildLineStartsAfterRegexSource = (
     const union = processed.map((p) => p.pattern).join('|');
     const captureNames = processed.flatMap((p) => p.captureNames);
     // For lineStartsAfter, we need to capture the content.
-    // If we have a prefix, we should name the content capture too.
-    const contentCapture = capturePrefix ? `(?<${capturePrefix}content>.*)` : '(.*)';
-    if (capturePrefix) {
-        captureNames.push(`${capturePrefix}content`);
-    }
+    // If we have a prefix (combined-regex mode), we name the internal content capture so the caller
+    // can compute marker length. IMPORTANT: this internal group is not a "user capture", so it must
+    // NOT be included in `captureNames` (otherwise it leaks into segment.meta as `content`).
+    const contentCapture = capturePrefix ? `(?<${capturePrefix}__content>.*)` : '(.*)';
     return { captureNames, regex: `^(?:${union})${contentCapture}` };
 };
 

@@ -1004,6 +1004,20 @@ describe('segmenter', () => {
                 expect(result[1].meta?.num).toBe('٦٦٩٧');
             });
 
+            it('should not leak meta.content for template named captures', () => {
+                const pages: Page[] = [
+                    { content: '٦٦٩٦ - نص', id: 1 },
+                    { content: '٦٦٩٧ - نص', id: 2 },
+                ];
+
+                const rules: SplitRule[] = [{ split: 'at', template: '^{{raqms:num}} {{dash}} ' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0].meta).toEqual({ num: '٦٦٩٦' });
+                expect(result[1].meta).toEqual({ num: '٦٦٩٧' });
+            });
+
             it('should extract multiple named captures from template', () => {
                 const pages: Page[] = [{ content: '٣/٤٥٦ - نص الحديث', id: 1 }];
 
@@ -1042,6 +1056,20 @@ describe('segmenter', () => {
                 expect(result).toHaveLength(2);
                 expect(result[0].meta?.hadithNum).toBe('١');
                 expect(result[1].meta?.hadithNum).toBe('٢');
+            });
+
+            it('should not leak meta.content for lineStartsWith named captures', () => {
+                const pages: Page[] = [
+                    { content: '١ - نص', id: 1 },
+                    { content: '٢ - نص', id: 2 },
+                ];
+
+                const rules: SplitRule[] = [{ lineStartsWith: ['{{raqms:num}} {{dash}} '], split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0].meta).toEqual({ num: '١' });
+                expect(result[1].meta).toEqual({ num: '٢' });
             });
 
             it('should merge extracted captures with existing meta', () => {
@@ -1088,6 +1116,20 @@ describe('segmenter', () => {
                 expect(result[0].meta?.num).toBe('٦٦٩٦');
                 expect(result[1].content).toBe('أَخْبَرَنَا عُمَرُ');
                 expect(result[1].meta?.num).toBe('٦٦٩٧');
+            });
+
+            it('should not leak meta.content for lineStartsAfter named captures', () => {
+                const pages: Page[] = [
+                    { content: '٦٦٩٦ - نص', id: 1 },
+                    { content: '٦٦٩٧ - نص', id: 2 },
+                ];
+
+                const rules: SplitRule[] = [{ lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0].meta).toEqual({ num: '٦٦٩٦' });
+                expect(result[1].meta).toEqual({ num: '٦٦٩٧' });
             });
 
             it('should extract multiple captures with lineStartsAfter', () => {
@@ -1143,6 +1185,23 @@ describe('segmenter', () => {
                 expect(result[0].content).toBe('الصلاة');
                 expect(result[0].meta?.book).toBeDefined(); // Should capture the matched variant
                 expect(result[1].content).toBe('الصيام');
+            });
+        });
+
+        describe('raw regex patterns', () => {
+            it('should not leak meta.content for regex named captures', () => {
+                const pages: Page[] = [
+                    { content: '٦٦٩٦ - نص', id: 1 },
+                    { content: '٦٦٩٧ - نص', id: 2 },
+                ];
+
+                // Named capture only; no anonymous capture groups.
+                const rules: SplitRule[] = [{ regex: '^(?<num>[\\u0660-\\u0669]+)\\s*[-–—ـ]\\s*', split: 'at' }];
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(2);
+                expect(result[0].meta).toEqual({ num: '٦٦٩٦' });
+                expect(result[1].meta).toEqual({ num: '٦٦٩٧' });
             });
         });
 
@@ -2017,5 +2076,38 @@ describe('segmenter', () => {
             expect(result.some((s) => s.from === 2 || s.to === 2)).toBeTrue();
             expect(result.some((s) => s.from === 3 || s.to === 3)).toBeTrue();
         });
+    });
+
+    it('should not leak lineStartsAfter internal content capture into segment.meta (regression)', () => {
+        const pages = [
+            {
+                // NOTE: we use spaces around the dash so it matches the rule '{{raqms:num}} {{dash}} ...'
+                content: ['• د: أَحْمَد بن عَبد اللَّهِ.', '٥٨ - خ د س: سطر آخر'].join('\n'),
+                id: 324,
+            },
+        ];
+
+        const segments = segmentPages(pages, {
+            rules: [
+                { lineStartsAfter: ['{{bullet}}\\s*{{rumuz:rumuz}}:'], split: 'at' },
+                { lineStartsAfter: ['{{raqms:num}} {{dash}} {{rumuz:rumuz}}:'], split: 'at' },
+                // Keep the more-generic numbered rule AFTER the more-specific numbered+rumuz rule
+                // so the alternation prefers the longer/more-informative match.
+                { lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'at' },
+            ],
+        });
+
+        expect(segments).toEqual([
+            {
+                content: 'أَحْمَد بن عَبد اللَّهِ.',
+                from: 324,
+                meta: { rumuz: 'د' },
+            },
+            {
+                content: 'سطر آخر',
+                from: 324,
+                meta: { num: '٥٨', rumuz: 'خ د س' },
+            },
+        ]);
     });
 });

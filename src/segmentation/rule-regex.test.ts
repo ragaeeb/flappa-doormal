@@ -45,6 +45,12 @@ describe('rule-regex', () => {
             expect(regex).toContain('(.*)');
             expect(captureNames).toEqual(['num']);
         });
+
+        it('should use internal __content group when capturePrefix is provided (without leaking into captureNames)', () => {
+            const { regex, captureNames } = buildLineStartsAfterRegexSource(['{{raqms:num}} {{dash}}'], false, '__p__');
+            expect(regex).toContain('(?<__p____content>.*)');
+            expect(captureNames).toEqual(['__p__num']);
+        });
     });
 
     describe('buildLineStartsWithRegexSource', () => {

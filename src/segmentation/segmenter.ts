@@ -208,8 +208,8 @@ const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, p
                 let contentStartOffset: number | undefined;
 
                 if (ruleInfo.usesLineStartsAfter) {
-                    // The content capture is named `${prefix}content`
-                    capturedContent = m.groups?.[`${prefix}content`];
+                    // The internal content capture is named `${prefix}__content` (not a user capture).
+                    capturedContent = m.groups?.[`${prefix}__content`];
                     if (capturedContent !== undefined) {
                         // Calculate marker length: (full match length) - (content length)
                         // Note: m[0] is the full match of the combined group
