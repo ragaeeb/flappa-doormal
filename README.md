@@ -91,7 +91,7 @@ Replace regex with readable tokens:
 | `{{dash}}` | Dash variants | `[-–—ـ]` |
 | `{{harf}}` | Arabic letter | `[أ-ي]` |
 | `{{harfs}}` | Single-letter codes separated by spaces | `[أ-ي](?:\s+[أ-ي])*` |
-| `{{rumuz}}` | Source abbreviations (rijāl/takhrīj rumuz), incl. multi-code blocks | e.g. `خت ٤`, `خ سي`, `خ فق`, `د ت سي ق` |
+| `{{rumuz}}` | Source abbreviations (rijāl/takhrīj rumuz), incl. multi-code blocks | e.g. `خت ٤`, `خ سي`, `خ فق`, `د ت سي ق`, `دت عس ق` |
 | `{{numbered}}` | Hadith numbering `٢٢ - ` | `{{raqms}} {{dash}} ` |
 | `{{fasl}}` | Section markers | `فصل\|مسألة` |
 | `{{tarqim}}` | Punctuation marks | `[.!?؟؛]` |

@@ -225,4 +225,29 @@ describe('analysis', () => {
             },
         ]);
     });
+
+    it('should pick up numbered + combined rumuz atom like "دت" in "٦٧٧ - دت عس ق:"', () => {
+        const pages: Page[] = [
+            {
+                content: ['٦٧٧ - دت عس ق: بشر', '٦٧٨ - دت عس ق: آخر'].join('\n'),
+                id: 1,
+            },
+        ];
+
+        const result = analyzeCommonLineStarts(pages, {
+            maxExamples: 1,
+            minCount: 2,
+            prefixChars: 40,
+            sortBy: 'count',
+            topK: 10,
+        });
+
+        expect(result).toEqual([
+            {
+                count: 2,
+                examples: [{ line: '٦٧٧ - دت عس ق: بشر', pageId: 1 }],
+                pattern: '{{numbered}}{{rumuz}}:',
+            },
+        ]);
+    });
 });
