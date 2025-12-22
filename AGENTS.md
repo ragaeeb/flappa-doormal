@@ -418,6 +418,7 @@ Useful options (recent additions):
 - **`prefixMatchers`**: consume syntactic prefixes before tokenization (default includes headings via `/^#+/u`).
   - This is how you see variations *after* prefixes like `##` instead of collapsing to just `"##"`.
 - **`normalizeArabicDiacritics`**: `true` by default so tokens match diacritized forms (e.g. `وأَخْبَرَنَا` → `{{naql}}`).
+- **`whitespace`**: `'regex'` (default) uses `\\s*` placeholders; `'space'` uses literal spaces in returned signatures.
 
 Examples:
 

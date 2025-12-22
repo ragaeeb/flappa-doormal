@@ -93,7 +93,7 @@ export const escapeTemplateBrackets = (pattern: string): string => {
 // - We include the Arabic-Indic digit `٤` as a rumuz code, but we do NOT match it when it's part of a larger number (e.g. "٣٤").
 // - We intentionally do NOT match ASCII `4`.
 // - For performance/clarity, the single-letter rumuz are represented as a character class.
-const RUMUZ_SINGLE_LETTER = '[خرزيمنصدفلتقع]';
+const RUMUZ_SINGLE_LETTER = '[خرزيمنصسدفلتقع]';
 const RUMUZ_FOUR = '(?<![\\u0660-\\u0669])٤(?![\\u0660-\\u0669])';
 const RUMUZ_ATOM = `(?:خت|خغ|بخ|عخ|مق|مت|عس|سي|كن|مد|قد|خد|فد|دل|كد|غد|صد|تم|فق|دق|${RUMUZ_SINGLE_LETTER}|${RUMUZ_FOUR})`;
 const RUMUZ_BLOCK = `${RUMUZ_ATOM}(?:\\s+${RUMUZ_ATOM})*`;

@@ -379,6 +379,9 @@ Key options:
 - `lineFilter`: restrict which lines are counted (e.g. only headings)
 - `prefixMatchers`: consume syntactic prefixes (default includes headings via `/^#+/u`) so you can see variations *after* the prefix
 - `normalizeArabicDiacritics`: `true` by default (helps token matching like `وأَخْبَرَنَا` → `{{naql}}`)
+- `whitespace`: how whitespace is represented in returned patterns:
+  - `'regex'` (default): uses `\\s*` placeholders between tokens
+  - `'space'`: uses literal single spaces (`' '`) between tokens (useful if you don't want `\\s` to later match newlines when reusing these patterns)
 
 
 ## Prompting LLMs / Agents to Generate Rules (Shamela books)
