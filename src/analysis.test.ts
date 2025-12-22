@@ -105,7 +105,7 @@ describe('analysis', () => {
 
         const result = analyzeCommonLineStarts(pages, { includeFirstWordFallback: false, maxExamples: 1, minCount: 2, topK: 10 });
         expect(result).toEqual([
-            { count: 2, examples: [{ line: '١١ - [X] نص', pageId: 1 }], pattern: '{{numbered}}\\[' },
+            { count: 2, examples: [{ line: '١١ - [X] نص', pageId: 1 }], pattern: '{{numbered}}[' },
             { count: 10, examples: [{ line: '١ - نص', pageId: 1 }], pattern: '{{numbered}}' },
         ]);
     });
@@ -170,7 +170,7 @@ describe('analysis', () => {
 
         expect(result).toEqual([
             { count: 2, examples: [{ line: '## باب الصلاة', pageId: 1 }], pattern: '##\\s*{{bab}}' },
-            { count: 1, examples: [{ line: '## ١ - [X] عنوان', pageId: 1 }], pattern: '##\\s*{{numbered}}\\[' },
+            { count: 1, examples: [{ line: '## ١ - [X] عنوان', pageId: 1 }], pattern: '##\\s*{{numbered}}[' },
         ]);
     });
 
@@ -249,5 +249,17 @@ describe('analysis', () => {
                 pattern: '{{numbered}}{{rumuz}}:',
             },
         ]);
+    });
+
+    it('should not escape parentheses/brackets in returned signatures (they are auto-escaped later in templates)', () => {
+        const pages: Page[] = [
+            {
+                content: ['(ح) وأَخْبَرَنَا أَبُو إِسْحَاقَ', '(ح) وأَخْبَرَنَا أَبُو إِسْحَاقَ'].join('\n'),
+                id: 1,
+            },
+        ];
+
+        const result = analyzeCommonLineStarts(pages, { maxExamples: 1, minCount: 2, prefixChars: 60, sortBy: 'count', topK: 5 });
+        expect(result).toEqual([{ count: 2, examples: [{ line: '(ح) وأَخْبَرَنَا أَبُو إِسْحَاقَ', pageId: 1 }], pattern: '(ح)' }]);
     });
 });

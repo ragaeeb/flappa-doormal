@@ -110,7 +110,11 @@ const DEFAULT_OPTIONS: ResolvedLineStartAnalysisOptions = {
     whitespace: 'regex',
 };
 
-const escapeRegexLiteral = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// For analysis signatures we avoid escaping ()[] because:
+// - These are commonly used literally in texts (e.g., "(ح)")
+// - When signatures are later used in template patterns, ()[] are auto-escaped there
+// We still escape other regex metacharacters to keep signatures safe if reused as templates.
+const escapeSignatureLiteral = (s: string): string => s.replace(/[.*+?^${}|\\{}]/g, '\\$&');
 
 // Keep this intentionally focused on "useful at line start" tokens, avoiding overly-generic tokens like {{harf}}.
 const TOKEN_PRIORITY_ORDER: string[] = [
@@ -191,7 +195,7 @@ const consumeLeadingPrefixes = (
             continue;
         }
 
-        currentOut += escapeRegexLiteral(m[0]);
+        currentOut += escapeSignatureLiteral(m[0]);
         currentPos += m[0].length;
         matchedAny = true;
 
@@ -294,7 +298,7 @@ const tokenizeLineStart = (
         if (matchedAny) {
             const ch = s[pos];
             if (ch && isCommonDelimiter(ch)) {
-                out += escapeRegexLiteral(ch);
+                out += escapeSignatureLiteral(ch);
                 pos += 1;
                 continue;
             }
@@ -309,7 +313,7 @@ const tokenizeLineStart = (
                 if (!firstWord) {
                     break;
                 }
-                out += escapeRegexLiteral(firstWord);
+                out += escapeSignatureLiteral(firstWord);
             }
             break;
         }
@@ -323,7 +327,7 @@ const tokenizeLineStart = (
         if (!firstWord) {
             return null;
         }
-        out += escapeRegexLiteral(firstWord);
+        out += escapeSignatureLiteral(firstWord);
         return out;
     }
 

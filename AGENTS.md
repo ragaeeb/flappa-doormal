@@ -420,6 +420,11 @@ Useful options (recent additions):
 - **`normalizeArabicDiacritics`**: `true` by default so tokens match diacritized forms (e.g. `وأَخْبَرَنَا` → `{{naql}}`).
 - **`whitespace`**: `'regex'` (default) uses `\\s*` placeholders; `'space'` uses literal spaces in returned signatures.
 
+**Note on brackets in returned signatures**:
+- `analyzeCommonLineStarts()` emits **template-like** signatures.
+- It intentionally **does not escape literal `()` / `[]`** (e.g. `(ح)` stays `(ح)`), because template patterns auto-escape `()[]` later.
+- If you reuse a signature inside a raw `regex` rule, you may need to escape literal brackets yourself.
+
 Examples:
 
 ```typescript

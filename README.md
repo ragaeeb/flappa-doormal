@@ -383,6 +383,12 @@ Key options:
   - `'regex'` (default): uses `\\s*` placeholders between tokens
   - `'space'`: uses literal single spaces (`' '`) between tokens (useful if you don't want `\\s` to later match newlines when reusing these patterns)
 
+**Note on brackets in returned patterns**:
+- `analyzeCommonLineStarts()` returns **template-like signatures**, not “ready-to-run regex”.
+- It intentionally **does not escape literal `()` / `[]`** in the returned `pattern` (e.g. `(ح)` stays `(ح)`).
+- If you paste these signatures into `lineStartsWith` / `lineStartsAfter` / `template`, that’s fine: those template pattern types **auto-escape `()[]`** outside `{{tokens}}`.
+- If you paste them into a raw `regex` rule, you may need to escape literal brackets yourself.
+
 
 ## Prompting LLMs / Agents to Generate Rules (Shamela books)
 
