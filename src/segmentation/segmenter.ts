@@ -18,6 +18,7 @@ import {
     type MatchResult,
 } from './match-utils.js';
 import { buildRuleRegex, processPattern } from './rule-regex.js';
+import { applyReplacements } from './replace.js';
 import {
     collectFastFuzzySplitPoints,
     createPageStartGuardChecker,
@@ -479,21 +480,22 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
 export const segmentPages = (pages: Page[], options: SegmentationOptions): Segment[] => {
     const { rules = [], maxPages = 0, breakpoints = [], prefer = 'longer', pageJoiner = 'space', logger } = options;
 
-    const { content: matchContent, normalizedPages: normalizedContent, pageMap } = buildPageMap(pages);
+    const processedPages = options.replace ? applyReplacements(pages, options.replace) : pages;
+    const { content: matchContent, normalizedPages: normalizedContent, pageMap } = buildPageMap(processedPages);
     const splitPoints = collectSplitPointsFromRules(rules, matchContent, pageMap);
     const unique = dedupeSplitPoints(splitPoints);
 
     // Build initial segments from structural rules
     let segments = buildSegments(unique, matchContent, pageMap, rules);
 
-    segments = ensureFallbackSegment(segments, pages, normalizedContent, pageJoiner);
+    segments = ensureFallbackSegment(segments, processedPages, normalizedContent, pageJoiner);
 
     // Apply breakpoints post-processing for oversized segments
     if (maxPages >= 0 && breakpoints.length) {
         const patternProcessor = (p: string) => processPattern(p, false).pattern;
         return applyBreakpoints(
             segments,
-            pages,
+            processedPages,
             normalizedContent,
             maxPages,
             breakpoints,

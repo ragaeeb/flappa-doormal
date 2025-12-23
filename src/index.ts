@@ -32,6 +32,10 @@ export { escapeRegex, makeDiacriticInsensitive } from './segmentation/fuzzy.js';
 // Core segmentation
 export { segmentPages } from './segmentation/segmenter.js';
 
+// Replace preprocessor (optional, also used internally by segmentPages when options.replace is set)
+export { applyReplacements } from './segmentation/replace.js';
+export type { ReplaceRule } from './segmentation/replace.js';
+
 // Token expansion types
 export type { ExpandResult } from './segmentation/tokens.js';
 

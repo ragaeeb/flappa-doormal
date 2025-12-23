@@ -95,7 +95,38 @@ export const escapeTemplateBrackets = (pattern: string): string => {
 // - For performance/clarity, the single-letter rumuz are represented as a character class.
 const RUMUZ_SINGLE_LETTER = '[خرزيمنصسدفلتقع]';
 const RUMUZ_FOUR = '(?<![\\u0660-\\u0669])٤(?![\\u0660-\\u0669])';
-const RUMUZ_ATOM = `(?:خت|خغ|بخ|عخ|مق|مت|عس|سي|سن|كن|مد|قد|خد|فد|دل|كد|غد|صد|دت|تم|فق|دق|${RUMUZ_SINGLE_LETTER}|${RUMUZ_FOUR})`;
+// IMPORTANT: order matters. Put longer/more specific codes before shorter ones.
+const RUMUZ_ATOMS: string[] = [
+    // 2-letter codes
+    'خت',
+    'خغ',
+    'بخ',
+    'عخ',
+    'مق',
+    'مت',
+    'عس',
+    'سي',
+    'سن',
+    'كن',
+    'مد',
+    'قد',
+    'خد',
+    'فد',
+    'دل',
+    'كد',
+    'غد',
+    'صد',
+    'دت',
+    'دس',
+    'تم',
+    'فق',
+    'دق',
+    // Single-letter codes (character class) + special digit atom
+    RUMUZ_SINGLE_LETTER,
+    RUMUZ_FOUR,
+];
+
+const RUMUZ_ATOM = `(?:${RUMUZ_ATOMS.join('|')})`;
 const RUMUZ_BLOCK = `${RUMUZ_ATOM}(?:\\s+${RUMUZ_ATOM})*`;
 
 const BASE_TOKENS: Record<string, string> = {
@@ -195,7 +226,7 @@ const BASE_TOKENS: Record<string, string> = {
      *
      * @example '{{naql}}' matches any of the above phrases
      */
-    naql: ['حدثني', 'وأخبرنا', 'حدثنا', 'سمعت', 'أنبأنا', 'وحدثنا', 'أخبرنا'].join('|'),
+    naql: ['حدثني', 'وأخبرنا', 'حدثنا', 'سمعت', 'أنبأنا', 'وحدثنا', 'أخبرنا', 'وحدثني', 'وحدثنيه'].join('|'),
 
     /**
      * Single Arabic-Indic digit - matches one digit (٠-٩).

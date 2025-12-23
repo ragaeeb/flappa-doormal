@@ -47,6 +47,10 @@ describe('detection', () => {
             expect(detectTokenPatterns('سن:')).toEqual([{ endIndex: 2, index: 0, match: 'سن', token: 'rumuz' }]);
         });
 
+        it('should treat "دس" as a rumuz atom within a rumuz block (e.g. "بخ دس ق:")', () => {
+            expect(detectTokenPatterns('بخ دس ق:')).toEqual([{ endIndex: 7, index: 0, match: 'بخ دس ق', token: 'rumuz' }]);
+        });
+
         it('should detect single-letter rumuz like س in "١٥٦ - س:"', () => {
             expect(detectTokenPatterns('١٥٦ - س:')).toEqual([
                 { endIndex: 6, index: 0, match: '١٥٦ - ', token: 'numbered' },

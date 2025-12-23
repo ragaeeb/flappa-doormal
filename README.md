@@ -636,6 +636,16 @@ const pages: Page[] = [
 ];
 
 const options: SegmentationOptions = {
+  // Optional preprocessing step: regex replacements applied per-page BEFORE segmentation.
+  // Useful for normalizing OCR/typos/spacing so rules match consistently.
+  //
+  // Notes:
+  // - `flags` defaults to 'gu'. If provided, `g` and `u` are always enforced.
+  // - `pageIds: []` means "apply to no pages" (skip that rule).
+  // - Remember JSON escaping: to match a literal '.', use regex: "\\\\." in JSON.
+  replace: [
+    { regex: "([\\u0660-\\u0669]+)\\s*[-–—ـ]\\s*", replacement: "$1 - " }
+  ],
   rules: [
     { lineStartsWith: ['## '], split: 'at' }
   ],

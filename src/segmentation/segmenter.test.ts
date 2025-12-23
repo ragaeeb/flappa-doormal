@@ -1,9 +1,44 @@
 import { describe, expect, it } from 'bun:test';
 
-import { segmentPages } from './segmenter';
+import { dedupeSplitPoints, ensureFallbackSegment, segmentPages } from './segmenter';
 import type { Page, SplitRule } from './types';
 
 describe('segmenter', () => {
+    describe('dedupeSplitPoints', () => {
+        it('should prefer split points with contentStartOffset at same index', () => {
+            const splitPoints = [
+                { index: 10, meta: { a: 1 } },
+                { contentStartOffset: 3, index: 10 },
+            ];
+
+            const result = dedupeSplitPoints(splitPoints as never);
+            expect(result).toHaveLength(1);
+            expect(result[0].index).toBe(10);
+            expect(result[0].contentStartOffset).toBe(3);
+        });
+
+        it('should prefer split points with meta over those without at same index', () => {
+            const splitPoints = [{ index: 10 }, { index: 10, meta: { type: 'chapter' } }];
+
+            const result = dedupeSplitPoints(splitPoints as never);
+            expect(result).toHaveLength(1);
+            expect(result[0].meta).toEqual({ type: 'chapter' });
+        });
+    });
+
+    describe('ensureFallbackSegment', () => {
+        it('should return a single spanning segment when no segments were produced', () => {
+            const pages = [
+                { content: 'A', id: 1 },
+                { content: 'B', id: 3 },
+            ];
+            const normalizedContent = ['A', 'B'];
+            const segments = ensureFallbackSegment([], pages as never, normalizedContent, 'space');
+            expect(segments).toHaveLength(1);
+            expect(segments[0]).toMatchObject({ content: 'A B', from: 1, to: 3 });
+        });
+    });
+
     describe('segmentPages', () => {
         // ─────────────────────────────────────────────────────────────
         // Basic split: 'at' tests (current behavior)
@@ -2109,5 +2144,22 @@ describe('segmenter', () => {
                 meta: { num: '٥٨', rumuz: 'خ د س' },
             },
         ]);
+    });
+
+    it('should apply SegmentationOptions.replace before matching rules (integration)', () => {
+        const pages: Page[] = [{ content: '١- نص', id: 1 }];
+
+        const rules: SplitRule[] = [{ lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'at' }];
+
+        // Without replace: no match (missing spaces around dash), so marker isn't stripped and no meta is captured.
+        const noReplace = segmentPages(pages, { rules });
+        expect(noReplace).toEqual([{ content: '١- نص', from: 1 }]);
+
+        // With replace: normalize "١-" -> "١ - " so the rule matches and captures num.
+        const withReplace = segmentPages(pages, {
+            replace: [{ regex: '([\\u0660-\\u0669]+)\\s*[-–—ـ]\\s*', replacement: '$1 - ' }],
+            rules,
+        });
+        expect(withReplace).toEqual([{ content: 'نص', from: 1, meta: { num: '١' } }]);
     });
 });

@@ -203,6 +203,11 @@ The `breakpoints` option provides a post-processing mechanism for limiting segme
 ```typescript
 interface SegmentationOptions {
   rules: SplitRule[];
+  // Optional preprocessing step: regex replacements applied per-page BEFORE segmentation
+  // - default flags: 'gu' (and g+u are always enforced)
+  // - pageIds omitted: apply to all pages
+  // - pageIds: []: apply to no pages (skip)
+  replace?: Array<{ regex: string; replacement: string; flags?: string; pageIds?: number[] }>;
   maxPages?: number;           // Maximum pages a segment can span
   breakpoints?: string[];      // Ordered array of regex patterns (supports token expansion)
   prefer?: 'longer' | 'shorter'; // Select last or first match within window
