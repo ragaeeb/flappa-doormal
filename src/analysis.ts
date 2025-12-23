@@ -261,7 +261,9 @@ const tokenizeLineStart = (
     // Pre-compile regexes once per call (tokenNames is small); use sticky to match at position.
     const compiled = compileTokenRegexes(tokenNames);
 
-    const isArabicLetter = (ch: string): boolean => /[\u0600-\u06FF]/u.test(ch);
+    // IMPORTANT: do NOT treat all Arabic-block codepoints as "letters" (it includes punctuation like "،").
+    // We only want to consider actual letters here for the rumuz boundary guard.
+    const isArabicLetter = (ch: string): boolean => /\p{Script=Arabic}/u.test(ch) && /\p{L}/u.test(ch);
     const isCommonDelimiter = (ch: string): boolean => /[:：\-–—ـ،؛.?!؟()[\]{}]/u.test(ch);
 
     {
@@ -271,8 +273,10 @@ const tokenizeLineStart = (
         matchedAny = consumed.matchedAny;
     }
 
-    // Scan forward at most a few steps to avoid producing huge unique strings.
-    for (let steps = 0; steps < 6 && pos < s.length; steps++) {
+    // Scan forward at most a few *token* steps to avoid producing huge unique strings.
+    // Whitespace and delimiters do not count toward the token step budget.
+    let tokenSteps = 0;
+    while (tokenSteps < 6 && pos < s.length) {
         // Skip whitespace and represent it as \\s*
         const wsMatch = /^[ \t]+/u.exec(s.slice(pos));
         if (wsMatch) {
@@ -291,6 +295,7 @@ const tokenizeLineStart = (
             matchedAny = true;
             matchedToken = true;
             pos += best.text.length;
+            tokenSteps++;
             continue;
         }
 
@@ -314,6 +319,7 @@ const tokenizeLineStart = (
                     break;
                 }
                 out += escapeSignatureLiteral(firstWord);
+                tokenSteps++;
             }
             break;
         }
@@ -328,6 +334,7 @@ const tokenizeLineStart = (
             return null;
         }
         out += escapeSignatureLiteral(firstWord);
+        tokenSteps++;
         return out;
     }
 

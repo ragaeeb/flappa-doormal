@@ -198,6 +198,28 @@ describe('analysis', () => {
         ]);
     });
 
+    it('should tokenize rumuz atoms in a heading line like "## ١٤٥ - مق، د، ت:"', () => {
+        const line = '## ١٤٥ - مق، د، ت: إِبْرَاهِيم بن إسحاق';
+        const pages: Page[] = [{ content: [line, line].join('\n'), id: 1 }];
+
+        const result = analyzeCommonLineStarts(pages, {
+            maxExamples: 1,
+            minCount: 2,
+            prefixChars: 80,
+            sortBy: 'count',
+            topK: 5,
+            // default prefixMatchers already includes /^#+/u for markdown headings
+        });
+
+        expect(result).toEqual([
+            {
+                count: 2,
+                examples: [{ line, pageId: 1 }],
+                pattern: '##\\s*{{numbered}}{{rumuz}}،\\s*{{rumuz}}،\\s*{{rumuz}}:',
+            },
+        ]);
+    });
+
     it('should allow callers to prefer literal spaces instead of \\\\s* in patterns', () => {
         const pages: Page[] = [
             {

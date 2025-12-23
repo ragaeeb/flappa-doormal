@@ -564,7 +564,7 @@ export interface Logger {
  * - `[]`: apply to no pages (rule is skipped)
  * - `[id1, id2, ...]`: apply only to those pages
  */
-type Replacement = {
+export type Replacement = {
     /** Raw regex source string (no token expansion). Compiled with `u` (and always `g`). */
     regex: string;
     /** Replacement string (passed to `String.prototype.replace`). */
