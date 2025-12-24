@@ -1528,6 +1528,51 @@ describe('segmenter', () => {
                 });
             });
 
+            describe('multi-page segment from/to calculation', () => {
+                it('should correctly set segment from/to when breakpoints split content across page boundaries', () => {
+                    // This test reproduces the bug where breakpoint processing incorrectly calculates
+                    // segment from/to page IDs. When content is split at punctuation marks that happen
+                    // to be right after a page boundary, the resulting segment should reflect the
+                    // actual pages the content comes from.
+                    //
+                    // Key: Page 14215 has ONLY ONE period (after "الحمصي.") - the rest uses commas.
+                    // So with prefer: 'longer' and tarqim pattern, the break should happen at that period.
+                    const pages: Page[] = [
+                        { content: '٥٦١٣ - مُحَمَّد بن مصفى (٣) ،', id: 14214 },
+                        { content: 'أبو عَبد الله الحمصي.\nورى عَن: أَحْمَد بْن خالد،', id: 14215 },
+                        { content: 'ويوسف بْن السفر.\nرَوَى عَنه: أبو داود،', id: 14216 },
+                        { content: 'وَقَال النَّسَائي (٢) : صالح (٣) .', id: 14217 },
+                        { content: 'وَقَال صَالِح: كان مخلطا.', id: 14218 },
+                    ];
+
+                    const result = segmentPages(pages, {
+                        breakpoints: [{ pattern: '{{tarqim}}\\s*' }, ''],
+                        maxPages: 1,
+                        prefer: 'longer',
+                        rules: [{ lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'at' }],
+                    });
+
+                    // First segment: from page 14214 to 14215 (ends at "أبو عَبد الله الحمصي.")
+                    // The only tarqim within window is the period after "الحمصي"
+                    expect(result[0]).toMatchObject({ from: 14214, to: 14215 });
+                    expect(result[0].content).toEndWith('الحمصي.');
+
+                    // Second segment: from page 14215 to 14216 (starts with "ورى عَن:", ends at "ويوسف بْن السفر.")
+                    expect(result[1]).toMatchObject({ from: 14215, to: 14216 });
+                    expect(result[1].content).toStartWith('ورى عَن:');
+                    expect(result[1].content).toEndWith('السفر.');
+
+                    // Third segment: from page 14216 to 14217 (ends at last punctuation of page 14217)
+                    expect(result[2]).toMatchObject({ from: 14216, to: 14217 });
+                    expect(result[2].content).toStartWith('رَوَى عَنه:');
+                    expect(result[2].content).toEndWith('.');
+
+                    // Fourth segment: page 14218 only
+                    expect(result[3]).toMatchObject({ from: 14218 });
+                    expect(result[3].to).toBeUndefined();
+                });
+            });
+
             describe('OCR content without punctuation', () => {
                 it('should fall back to line breaks for OCR content', () => {
                     const pages: Page[] = [

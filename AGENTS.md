@@ -41,7 +41,7 @@ src/
     ├── match-utils.ts          # Extracted match processing utilities
     ├── segmenter.test.ts       # Core test suite (150+ tests including breakpoints)
     ├── segmenter.bukhari.test.ts # Real-world test cases
-    ├── breakpoint-utils.test.ts # Breakpoint utility tests (42 tests)
+    ├── breakpoint-utils.test.ts # Breakpoint utility tests (55 tests)
     ├── rule-regex.test.ts      # Rule regex builder tests
     ├── segmenter-utils.test.ts # Segmenter helper tests
     ├── tokens.test.ts          # Token expansion tests
@@ -92,7 +92,7 @@ docs/
    - `buildExcludeSet()` - Create Set from PageRange[] for O(1) lookups
    - `createSegment()` - Create segment with optional to/meta fields
    - `expandBreakpoints()` - Expand patterns with pre-compiled regexes
-   - `findActualEndPage()` - Search backwards for ending page by content
+   - `findActualEndPage()` - Search backwards for ending page using progressive prefix matching (handles mid-page splits)
    - `findBreakpointWindowEndPosition()` - Compute window boundary in content-space (robust to marker stripping)
    - `applyPageJoinerBetweenPages()` - Normalize page-boundary join in output segments (`space` vs `newline`)
    - `findBreakPosition()` - Find break position using breakpoint patterns
@@ -306,7 +306,7 @@ The original `segmentPages` had complexity 37 (max: 15). Extraction:
 1. **TypeScript strict mode** - No `any` types
 2. **Biome linting** - Max complexity 15 per function (some exceptions exist)
 3. **JSDoc comments** - All exported functions documented
-4. **Test coverage** - 251 tests across 8 files
+4. **Test coverage** - 352 tests across 12 files
 
 ## Dependencies
 
@@ -359,6 +359,8 @@ bunx biome lint .
 8. **Escaping in tests requires care**: TypeScript string `'\\.'` creates regex `\.`, but regex literal `/\./` is already escaped. Double-backslash in strings, single in literals.
 
 9. **Auto-escaping improves DX significantly**: Users expect `(أ):` to match literal parentheses. Auto-escaping `()[]` in template patterns (but not `regex`) gives intuitive behavior while preserving power-user escape hatch.
+
+10. **Page boundary detection needs progressive prefixes**: When breakpoints split content mid-page, checking only the first N characters of a page to detect if the segment ends on that page can fail. Solution: try progressively shorter prefixes (`[80, 60, 40, 30, 20, 15, 12, 10, 8, 6]`) via `JOINER_PREFIX_LENGTHS`. The check uses `indexOf(...) > 0` (not `>= 0`) to avoid false positives when a page prefix appears at position 0 (which indicates the segment *starts* with that page, not *ends* on it).
 
 ### Architecture Insights
 

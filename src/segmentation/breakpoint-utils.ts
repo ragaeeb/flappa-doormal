@@ -464,8 +464,21 @@ export const findActualEndPage = (
 ): number => {
     for (let pi = toIdx; pi > currentFromIdx; pi--) {
         const pageData = normalizedPages.get(pageIds[pi]);
-        if (pageData) {
-            const checkPortion = pageData.content.slice(0, Math.min(30, pageData.length));
+        if (!pageData) {
+            continue;
+        }
+
+        const trimmedContent = pageData.content.trimStart();
+
+        // Try progressively shorter prefixes to handle mid-page splits.
+        // Uses JOINER_PREFIX_LENGTHS which is designed for cases where only
+        // a small portion of a page is present in the segment.
+        for (const len of JOINER_PREFIX_LENGTHS) {
+            const checkPortion = trimmedContent.slice(0, Math.min(len, trimmedContent.length)).trim();
+            // Note: We use `> 0` (not `>= 0`) intentionally.
+            // If the page prefix appears at position 0, it means the piece STARTS with this page's
+            // content, not that the piece ENDS on this page. We're looking for cases where the
+            // page content appears AFTER earlier pages' content (position > 0).
             if (checkPortion.length > 0 && pieceContent.indexOf(checkPortion) > 0) {
                 return pi;
             }
