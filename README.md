@@ -1,5 +1,20 @@
 # flappa-doormal
 
+<p align="center">
+  <img src="icon.png" alt="flappa-doormal" width="128" height="128" />
+</p>
+
+<p align="center">
+  <strong>Declarative Arabic text segmentation library</strong><br/>
+  Split pages of content into logical segments using human-readable patterns.
+</p>
+
+<p align="center">
+  <a href="https://flappa-doormal.surge.sh">🚀 <strong>Live Demo</strong></a> •
+  <a href="https://www.npmjs.com/package/flappa-doormal">📦 npm</a> •
+  <a href="https://github.com/ragaeeb/flappa-doormal">📚 GitHub</a>
+</p>
+
 [![wakatime](https://wakatime.com/badge/user/a0b906ce-b8e7-4463-8bce-383238df6d4b/project/384fa29d-72e8-4078-980f-45d363f10507.svg)](https://wakatime.com/badge/user/a0b906ce-b8e7-4463-8bce-383238df6d4b/project/384fa29d-72e8-4078-980f-45d363f10507)
 [![Node.js CI](https://github.com/ragaeeb/flappa-doormal/actions/workflows/build.yml/badge.svg)](https://github.com/ragaeeb/flappa-doormal/actions/workflows/build.yml) ![GitHub License](https://img.shields.io/github/license/ragaeeb/flappa-doormal)
 ![GitHub Release](https://img.shields.io/github/v/release/ragaeeb/flappa-doormal)
@@ -11,8 +26,6 @@
 ![GitHub stars](https://img.shields.io/github/stars/ragaeeb/flappa-doormal?style=social)
 [![codecov](https://codecov.io/gh/ragaeeb/flappa-doormal/graph/badge.svg?token=RQ2BV4M9IS)](https://codecov.io/gh/ragaeeb/flappa-doormal)
 [![npm version](https://badge.fury.io/js/flappa-doormal.svg)](https://badge.fury.io/js/flappa-doormal)
-
-**Declarative Arabic text segmentation library** - Split pages of content into logical segments using human-readable patterns.
 
 ## Why This Library?
 
@@ -939,7 +952,7 @@ Complex logic is intentionally split into small, independently testable modules:
 
 - `src/segmentation/match-utils.ts`: match filtering + capture extraction
 - `src/segmentation/rule-regex.ts`: SplitRule → compiled regex builder (`buildRuleRegex`, `processPattern`)
-- `src/segmentation/breakpoint-utils.ts`: breakpoint windowing/exclusion helpers + page boundary join normalization
+- `src/segmentation/breakpoint-utils.ts`: breakpoint windowing/exclusion helpers, page boundary join normalization, and progressive prefix page detection for accurate `from`/`to` attribution
 - `src/segmentation/breakpoint-processor.ts`: breakpoint post-processing engine (applies breakpoints after structural segmentation)
 
 ## Performance Notes
@@ -985,6 +998,30 @@ See [AGENTS.md](./AGENTS.md) for:
 - Adding new tokens and pattern types
 - Algorithm explanations
 - Lessons learned during development
+
+## Demo
+
+An interactive demo is available at [flappa-doormal.surge.sh](https://flappa-doormal.surge.sh).
+
+The demo source code is located in the `demo/` directory and includes:
+- **Analysis**: Discover common line-start patterns in your text
+- **Pattern Detection**: Auto-detect tokens in text and get template suggestions
+- **Segmentation**: Apply rules and see segmented output with metadata
+
+To run the demo locally:
+
+```bash
+cd demo
+bun install
+bun run dev
+```
+
+To deploy updates:
+
+```bash
+cd demo
+bun run deploy
+```
 
 ## License
 

@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/icon.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Interactive demo for flappa-doormal - Declarative Arabic text segmentation library" />
+    <title>flappa-doormal Demo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Naskh+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="app">
+      <!-- Header -->
+      <header class="header">
+        <div class="header-content">
+          <div class="logo-section">
+            <img src="/icon.png" alt="flappa-doormal" class="logo" />
+            <div class="title-section">
+              <h1 class="title">flappa-doormal <span id="version" class="version"></span></h1>
+              <p class="subtitle">Arabic Text Segmentation</p>
+            </div>
+          </div>
+          <div class="badges">
+            <a href="https://github.com/ragaeeb/flappa-doormal" target="_blank" class="badge github">GitHub</a>
+            <a href="https://www.npmjs.com/package/flappa-doormal" target="_blank" class="badge npm">npm</a>
+          </div>
+        </div>
+      </header>
+
+      <main class="main-content">
+        <!-- Left: Pages & Analysis -->
+        <div class="left-panel">
+          <section class="panel pages-panel">
+            <div class="panel-header">
+              <h2>Pages</h2>
+              <button id="add-page-btn" class="btn btn-small btn-secondary">+ Add</button>
+            </div>
+            <div id="pages-container" class="pages-container"></div>
+          </section>
+
+          <section class="panel analysis-panel">
+            <div class="panel-header">
+              <h2>Detected Patterns</h2>
+              <button id="analysis-config-toggle" class="btn btn-small btn-secondary">⚙️</button>
+            </div>
+            <div id="analysis-config" class="analysis-config hidden">
+              <div class="config-row config-row-4">
+                <div class="form-group">
+                  <label for="topK">Top K</label>
+                  <input type="number" id="topK" value="10" min="1" max="50" />
+                </div>
+                <div class="form-group">
+                  <label for="minCount">Min Count</label>
+                  <input type="number" id="minCount" value="1" min="1" />
+                </div>
+                <div class="form-group">
+                  <label for="sortBy">Sort By</label>
+                  <select id="sortBy">
+                    <option value="count" selected>count</option>
+                    <option value="specificity">specificity</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label for="whitespace">Whitespace</label>
+                  <select id="whitespace">
+                    <option value="regex" selected>regex (\s*)</option>
+                    <option value="space">space</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div id="analysis-container" class="analysis-container">
+              <div class="empty-state">Type text to see patterns</div>
+            </div>
+          </section>
+        </div>
+
+        <!-- Right: Rules & Config -->
+        <section class="panel config-panel">
+          <div class="panel-header">
+            <h2>Rules</h2>
+            <button id="add-rule-btn" class="btn btn-small btn-secondary">+ Add</button>
+          </div>
+          <div class="config-section">
+            <div id="rules-container" class="rules-list"></div>
+          </div>
+          
+          <!-- Global Options -->
+          <div class="config-section global-section">
+            <div class="config-section-title">Global Options</div>
+            <div class="global-grid">
+              <div class="form-group">
+                <label for="max-pages">Max Pages</label>
+                <input type="number" id="max-pages" value="1" min="1" />
+              </div>
+              <div class="form-group">
+                <label for="prefer">Prefer</label>
+                <select id="prefer">
+                  <option value="longer">longer</option>
+                  <option value="shorter">shorter</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="page-joiner">Page Joiner</label>
+                <select id="page-joiner">
+                  <option value="space">space</option>
+                  <option value="newline">newline</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Breakpoints -->
+          <div class="config-section">
+            <div class="config-section-title">Breakpoints <span class="hint">(one per line)</span></div>
+            <textarea id="breakpoints" class="breakpoints-input" rows="3">{{tarqim}}\s*
+\n
+</textarea>
+          </div>
+        </section>
+      </main>
+
+      <!-- Actions -->
+      <section class="actions-section">
+        <button id="segment-btn" class="btn btn-action btn-segment">✂️ Segment</button>
+      </section>
+
+      <!-- Results -->
+      <section class="panel results-panel">
+        <div class="panel-header">
+          <h2>Results</h2>
+          <span id="result-stats" class="result-stats"></span>
+        </div>
+        <div id="results-container" class="results-container">
+          <div class="empty-state">Configure rules and click Segment</div>
+        </div>
+      </section>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
