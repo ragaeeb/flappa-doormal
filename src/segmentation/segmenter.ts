@@ -17,8 +17,8 @@ import {
     getLastPositionalCapture,
     type MatchResult,
 } from './match-utils.js';
-import { buildRuleRegex, processPattern } from './rule-regex.js';
 import { applyReplacements } from './replace.js';
+import { buildRuleRegex, processPattern } from './rule-regex.js';
 import {
     collectFastFuzzySplitPoints,
     createPageStartGuardChecker,
@@ -480,20 +480,45 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
 export const segmentPages = (pages: Page[], options: SegmentationOptions): Segment[] => {
     const { rules = [], maxPages = 0, breakpoints = [], prefer = 'longer', pageJoiner = 'space', logger } = options;
 
+    logger?.info?.('[segmenter] starting segmentation', {
+        breakpointCount: breakpoints.length,
+        maxPages,
+        pageCount: pages.length,
+        prefer,
+        ruleCount: rules.length,
+    });
+
     const processedPages = options.replace ? applyReplacements(pages, options.replace) : pages;
     const { content: matchContent, normalizedPages: normalizedContent, pageMap } = buildPageMap(processedPages);
+
+    logger?.debug?.('[segmenter] content built', {
+        pageIds: pageMap.pageIds,
+        totalContentLength: matchContent.length,
+    });
+
     const splitPoints = collectSplitPointsFromRules(rules, matchContent, pageMap);
     const unique = dedupeSplitPoints(splitPoints);
 
+    logger?.debug?.('[segmenter] split points collected', {
+        rawSplitPoints: splitPoints.length,
+        uniqueSplitPoints: unique.length,
+    });
+
     // Build initial segments from structural rules
     let segments = buildSegments(unique, matchContent, pageMap, rules);
+
+    logger?.debug?.('[segmenter] structural segments built', {
+        segmentCount: segments.length,
+        segments: segments.map((s) => ({ contentLength: s.content.length, from: s.from, to: s.to })),
+    });
 
     segments = ensureFallbackSegment(segments, processedPages, normalizedContent, pageJoiner);
 
     // Apply breakpoints post-processing for oversized segments
     if (maxPages >= 0 && breakpoints.length) {
+        logger?.debug?.('[segmenter] applying breakpoints to oversized segments');
         const patternProcessor = (p: string) => processPattern(p, false).pattern;
-        return applyBreakpoints(
+        const result = applyBreakpoints(
             segments,
             processedPages,
             normalizedContent,
@@ -504,8 +529,15 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
             logger,
             pageJoiner,
         );
+        logger?.info?.('[segmenter] segmentation complete (with breakpoints)', {
+            finalSegmentCount: result.length,
+        });
+        return result;
     }
 
+    logger?.info?.('[segmenter] segmentation complete (structural only)', {
+        finalSegmentCount: segments.length,
+    });
     return segments;
 };
 

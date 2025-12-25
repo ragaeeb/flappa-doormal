@@ -48,16 +48,6 @@ src/
     ├── fuzzy.test.ts           # Fuzzy matching tests
     ├── textUtils.test.ts       # Text utility tests
     └── match-utils.test.ts     # Utility function tests
-
-test/
-├── 2576.json                   # Test data for book 2576 (Sahih Bukhari)
-└── 2588.json                   # Test data for book 2588 (Al-Mughni)
-
-docs/
-├── checkpoints/                # AI agent handoff documentation
-│   └── 2025-12-09-handoff.md
-└── reviews/                    # Performance analysis reports
-    └── 2025-12-10/
 ```
 
 ### Core Components
@@ -92,6 +82,9 @@ docs/
    - `buildExcludeSet()` - Create Set from PageRange[] for O(1) lookups
    - `createSegment()` - Create segment with optional to/meta fields
    - `expandBreakpoints()` - Expand patterns with pre-compiled regexes
+   - `buildBoundaryPositions()` - Build position map of page boundaries for O(log n) lookups
+   - `findPageIndexForPosition()` - Binary search to find page index for a character position
+   - `estimateStartOffsetInCurrentPage()` - Estimate offset when segment starts mid-page
    - `findActualEndPage()` - Search backwards for ending page using progressive prefix matching (handles mid-page splits)
    - `findBreakpointWindowEndPosition()` - Compute window boundary in content-space (robust to marker stripping)
    - `applyPageJoinerBetweenPages()` - Normalize page-boundary join in output segments (`space` vs `newline`)
@@ -361,6 +354,8 @@ bunx biome lint .
 9. **Auto-escaping improves DX significantly**: Users expect `(أ):` to match literal parentheses. Auto-escaping `()[]` in template patterns (but not `regex`) gives intuitive behavior while preserving power-user escape hatch.
 
 10. **Page boundary detection needs progressive prefixes**: When breakpoints split content mid-page, checking only the first N characters of a page to detect if the segment ends on that page can fail. Solution: try progressively shorter prefixes (`[80, 60, 40, 30, 20, 15, 12, 10, 8, 6]`) via `JOINER_PREFIX_LENGTHS`. The check uses `indexOf(...) > 0` (not `>= 0`) to avoid false positives when a page prefix appears at position 0 (which indicates the segment *starts* with that page, not *ends* on it).
+
+11. **Boundary-position algorithm improves page attribution**: Building a position map of page boundaries once per segment (O(n)) enables binary search for O(log n) lookups per piece. Key insight: when a segment starts mid-page (common after structural rules), expected boundary estimates must account for the offset into the starting page. Without this adjustment, position-based lookups can return the wrong page when pages have identical content prefixes.
 
 ### Architecture Insights
 

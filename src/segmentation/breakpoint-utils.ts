@@ -355,6 +355,112 @@ export const findPageStartNearExpectedBoundary = (
 };
 
 /**
+ * Builds a boundary position map for pages within the given range.
+ *
+ * This function computes page boundaries once per segment and enables
+ * O(log n) page lookups via binary search with `findPageIndexForPosition`.
+ *
+ * Boundaries are derived from segmentContent (post-structural-rules).
+ * When the segment starts mid-page, an offset correction is applied to
+ * keep boundary estimates aligned with the segment's actual content space.
+ *
+ * @param segmentContent - Full segment content (already processed by structural rules)
+ * @param fromIdx - Starting page index
+ * @param toIdx - Ending page index
+ * @param pageIds - Array of all page IDs
+ * @param normalizedPages - Map of page ID to normalized content
+ * @param cumulativeOffsets - Cumulative character offsets (for estimates)
+ * @returns Array where boundaryPositions[i] = start position of page (fromIdx + i),
+ *          with a sentinel boundary at segmentContent.length as the last element
+ *
+ * @example
+ * // For a 3-page segment:
+ * buildBoundaryPositions(content, 0, 2, pageIds, normalizedPages, offsets)
+ * // → [0, 23, 45, 67] where 67 is content.length (sentinel)
+ */
+export const buildBoundaryPositions = (
+    segmentContent: string,
+    fromIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    cumulativeOffsets: number[],
+): number[] => {
+    const boundaryPositions: number[] = [0];
+    const startOffsetInFromPage = estimateStartOffsetInCurrentPage(segmentContent, fromIdx, pageIds, normalizedPages);
+
+    for (let i = fromIdx + 1; i <= toIdx; i++) {
+        const expectedBoundary =
+            cumulativeOffsets[i] !== undefined && cumulativeOffsets[fromIdx] !== undefined
+                ? Math.max(0, cumulativeOffsets[i] - cumulativeOffsets[fromIdx] - startOffsetInFromPage)
+                : segmentContent.length;
+
+        const pos = findPageStartNearExpectedBoundary(
+            segmentContent,
+            fromIdx,
+            i,
+            expectedBoundary,
+            pageIds,
+            normalizedPages,
+        );
+
+        const prevBoundary = boundaryPositions[boundaryPositions.length - 1];
+
+        // Strict > prevents duplicate boundaries when pages have identical content
+        const MAX_DEVIATION = 2000;
+        const isValidPosition = pos > 0 && pos > prevBoundary && Math.abs(pos - expectedBoundary) < MAX_DEVIATION;
+
+        if (isValidPosition) {
+            boundaryPositions.push(pos);
+        } else {
+            // Fallback for whitespace-only pages, identical content, or stripped markers
+            const estimate = Math.max(prevBoundary, expectedBoundary);
+            boundaryPositions.push(Math.min(estimate, segmentContent.length));
+        }
+    }
+
+    boundaryPositions.push(segmentContent.length); // sentinel
+    return boundaryPositions;
+};
+
+/**
+ * Binary search to find which page a position falls within.
+ * Uses "largest i where boundaryPositions[i] <= position" semantics.
+ *
+ * @param position - Character position in segmentContent
+ * @param boundaryPositions - Precomputed boundary positions (from buildBoundaryPositions)
+ * @param fromIdx - Base page index (boundaryPositions[0] corresponds to pageIds[fromIdx])
+ * @returns Page index in pageIds array
+ *
+ * @example
+ * // With boundaries [0, 20, 40, 60] and fromIdx=0:
+ * findPageIndexForPosition(15, boundaries, 0) // → 0 (first page)
+ * findPageIndexForPosition(25, boundaries, 0) // → 1 (second page)
+ * findPageIndexForPosition(40, boundaries, 0) // → 2 (exactly on boundary = that page)
+ */
+export const findPageIndexForPosition = (position: number, boundaryPositions: number[], fromIdx: number): number => {
+    // Handle edge cases
+    if (boundaryPositions.length <= 1) {
+        return fromIdx;
+    }
+
+    // Binary search for largest i where boundaryPositions[i] <= position
+    let left = 0;
+    let right = boundaryPositions.length - 2; // Exclude sentinel
+
+    while (left < right) {
+        const mid = Math.ceil((left + right) / 2);
+        if (boundaryPositions[mid] <= position) {
+            left = mid;
+        } else {
+            right = mid - 1;
+        }
+    }
+
+    return fromIdx + left;
+};
+
+/**
  * Finds the end position of a breakpoint window inside `remainingContent`.
  *
  * The window end is defined as the start of the page AFTER `windowEndIdx` (i.e. `windowEndIdx + 1`),

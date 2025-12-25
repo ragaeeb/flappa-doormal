@@ -337,7 +337,7 @@ describe('breakpoint-utils', () => {
             const result = findActualEndPage(pieceContent, 0, 2, pageIds, normalizedPages);
 
             // This test documents current behavior - we accept the false positive as a tradeoff
-            // for handling mid-page splits. The v2 offset-based approach would fix this.
+            // for handling mid-page splits. The offset-based approach would fix this.
             // For now, we verify the function doesn't crash and returns a valid page index.
             expect(result).toBeGreaterThanOrEqual(0);
             expect(result).toBeLessThanOrEqual(2);
@@ -528,6 +528,189 @@ describe('breakpoint-utils', () => {
             const content = 'سنة ثمان وخمسين\nومئتين (١) .';
             const out = applyPageJoinerBetweenPages(content, 0, 1, pageIds, normalizedPages, 'space');
             expect(out).toBe('سنة ثمان وخمسين ومئتين (١) .');
+        });
+    });
+
+    describe('buildBoundaryPositions', () => {
+        it('should build boundaries for simple multi-page content', () => {
+            const pageIds = [10, 20, 30];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [10, { content: 'Page ten content here.', index: 0, length: 22 }],
+                [20, { content: 'Page twenty content.', index: 1, length: 20 }],
+                [30, { content: 'Page thirty.', index: 2, length: 12 }],
+            ]);
+            // Content with newline joiners between pages
+            const segmentContent = 'Page ten content here.\nPage twenty content.\nPage thirty.';
+            const cumulativeOffsets = [0, 23, 44, 56]; // includes separators
+
+            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                2,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // First boundary is always 0
+            expect(boundaries[0]).toBe(0);
+            // Second boundary is start of page 20 content
+            expect(boundaries[1]).toBe(23); // After "Page ten content here.\n"
+            // Third boundary is start of page 30 content
+            expect(boundaries[2]).toBe(44); // After "Page twenty content.\n"
+            // Sentinel boundary is content length
+            expect(boundaries[3]).toBe(56);
+        });
+
+        it('should enforce monotonicity even with failed prefix searches', () => {
+            const pageIds = [10, 20, 30];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [10, { content: 'Start content here.', index: 0, length: 19 }],
+                [20, { content: 'MISSING CONTENT', index: 1, length: 15 }], // Not in segment
+                [30, { content: 'End content here.', index: 2, length: 17 }],
+            ]);
+            // Page 20's content is NOT in the segment
+            const segmentContent = 'Start content here.\nEnd content here.';
+            const cumulativeOffsets = [0, 20, 36, 54];
+
+            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                2,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // Monotonicity: each boundary >= previous
+            for (let i = 1; i < boundaries.length; i++) {
+                expect(boundaries[i]).toBeGreaterThanOrEqual(boundaries[i - 1]);
+            }
+        });
+
+        it('should handle whitespace-only pages with zero-length boundary', () => {
+            const pageIds = [10, 20, 30];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [10, { content: 'Page ten content.', index: 0, length: 17 }],
+                [20, { content: '   \n  ', index: 1, length: 6 }], // Whitespace only
+                [30, { content: 'Page thirty content.', index: 2, length: 20 }],
+            ]);
+            const segmentContent = 'Page ten content.\n   \n  \nPage thirty content.';
+            const cumulativeOffsets = [0, 18, 25, 46];
+
+            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                2,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // Page 20 has no useful content - boundary should equal previous or use estimate
+            // but must maintain monotonicity
+            expect(boundaries[1]).toBeGreaterThanOrEqual(boundaries[0]);
+            expect(boundaries[2]).toBeGreaterThanOrEqual(boundaries[1]);
+        });
+
+        it('should handle very short pages (<10 chars)', () => {
+            const pageIds = [10, 20, 30];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [10, { content: 'First page content here.', index: 0, length: 24 }],
+                [20, { content: 'Short', index: 1, length: 5 }], // Very short
+                [30, { content: 'Third page content.', index: 2, length: 19 }],
+            ]);
+            const segmentContent = 'First page content here.\nShort\nThird page content.';
+            const cumulativeOffsets = [0, 25, 31, 51];
+
+            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                2,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // Should find "Short" at position 25
+            expect(boundaries[1]).toBe(25);
+        });
+
+        it('should append sentinel boundary at content length', () => {
+            const pageIds = [10, 20];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [10, { content: 'Page one.', index: 0, length: 9 }],
+                [20, { content: 'Page two.', index: 1, length: 9 }],
+            ]);
+            const segmentContent = 'Page one.\nPage two.';
+            const cumulativeOffsets = [0, 10, 20];
+
+            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                1,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // Last element should be content length (sentinel)
+            expect(boundaries[boundaries.length - 1]).toBe(segmentContent.length);
+        });
+    });
+
+    describe('findPageIndexForPosition', () => {
+        it('should return first page for position 0', () => {
+            const { findPageIndexForPosition } = require('./breakpoint-utils.js');
+            const boundaries = [0, 20, 40, 60]; // 3 pages + sentinel
+            const fromIdx = 5;
+
+            expect(findPageIndexForPosition(0, boundaries, fromIdx)).toBe(5);
+        });
+
+        it('should return correct page for mid-content position', () => {
+            const { findPageIndexForPosition } = require('./breakpoint-utils.js');
+            const boundaries = [0, 20, 40, 60]; // 3 pages + sentinel
+            const fromIdx = 0;
+
+            expect(findPageIndexForPosition(15, boundaries, fromIdx)).toBe(0); // In first page
+            expect(findPageIndexForPosition(25, boundaries, fromIdx)).toBe(1); // In second page
+            expect(findPageIndexForPosition(45, boundaries, fromIdx)).toBe(2); // In third page
+        });
+
+        it('should return correct page when position is exactly on boundary', () => {
+            const { findPageIndexForPosition } = require('./breakpoint-utils.js');
+            const boundaries = [0, 20, 40, 60]; // 3 pages + sentinel
+            const fromIdx = 0;
+
+            // Position exactly on boundary returns that page
+            expect(findPageIndexForPosition(20, boundaries, fromIdx)).toBe(1);
+            expect(findPageIndexForPosition(40, boundaries, fromIdx)).toBe(2);
+        });
+
+        it('should return last page for position at or after last boundary', () => {
+            const { findPageIndexForPosition } = require('./breakpoint-utils.js');
+            const boundaries = [0, 20, 40, 60];
+            const fromIdx = 0;
+
+            // Position at sentinel should return last real page
+            expect(findPageIndexForPosition(60, boundaries, fromIdx)).toBe(2);
+            expect(findPageIndexForPosition(100, boundaries, fromIdx)).toBe(2);
+        });
+
+        it('should handle single-page boundary array', () => {
+            const { findPageIndexForPosition } = require('./breakpoint-utils.js');
+            const boundaries = [0, 50]; // 1 page + sentinel
+            const fromIdx = 10;
+
+            expect(findPageIndexForPosition(0, boundaries, fromIdx)).toBe(10);
+            expect(findPageIndexForPosition(25, boundaries, fromIdx)).toBe(10);
+            expect(findPageIndexForPosition(50, boundaries, fromIdx)).toBe(10);
         });
     });
 });
