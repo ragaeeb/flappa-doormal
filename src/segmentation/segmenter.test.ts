@@ -2036,6 +2036,23 @@ describe('segmenter', () => {
             expect(segments[0]).toMatchObject({ from: 1, to: 3 });
             expect(segments[1]).toMatchObject({ from: 4 });
         });
+
+        it('should auto-enable fuzzy for {{naql}} without explicit fuzzy:true', () => {
+            const pages: Page[] = [
+                { content: 'حَدَّثَنَا محمد بن عبد الله.', id: 1 },
+                { content: 'أَخْبَرَنَا علي بن موسى.', id: 2 },
+            ];
+
+            // No explicit fuzzy:true - should auto-enable because {{naql}} is a fuzzy-default token
+            const segments = segmentPages(pages, {
+                rules: [{ lineStartsWith: ['{{naql}}'], split: 'at' }],
+            });
+
+            // Should match diacritized versions
+            expect(segments).toHaveLength(2);
+            expect(segments[0]).toMatchObject({ from: 1 });
+            expect(segments[1]).toMatchObject({ from: 2 });
+        });
     });
 
     describe('page-ID tracking with non-consecutive IDs', () => {

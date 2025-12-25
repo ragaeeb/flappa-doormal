@@ -29,16 +29,20 @@
 
 // Fuzzy matching utilities
 export { escapeRegex, makeDiacriticInsensitive } from './segmentation/fuzzy.js';
-// Core segmentation
-export { segmentPages } from './segmentation/segmenter.js';
-
+export type {
+    RuleValidationResult,
+    ValidationIssue,
+    ValidationIssueType,
+} from './segmentation/pattern-validator.js';
+// Pattern validation utilities
+export { validateRules } from './segmentation/pattern-validator.js';
+export type { ReplaceRule } from './segmentation/replace.js';
 // Replace preprocessor (optional, also used internally by segmentPages when options.replace is set)
 export { applyReplacements } from './segmentation/replace.js';
-export type { ReplaceRule } from './segmentation/replace.js';
-
+// Core segmentation
+export { segmentPages } from './segmentation/segmenter.js';
 // Token expansion types
 export type { ExpandResult } from './segmentation/tokens.js';
-
 // Token expansion (with named capture support)
 export {
     containsTokens,

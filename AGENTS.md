@@ -71,13 +71,17 @@ src/
 4. **`rule-regex.ts`** - SplitRule → compiled regex builder
    - `buildRuleRegex()` - Compiles rule patterns (`lineStartsWith`, `lineStartsAfter`, `lineEndsWith`, `template`, `regex`)
    - `processPattern()` - Token expansion + auto-escaping + optional fuzzy application
-   - `extractNamedCaptureNames()` - Extract `(?<name>...)` groups from raw regex patterns (NEW)
+   - `extractNamedCaptureNames()` - Extract `(?<name>...)` groups from raw regex patterns
 
-5. **`breakpoint-processor.ts`** - Breakpoint post-processing engine
+5. **`pattern-validator.ts`** - Rule validation utilities
+   - `validateRules()` - Detects typos in patterns (missing `{{}}`, unknown tokens, duplicates)
+   - Returns parallel array structure for easy error tracking
+
+6. **`breakpoint-processor.ts`** - Breakpoint post-processing engine
    - `applyBreakpoints()` - Splits oversized structural segments using breakpoint patterns + windowing
    - Applies `pageJoiner` normalization to breakpoint-created segments
 
-6. **`breakpoint-utils.ts`** - Breakpoint processing utilities (NEW)
+7. **`breakpoint-utils.ts`** - Breakpoint processing utilities
    - `normalizeBreakpoint()` - Convert string to BreakpointRule object
    - `isPageExcluded()` - Check if page is in exclude list
    - `isInBreakpointRange()` - Validate page against min/max/exclude constraints

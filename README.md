@@ -406,6 +406,28 @@ Key options:
 - If you paste these signatures into `lineStartsWith` / `lineStartsAfter` / `template`, that’s fine: those template pattern types **auto-escape `()[]`** outside `{{tokens}}`.
 - If you paste them into a raw `regex` rule, you may need to escape literal brackets yourself.
 
+## Rule Validation
+
+Use `validateRules()` to detect common mistakes in rule patterns before running segmentation:
+
+```typescript
+import { validateRules } from 'flappa-doormal';
+
+const issues = validateRules([
+  { lineStartsAfter: ['raqms:num'] },       // Missing {{}}
+  { lineStartsWith: ['{{unknown}}'] },      // Unknown token
+  { lineStartsAfter: ['## (rumuz:rumuz)'] } // Typo - should be {{rumuz:rumuz}}
+]);
+
+// issues[0]?.lineStartsAfter?.[0]?.type === 'missing_braces'
+// issues[1]?.lineStartsWith?.[0]?.type === 'unknown_token'
+// issues[2]?.lineStartsAfter?.[0]?.type === 'missing_braces'
+```
+
+**Checks performed:**
+- **Missing braces**: Detects token names like `raqms:num` without `{{}}`
+- **Unknown tokens**: Flags tokens inside `{{}}` that don't exist (e.g., `{{nonexistent}}`)
+- **Duplicates**: Finds duplicate patterns within the same rule
 
 ## Prompting LLMs / Agents to Generate Rules (Shamela books)
 

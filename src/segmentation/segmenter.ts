@@ -26,7 +26,10 @@ import {
 } from './segmenter-rule-utils.js';
 import type { PageBoundary, PageMap, SplitPoint } from './segmenter-types.js';
 import { normalizeLineEndings } from './textUtils.js';
-import type { Page, Segment, SegmentationOptions, SplitRule } from './types.js';
+import type { Logger, Page, Segment, SegmentationOptions, SplitRule } from './types.js';
+
+// Maximum number of regex match iterations before throwing an error to prevent infinite loops
+const MAX_REGEX_ITERATIONS = 100000;
 
 // buildRuleRegex + processPattern extracted to src/segmentation/rule-regex.ts
 
@@ -160,9 +163,25 @@ export const ensureFallbackSegment = (
     return [initialSeg];
 };
 
-const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, pageMap: PageMap): SplitPoint[] => {
+const collectSplitPointsFromRules = (
+    rules: SplitRule[],
+    matchContent: string,
+    pageMap: PageMap,
+    logger?: Logger,
+): SplitPoint[] => {
+    logger?.debug?.('[segmenter] collecting split points from rules', {
+        contentLength: matchContent.length,
+        ruleCount: rules.length,
+    });
+
     const passesPageStartGuard = createPageStartGuardChecker(matchContent, pageMap);
     const { combinableRules, fastFuzzyRules, standaloneRules } = partitionRulesForMatching(rules);
+
+    logger?.debug?.('[segmenter] rules partitioned', {
+        combinableCount: combinableRules.length,
+        fastFuzzyCount: fastFuzzyRules.length,
+        standaloneCount: standaloneRules.length,
+    });
 
     // Store split points by rule index to apply occurrence filtering later.
     // Start with fast-fuzzy matches (if any) and then add regex-based matches.
@@ -182,10 +201,36 @@ const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, p
         const combinedSource = ruleRegexes.map((r) => r.source).join('|');
         const combinedRegex = new RegExp(combinedSource, 'gm');
 
+        logger?.debug?.('[segmenter] combined regex built', {
+            combinableRuleCount: combinableRules.length,
+            combinedSourceLength: combinedSource.length,
+        });
+
         combinedRegex.lastIndex = 0;
         let m = combinedRegex.exec(matchContent);
+        let iterationCount = 0;
 
         while (m !== null) {
+            iterationCount++;
+
+            // Prevent infinite loops from hanging - throw error if iteration count is too high
+            if (iterationCount > MAX_REGEX_ITERATIONS) {
+                throw new Error(
+                    `[segmenter] Possible infinite loop detected: regex matching exceeded ${MAX_REGEX_ITERATIONS} iterations. ` +
+                        `Last match at position ${m.index} (length ${m[0].length}). ` +
+                        `Check for patterns that may match empty strings or cause catastrophic backtracking.`,
+                );
+            }
+
+            // Log every 10000 iterations to help diagnose performance issues
+            if (iterationCount % 10000 === 0) {
+                logger?.warn?.('[segmenter] high iteration count in regex loop', {
+                    iterationCount,
+                    lastIndex: combinedRegex.lastIndex,
+                    matchLength: m[0].length,
+                    matchPosition: m.index,
+                });
+            }
             // Find which rule matched by checking which prefix group is defined
             const matchedRuleIndex = combinableRules.findIndex(({ prefix }) => m?.groups?.[prefix] !== undefined);
 
@@ -231,12 +276,7 @@ const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, p
                     (rule.max === undefined || pageId <= rule.max) &&
                     !isPageExcluded(pageId, rule.exclude);
 
-                if (passesConstraints) {
-                    if (!passesPageStartGuard(rule, originalIndex, start)) {
-                        // Skip false positives caused purely by page wrap.
-                        // Mid-page line starts are unaffected.
-                        continue;
-                    }
+                if (passesConstraints && passesPageStartGuard(rule, originalIndex, start)) {
                     const sp: SplitPoint = {
                         capturedContent: undefined, // For combinable rules, we don't use captured content for the segment text
                         contentStartOffset,
@@ -252,6 +292,8 @@ const collectSplitPointsFromRules = (rules: SplitRule[], matchContent: string, p
                 }
             }
 
+            // IMPORTANT: Always advance the regex before next iteration
+            // This must happen after processing, even when we `continue` above
             if (m[0].length === 0) {
                 combinedRegex.lastIndex++;
             }
@@ -496,7 +538,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions): Segme
         totalContentLength: matchContent.length,
     });
 
-    const splitPoints = collectSplitPointsFromRules(rules, matchContent, pageMap);
+    const splitPoints = collectSplitPointsFromRules(rules, matchContent, pageMap, logger);
     const unique = dedupeSplitPoints(splitPoints);
 
     logger?.debug?.('[segmenter] split points collected', {
