@@ -9,14 +9,15 @@ import { describe, expect, it } from 'bun:test';
 import { computeNextFromIdx, computeWindowEndIdx } from './breakpoint-processor.js';
 import {
     applyPageJoinerBetweenPages,
+    buildBoundaryPositions,
     buildExcludeSet,
     createSegment,
     estimateStartOffsetInCurrentPage,
     expandBreakpoints,
-    findActualEndPage,
     findBreakpointWindowEndPosition,
     findExclusionBreakPosition,
     findNextPagePosition,
+    findPageIndexForPosition,
     findPatternBreakPosition,
     hasExcludedPageInRange,
     isInBreakpointRange,
@@ -274,109 +275,6 @@ describe('breakpoint-utils', () => {
         });
     });
 
-    describe('findActualEndPage', () => {
-        it('should find ending page by content prefix', () => {
-            const normalizedPages = new Map<number, NormalizedPage>([
-                [10, { content: 'Page 10 content', index: 0, length: 15 }],
-                [20, { content: 'Page 20 content', index: 1, length: 15 }],
-                [30, { content: 'Page 30 content', index: 2, length: 15 }],
-            ]);
-            const pageIds = [10, 20, 30];
-
-            // Piece contains prefix of page 20
-            const result = findActualEndPage('First part Page 20 content and more', 0, 2, pageIds, normalizedPages);
-            expect(result).toBe(1); // Index of page 20
-        });
-
-        it('should return currentFromIdx when no match found', () => {
-            const normalizedPages = new Map<number, NormalizedPage>([
-                [10, { content: 'Page 10 content', index: 0, length: 15 }],
-                [20, { content: 'Unique content', index: 1, length: 14 }],
-            ]);
-            const pageIds = [10, 20];
-
-            const result = findActualEndPage('Different text', 0, 1, pageIds, normalizedPages);
-            expect(result).toBe(0);
-        });
-
-        it('should ignore matches at position 0', () => {
-            const normalizedPages = new Map<number, NormalizedPage>([
-                [10, { content: 'Start', index: 0, length: 5 }],
-                [20, { content: 'Middle', index: 1, length: 6 }],
-            ]);
-            const pageIds = [10, 20];
-
-            // "Start" is at position 0, should be ignored
-            const result = findActualEndPage('Start content', 0, 1, pageIds, normalizedPages);
-            expect(result).toBe(0);
-        });
-
-        it('should handle collision when later page has same short prefix as earlier content (regression)', () => {
-            // Scenario: Page 100 contains "Introduction text" and Page 105 starts with "Introduction"
-            // A segment containing only Page 100 content should NOT be attributed to Page 105
-            // because the search starts from the end, but we should still return the correct page
-            const normalizedPages = new Map<number, NormalizedPage>([
-                [100, { content: 'Some content here. Introduction text follows.', index: 0, length: 45 }],
-                [101, { content: 'Page 101 has different start.', index: 1, length: 29 }],
-                [105, { content: 'Introduction to next chapter.', index: 2, length: 29 }],
-            ]);
-            const pageIds = [100, 101, 105];
-
-            // Piece contains ONLY content from page 100 - ends before page 101 starts
-            // The word "Introduction" appears in the content but is NOT at position > 0 of page 105's prefix location
-            const pieceContent = 'Some content here. Introduction text follows.';
-
-            // Search backwards: check page 105 first (its prefix "Introduction" is in the piece!)
-            // But "Introduction" appears at position 19, and the piece is entirely from page 100
-            // The function should find page 101's prefix "Page 101" is NOT in the piece,
-            // and page 105's "Introduction" IS in the piece at pos 19 > 0
-            // This is a potential false positive - the function may return page 105 (index 2)
-            // In practice, this is acceptable because:
-            // 1. The search is bounded by the window (toIdx)
-            // 2. Real-world Arabic text rarely has such short matching prefixes across distant pages
-            const result = findActualEndPage(pieceContent, 0, 2, pageIds, normalizedPages);
-
-            // This test documents current behavior - we accept the false positive as a tradeoff
-            // for handling mid-page splits. The v2 offset-based approach would fix this.
-            // For now, we verify the function doesn't crash and returns a valid page index.
-            expect(result).toBeGreaterThanOrEqual(0);
-            expect(result).toBeLessThanOrEqual(2);
-        });
-
-        it('should handle very short page content (< 10 characters)', () => {
-            // Pages with very short content could cause issues with prefix matching
-            const normalizedPages = new Map<number, NormalizedPage>([
-                [10, { content: 'First page with normal content here.', index: 0, length: 36 }],
-                [20, { content: 'Short', index: 1, length: 5 }], // Very short page
-                [30, { content: 'Third page content continues.', index: 2, length: 28 }],
-            ]);
-            const pageIds = [10, 20, 30];
-
-            // Piece contains content from pages 10 and 20
-            const pieceContent = 'First page with normal content here. Short';
-
-            const result = findActualEndPage(pieceContent, 0, 2, pageIds, normalizedPages);
-            // Should find "Short" in the piece and return page 20's index
-            expect(result).toBe(1);
-        });
-
-        it('should handle page content that is entirely whitespace', () => {
-            // Edge case: a page with only whitespace
-            const normalizedPages = new Map<number, NormalizedPage>([
-                [10, { content: 'Content from page 10.', index: 0, length: 21 }],
-                [20, { content: '   \n  ', index: 1, length: 6 }], // Whitespace-only page
-                [30, { content: 'Content from page 30.', index: 2, length: 21 }],
-            ]);
-            const pageIds = [10, 20, 30];
-
-            const pieceContent = 'Content from page 10. Content from page 30.';
-
-            // Should skip page 20 (no useful prefix after trimming) and find page 30
-            const result = findActualEndPage(pieceContent, 0, 2, pageIds, normalizedPages);
-            expect(result).toBe(2);
-        });
-    });
-
     describe('estimateStartOffsetInCurrentPage', () => {
         it('should return 0 when remainingContent starts at page start', () => {
             const pageIds = [1];
@@ -528,6 +426,261 @@ describe('breakpoint-utils', () => {
             const content = 'سنة ثمان وخمسين\nومئتين (١) .';
             const out = applyPageJoinerBetweenPages(content, 0, 1, pageIds, normalizedPages, 'space');
             expect(out).toBe('سنة ثمان وخمسين ومئتين (١) .');
+        });
+    });
+
+    describe('buildBoundaryPositions', () => {
+        it('should build boundaries for simple multi-page content', () => {
+            const pageIds = [10, 20, 30];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [10, { content: 'Page ten content here.', index: 0, length: 22 }],
+                [20, { content: 'Page twenty content.', index: 1, length: 20 }],
+                [30, { content: 'Page thirty.', index: 2, length: 12 }],
+            ]);
+            // Content with newline joiners between pages
+            const segmentContent = 'Page ten content here.\nPage twenty content.\nPage thirty.';
+            const cumulativeOffsets = [0, 23, 44, 56]; // includes separators
+
+            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                2,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // First boundary is always 0
+            expect(boundaries[0]).toBe(0);
+            // Second boundary is start of page 20 content
+            expect(boundaries[1]).toBe(23); // After "Page ten content here.\n"
+            // Third boundary is start of page 30 content
+            expect(boundaries[2]).toBe(44); // After "Page twenty content.\n"
+            // Sentinel boundary is content length
+            expect(boundaries[3]).toBe(56);
+        });
+
+        it('should enforce monotonicity even with failed prefix searches', () => {
+            const pageIds = [10, 20, 30];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [10, { content: 'Start content here.', index: 0, length: 19 }],
+                [20, { content: 'MISSING CONTENT', index: 1, length: 15 }], // Not in segment
+                [30, { content: 'End content here.', index: 2, length: 17 }],
+            ]);
+            // Page 20's content is NOT in the segment
+            const segmentContent = 'Start content here.\nEnd content here.';
+            const cumulativeOffsets = [0, 20, 36, 54];
+
+            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                2,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // Monotonicity: each boundary >= previous
+            for (let i = 1; i < boundaries.length; i++) {
+                expect(boundaries[i]).toBeGreaterThanOrEqual(boundaries[i - 1]);
+            }
+        });
+
+        it('should handle whitespace-only pages with zero-length boundary', () => {
+            const pageIds = [10, 20, 30];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [10, { content: 'Page ten content.', index: 0, length: 17 }],
+                [20, { content: '   \n  ', index: 1, length: 6 }], // Whitespace only
+                [30, { content: 'Page thirty content.', index: 2, length: 20 }],
+            ]);
+            const segmentContent = 'Page ten content.\n   \n  \nPage thirty content.';
+            const cumulativeOffsets = [0, 18, 25, 46];
+
+            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                2,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // Page 20 has no useful content - boundary should equal previous or use estimate
+            // but must maintain monotonicity
+            expect(boundaries[1]).toBeGreaterThanOrEqual(boundaries[0]);
+            expect(boundaries[2]).toBeGreaterThanOrEqual(boundaries[1]);
+        });
+
+        it('should handle very short pages (<10 chars)', () => {
+            const pageIds = [10, 20, 30];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [10, { content: 'First page content here.', index: 0, length: 24 }],
+                [20, { content: 'Short', index: 1, length: 5 }], // Very short
+                [30, { content: 'Third page content.', index: 2, length: 19 }],
+            ]);
+            const segmentContent = 'First page content here.\nShort\nThird page content.';
+            const cumulativeOffsets = [0, 25, 31, 51];
+
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                2,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // Should find "Short" at position 25
+            expect(boundaries[1]).toBe(25);
+        });
+
+        it('should append sentinel boundary at content length', () => {
+            const pageIds = [10, 20];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [10, { content: 'Page one.', index: 0, length: 9 }],
+                [20, { content: 'Page two.', index: 1, length: 9 }],
+            ]);
+            const segmentContent = 'Page one.\nPage two.';
+            const cumulativeOffsets = [0, 10, 20];
+
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                1,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // Last element should be content length (sentinel)
+            expect(boundaries[boundaries.length - 1]).toBe(segmentContent.length);
+        });
+
+        it('should handle identical-prefix collisions by preferring proximity to expected offset', () => {
+            // Pages with identical short prefixes - "Intro" appears in all three
+            const pageIds = [100, 200, 300];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [100, { content: 'Introduction to chapter one. More content follows here.', index: 0, length: 55 }],
+                [200, { content: 'Introductory remarks for section two. Additional text.', index: 1, length: 54 }],
+                [300, { content: 'Intro paragraph for part three. Final content here.', index: 2, length: 51 }],
+            ]);
+
+            // Segment with all three pages concatenated with newlines
+            const segmentContent =
+                'Introduction to chapter one. More content follows here.\n' +
+                'Introductory remarks for section two. Additional text.\n' +
+                'Intro paragraph for part three. Final content here.';
+
+            // Cumulative offsets reflecting page boundaries
+            const cumulativeOffsets = [0, 56, 111, 162];
+
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                2,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // Verify first boundary is always 0
+            expect(boundaries[0]).toBe(0);
+
+            // Verify monotonicity: each boundary must be strictly greater than previous
+            for (let i = 1; i < boundaries.length; i++) {
+                expect(boundaries[i]).toBeGreaterThan(boundaries[i - 1]);
+            }
+
+            // Verify sentinel equals segment content length
+            expect(boundaries[boundaries.length - 1]).toBe(segmentContent.length);
+
+            // Verify the boundaries are at or near expected positions
+            // Page 200 starts at position 56 (after newline)
+            expect(boundaries[1]).toBe(56);
+            // Page 300 starts at position 111 (after second newline)
+            expect(boundaries[2]).toBe(111);
+        });
+
+        it('should produce strictly increasing boundaries even with duplicate prefix content', () => {
+            // Worst case: pages with identical first 10 characters
+            const pageIds = [1, 2, 3];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [1, { content: 'AAAAAAAAAA first page unique end', index: 0, length: 32 }],
+                [2, { content: 'AAAAAAAAAA second page unique end', index: 1, length: 33 }],
+                [3, { content: 'AAAAAAAAAA third page unique end', index: 2, length: 32 }],
+            ]);
+
+            const segmentContent =
+                'AAAAAAAAAA first page unique end\n' +
+                'AAAAAAAAAA second page unique end\n' +
+                'AAAAAAAAAA third page unique end';
+
+            const cumulativeOffsets = [0, 33, 67, 99];
+
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                2,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // Verify strict monotonicity (no duplicates)
+            for (let i = 1; i < boundaries.length; i++) {
+                expect(boundaries[i]).toBeGreaterThan(boundaries[i - 1]);
+            }
+
+            // Verify sentinel
+            expect(boundaries[boundaries.length - 1]).toBe(segmentContent.length);
+        });
+    });
+
+    describe('findPageIndexForPosition', () => {
+        it('should return first page for position 0', () => {
+            const boundaries = [0, 20, 40, 60]; // 3 pages + sentinel
+            const fromIdx = 5;
+
+            expect(findPageIndexForPosition(0, boundaries, fromIdx)).toBe(5);
+        });
+
+        it('should return correct page for mid-content position', () => {
+            const boundaries = [0, 20, 40, 60]; // 3 pages + sentinel
+            const fromIdx = 0;
+
+            expect(findPageIndexForPosition(15, boundaries, fromIdx)).toBe(0); // In first page
+            expect(findPageIndexForPosition(25, boundaries, fromIdx)).toBe(1); // In second page
+            expect(findPageIndexForPosition(45, boundaries, fromIdx)).toBe(2); // In third page
+        });
+
+        it('should return correct page when position is exactly on boundary', () => {
+            const boundaries = [0, 20, 40, 60]; // 3 pages + sentinel
+            const fromIdx = 0;
+
+            // Position exactly on boundary returns that page
+            expect(findPageIndexForPosition(20, boundaries, fromIdx)).toBe(1);
+            expect(findPageIndexForPosition(40, boundaries, fromIdx)).toBe(2);
+        });
+
+        it('should return last page for position at or after last boundary', () => {
+            const boundaries = [0, 20, 40, 60];
+            const fromIdx = 0;
+
+            // Position at sentinel should return last real page
+            expect(findPageIndexForPosition(60, boundaries, fromIdx)).toBe(2);
+            expect(findPageIndexForPosition(100, boundaries, fromIdx)).toBe(2);
+        });
+
+        it('should handle single-page boundary array', () => {
+            const boundaries = [0, 50]; // 1 page + sentinel
+            const fromIdx = 10;
+
+            expect(findPageIndexForPosition(0, boundaries, fromIdx)).toBe(10);
+            expect(findPageIndexForPosition(25, boundaries, fromIdx)).toBe(10);
+            expect(findPageIndexForPosition(50, boundaries, fromIdx)).toBe(10);
         });
     });
 });

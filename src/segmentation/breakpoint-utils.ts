@@ -355,6 +355,114 @@ export const findPageStartNearExpectedBoundary = (
 };
 
 /**
+ * Builds a boundary position map for pages within the given range.
+ *
+ * This function computes page boundaries once per segment and enables
+ * O(log n) page lookups via binary search with `findPageIndexForPosition`.
+ *
+ * Boundaries are derived from segmentContent (post-structural-rules).
+ * When the segment starts mid-page, an offset correction is applied to
+ * keep boundary estimates aligned with the segment's actual content space.
+ *
+ * @param segmentContent - Full segment content (already processed by structural rules)
+ * @param fromIdx - Starting page index
+ * @param toIdx - Ending page index
+ * @param pageIds - Array of all page IDs
+ * @param normalizedPages - Map of page ID to normalized content
+ * @param cumulativeOffsets - Cumulative character offsets (for estimates)
+ * @returns Array where boundaryPositions[i] = start position of page (fromIdx + i),
+ *          with a sentinel boundary at segmentContent.length as the last element
+ *
+ * @example
+ * // For a 3-page segment:
+ * buildBoundaryPositions(content, 0, 2, pageIds, normalizedPages, offsets)
+ * // → [0, 23, 45, 67] where 67 is content.length (sentinel)
+ */
+export const buildBoundaryPositions = (
+    segmentContent: string,
+    fromIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    cumulativeOffsets: number[],
+): number[] => {
+    const boundaryPositions: number[] = [0];
+    const startOffsetInFromPage = estimateStartOffsetInCurrentPage(segmentContent, fromIdx, pageIds, normalizedPages);
+
+    for (let i = fromIdx + 1; i <= toIdx; i++) {
+        const expectedBoundary =
+            cumulativeOffsets[i] !== undefined && cumulativeOffsets[fromIdx] !== undefined
+                ? Math.max(0, cumulativeOffsets[i] - cumulativeOffsets[fromIdx] - startOffsetInFromPage)
+                : segmentContent.length;
+
+        const pos = findPageStartNearExpectedBoundary(
+            segmentContent,
+            fromIdx,
+            i,
+            expectedBoundary,
+            pageIds,
+            normalizedPages,
+        );
+
+        const prevBoundary = boundaryPositions[boundaryPositions.length - 1];
+
+        // Strict > prevents duplicate boundaries when pages have identical content
+        const MAX_DEVIATION = 2000;
+        const isValidPosition = pos > 0 && pos > prevBoundary && Math.abs(pos - expectedBoundary) < MAX_DEVIATION;
+
+        if (isValidPosition) {
+            boundaryPositions.push(pos);
+        } else {
+            // Fallback for whitespace-only pages, identical content, or stripped markers.
+            // Ensure estimate is strictly > prevBoundary to prevent duplicate zero-length
+            // boundaries, which would break binary-search page-attribution logic.
+            const estimate = Math.max(prevBoundary + 1, expectedBoundary);
+            boundaryPositions.push(Math.min(estimate, segmentContent.length));
+        }
+    }
+
+    boundaryPositions.push(segmentContent.length); // sentinel
+    return boundaryPositions;
+};
+
+/**
+ * Binary search to find which page a position falls within.
+ * Uses "largest i where boundaryPositions[i] <= position" semantics.
+ *
+ * @param position - Character position in segmentContent
+ * @param boundaryPositions - Precomputed boundary positions (from buildBoundaryPositions)
+ * @param fromIdx - Base page index (boundaryPositions[0] corresponds to pageIds[fromIdx])
+ * @returns Page index in pageIds array
+ *
+ * @example
+ * // With boundaries [0, 20, 40, 60] and fromIdx=0:
+ * findPageIndexForPosition(15, boundaries, 0) // → 0 (first page)
+ * findPageIndexForPosition(25, boundaries, 0) // → 1 (second page)
+ * findPageIndexForPosition(40, boundaries, 0) // → 2 (exactly on boundary = that page)
+ */
+export const findPageIndexForPosition = (position: number, boundaryPositions: number[], fromIdx: number): number => {
+    // Handle edge cases
+    if (boundaryPositions.length <= 1) {
+        return fromIdx;
+    }
+
+    // Binary search for largest i where boundaryPositions[i] <= position
+    let left = 0;
+    let right = boundaryPositions.length - 2; // Exclude sentinel
+
+    while (left < right) {
+        const mid = Math.ceil((left + right) / 2);
+        if (boundaryPositions[mid] <= position) {
+            left = mid;
+        } else {
+            right = mid - 1;
+        }
+    }
+
+    return fromIdx + left;
+};
+
+/**
  * Finds the end position of a breakpoint window inside `remainingContent`.
  *
  * The window end is defined as the start of the page AFTER `windowEndIdx` (i.e. `windowEndIdx + 1`),
@@ -442,98 +550,6 @@ export const findExclusionBreakPosition = (
         }
     }
     return -1;
-};
-
-/**
- * Finds the actual ending page index by searching backwards for page content prefix.
- * Used to determine which page a segment actually ends on based on content matching.
- *
- * @param pieceContent - Content of the segment piece
- * @param currentFromIdx - Current starting index in pageIds
- * @param toIdx - Maximum ending index to search
- * @param pageIds - Array of page IDs
- * @param normalizedPages - Map of page ID to normalized content
- * @returns The actual ending page index
- */
-export const findActualEndPage = (
-    pieceContent: string,
-    currentFromIdx: number,
-    toIdx: number,
-    pageIds: number[],
-    normalizedPages: Map<number, NormalizedPage>,
-): number => {
-    for (let pi = toIdx; pi > currentFromIdx; pi--) {
-        const pageData = normalizedPages.get(pageIds[pi]);
-        if (!pageData) {
-            continue;
-        }
-
-        const trimmedContent = pageData.content.trimStart();
-
-        // Try progressively shorter prefixes to handle mid-page splits.
-        // Uses JOINER_PREFIX_LENGTHS which is designed for cases where only
-        // a small portion of a page is present in the segment.
-        for (const len of JOINER_PREFIX_LENGTHS) {
-            const checkPortion = trimmedContent.slice(0, Math.min(len, trimmedContent.length)).trim();
-            // Note: We use `> 0` (not `>= 0`) intentionally.
-            // If the page prefix appears at position 0, it means the piece STARTS with this page's
-            // content, not that the piece ENDS on this page. We're looking for cases where the
-            // page content appears AFTER earlier pages' content (position > 0).
-            if (checkPortion.length > 0 && pieceContent.indexOf(checkPortion) > 0) {
-                return pi;
-            }
-        }
-    }
-    return currentFromIdx;
-};
-
-/**
- * Finds the actual starting page index by searching forwards for page content prefix.
- * Used to determine which page content actually starts from based on content matching.
- *
- * This is the counterpart to findActualEndPage - it searches forward to find which
- * page the content starts on, rather than which page it ends on.
- *
- * @param pieceContent - Content of the segment piece
- * @param currentFromIdx - Current starting index in pageIds
- * @param toIdx - Maximum ending index to search
- * @param pageIds - Array of page IDs
- * @param normalizedPages - Map of page ID to normalized content
- * @returns The actual starting page index
- */
-export const findActualStartPage = (
-    pieceContent: string,
-    currentFromIdx: number,
-    toIdx: number,
-    pageIds: number[],
-    normalizedPages: Map<number, NormalizedPage>,
-): number => {
-    const trimmedPiece = pieceContent.trimStart();
-    if (!trimmedPiece) {
-        return currentFromIdx;
-    }
-
-    // Search forward from currentFromIdx to find which page the content starts on
-    for (let pi = currentFromIdx; pi <= toIdx; pi++) {
-        const pageData = normalizedPages.get(pageIds[pi]);
-        if (pageData) {
-            const pagePrefix = pageData.content.slice(0, Math.min(30, pageData.length)).trim();
-            const piecePrefix = trimmedPiece.slice(0, Math.min(30, trimmedPiece.length));
-
-            // Check both directions:
-            // 1. pieceContent starts with page prefix (page content is longer)
-            // 2. page content starts with pieceContent prefix (pieceContent is shorter)
-            if (pagePrefix.length > 0) {
-                if (trimmedPiece.startsWith(pagePrefix)) {
-                    return pi;
-                }
-                if (pageData.content.trimStart().startsWith(piecePrefix)) {
-                    return pi;
-                }
-            }
-        }
-    }
-    return currentFromIdx;
 };
 
 /** Context required for finding break positions */
