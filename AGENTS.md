@@ -85,7 +85,6 @@ src/
    - `buildBoundaryPositions()` - Build position map of page boundaries for O(log n) lookups
    - `findPageIndexForPosition()` - Binary search to find page index for a character position
    - `estimateStartOffsetInCurrentPage()` - Estimate offset when segment starts mid-page
-   - `findActualEndPage()` - Search backwards for ending page using progressive prefix matching (handles mid-page splits)
    - `findBreakpointWindowEndPosition()` - Compute window boundary in content-space (robust to marker stripping)
    - `applyPageJoinerBetweenPages()` - Normalize page-boundary join in output segments (`space` vs `newline`)
    - `findBreakPosition()` - Find break position using breakpoint patterns
