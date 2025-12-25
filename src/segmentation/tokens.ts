@@ -93,10 +93,14 @@ export const escapeTemplateBrackets = (pattern: string): string => {
 // - We include the Arabic-Indic digit `٤` as a rumuz code, but we do NOT match it when it's part of a larger number (e.g. "٣٤").
 // - We intentionally do NOT match ASCII `4`.
 // - For performance/clarity, the single-letter rumuz are represented as a character class.
-const RUMUZ_SINGLE_LETTER = '[خرزيمنصسدفلتقع]';
+// - Single-letter codes must NOT be followed by Arabic diacritics (\u064B-\u0652, \u0670) or letters (أ-ي),
+//   otherwise we'd incorrectly match the first letter of Arabic words like عَن as rumuz ع.
+const RUMUZ_SINGLE_LETTER = '[خرزيمنصسدفلتقع](?![\\u064B-\\u0652\\u0670أ-ي])';
 const RUMUZ_FOUR = '(?<![\\u0660-\\u0669])٤(?![\\u0660-\\u0669])';
 // IMPORTANT: order matters. Put longer/more specific codes before shorter ones.
 const RUMUZ_ATOMS: string[] = [
+    // Multi-letter word codes (must NOT be followed by diacritics or letters)
+    'تمييز(?![\\u064B-\\u0652\\u0670أ-ي])',
     // 2-letter codes
     'خت',
     'خغ',
@@ -709,3 +713,39 @@ export const getAvailableTokens = () => Object.keys(TOKEN_PATTERNS);
  * getTokenPattern('unknown') // → undefined
  */
 export const getTokenPattern = (tokenName: string): string | undefined => TOKEN_PATTERNS[tokenName];
+
+/**
+ * Tokens that should default to fuzzy matching when used in rules.
+ *
+ * These are Arabic phrase tokens where diacritic-insensitive matching
+ * is almost always desired. Users can still override with `fuzzy: false`.
+ */
+const FUZZY_DEFAULT_TOKENS: (keyof typeof BASE_TOKENS)[] = ['bab', 'basmalah', 'fasl', 'kitab', 'naql'];
+
+/**
+ * Regex to detect fuzzy-default tokens in a pattern string.
+ * Matches {{token}} or {{token:name}} syntax.
+ */
+const FUZZY_TOKEN_REGEX = new RegExp(`\\{\\{(?:${FUZZY_DEFAULT_TOKENS.join('|')})(?::\\w+)?\\}\\}`, 'g');
+
+/**
+ * Checks if a pattern (or array of patterns) contains tokens that should
+ * default to fuzzy matching.
+ *
+ * Fuzzy-default tokens are: bab, basmalah, fasl, kitab, naql
+ *
+ * @param patterns - Single pattern string or array of pattern strings
+ * @returns `true` if any pattern contains a fuzzy-default token
+ *
+ * @example
+ * shouldDefaultToFuzzy('{{bab}} الإيمان')     // true
+ * shouldDefaultToFuzzy('{{raqms}} {{dash}}')  // false
+ * shouldDefaultToFuzzy(['{{kitab}}', '{{raqms}}']) // true
+ */
+export const shouldDefaultToFuzzy = (patterns: string | string[]): boolean => {
+    const arr = Array.isArray(patterns) ? patterns : [patterns];
+    return arr.some((p) => {
+        FUZZY_TOKEN_REGEX.lastIndex = 0; // Reset stateful regex
+        return FUZZY_TOKEN_REGEX.test(p);
+    });
+};

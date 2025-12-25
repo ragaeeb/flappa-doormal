@@ -6,7 +6,7 @@
  */
 
 import { makeDiacriticInsensitive } from './fuzzy.js';
-import { escapeTemplateBrackets, expandTokensWithCaptures } from './tokens.js';
+import { escapeTemplateBrackets, expandTokensWithCaptures, shouldDefaultToFuzzy } from './tokens.js';
 import type { SplitRule } from './types.js';
 
 /**
@@ -157,7 +157,10 @@ export const buildRuleRegex = (rule: SplitRule, capturePrefix?: string): RuleReg
         regex?: string;
     } = { ...rule };
 
-    const fuzzy = (rule as { fuzzy?: boolean }).fuzzy ?? false;
+    // Auto-detect fuzzy for tokens like bab, kitab, etc. unless explicitly set
+    const allPatterns = [...(s.lineStartsWith ?? []), ...(s.lineStartsAfter ?? []), ...(s.lineEndsWith ?? [])];
+    const explicitFuzzy = (rule as { fuzzy?: boolean }).fuzzy;
+    const fuzzy = explicitFuzzy ?? shouldDefaultToFuzzy(allPatterns);
     let allCaptureNames: string[] = [];
 
     // lineStartsAfter: creates a capturing group to exclude the marker from content

@@ -97,5 +97,36 @@ describe('rule-regex', () => {
             rr.regex.lastIndex = 0;
             expect(rr.regex.test('بَابُ الصلاة')).toBe(true);
         });
+
+        it('should auto-enable fuzzy for tokens that default to fuzzy (bab)', () => {
+            // When {{bab}} is used without explicit fuzzy, it should match diacritics
+            const rr = buildRuleRegex({ lineStartsWith: ['{{bab}}'], split: 'at' } as never);
+            rr.regex.lastIndex = 0;
+            expect(rr.regex.test('بَابُ الصلاة')).toBe(true);
+        });
+
+        it('should auto-enable fuzzy for tokens that default to fuzzy (kitab)', () => {
+            const rr = buildRuleRegex({ lineStartsWith: ['{{kitab}}'], split: 'at' } as never);
+            rr.regex.lastIndex = 0;
+            expect(rr.regex.test('كِتَابُ الإيمان')).toBe(true);
+        });
+
+        it('should allow explicit fuzzy: false to override default', () => {
+            // Explicit fuzzy: false should prevent fuzzy matching
+            const rr = buildRuleRegex({ fuzzy: false, lineStartsWith: ['{{bab}}'], split: 'at' } as never);
+            rr.regex.lastIndex = 0;
+            // Should NOT match with diacritics when fuzzy is explicitly false
+            expect(rr.regex.test('بَابُ الصلاة')).toBe(false);
+            // Should match plain version
+            rr.regex.lastIndex = 0;
+            expect(rr.regex.test('باب الصلاة')).toBe(true);
+        });
+
+        it('should not auto-enable fuzzy for non-fuzzy-default tokens', () => {
+            // {{raqms}} is not a fuzzy-default token
+            const rr = buildRuleRegex({ lineStartsWith: ['{{raqms}}'], split: 'at' } as never);
+            // Pattern should be exact Unicode range, not fuzzy-expanded
+            expect(rr.regex.source).toBe('^(?:[\\u0660-\\u0669]+)');
+        });
     });
 });

@@ -225,6 +225,54 @@ describe('tokens', () => {
             expect(templateToRegex(`^${pat}$`)?.test('مد')).toBeTrue();
             expect(templateToRegex(`^${pat}$`)?.test('٤')).toBeTrue();
         });
+
+        it('should match standalone single-letter rumuz codes', () => {
+            const pat = getTokenPattern('rumuz');
+            const regex = templateToRegex(`^${pat}$`);
+            expect(regex?.test('ع')).toBeTrue(); // standalone ع is valid rumuz
+            expect(regex?.test('خ')).toBeTrue();
+            expect(regex?.test('م')).toBeTrue();
+        });
+
+        it('should NOT match single-letter rumuz when followed by diacritics', () => {
+            const pat = getTokenPattern('rumuz');
+            // Using start anchor but not end anchor to simulate real matching
+            const regex = templateToRegex(`^${pat}`);
+            // عَن has ع followed by fatha diacritic - should NOT match as rumuz
+            expect(regex?.test('عَن')).toBeFalse();
+            // مَ has م followed by fatha - should NOT match
+            expect(regex?.test('مَعروف')).toBeFalse();
+        });
+
+        it('should still match multi-letter rumuz codes', () => {
+            const pat = getTokenPattern('rumuz');
+            const regex = templateToRegex(`^${pat}$`);
+            expect(regex?.test('عس')).toBeTrue();
+            expect(regex?.test('خت')).toBeTrue();
+            expect(regex?.test('سي')).toBeTrue();
+        });
+
+        it('should match تمييز as a rumuz code (jarh wa tadil)', () => {
+            const pat = getTokenPattern('rumuz');
+            const regex = templateToRegex(`^${pat}$`);
+            expect(regex?.test('تمييز')).toBeTrue();
+        });
+
+        it('should NOT match partial تمييز', () => {
+            const pat = getTokenPattern('rumuz');
+            const regex = templateToRegex(`^${pat}$`);
+            expect(regex?.test('تميي')).toBeFalse();
+            expect(regex?.test('مييز')).toBeFalse();
+            expect(regex?.test('تميز')).toBeFalse();
+        });
+
+        it('should NOT match تمييز with diacritics', () => {
+            const pat = getTokenPattern('rumuz');
+            const regex = templateToRegex(`^${pat}$`);
+            expect(regex?.test('تَمييز')).toBeFalse();
+            expect(regex?.test('تمِييز')).toBeFalse();
+            expect(regex?.test('تَمْيِيزٌ')).toBeFalse();
+        });
     });
 
     describe('TOKEN_PATTERNS', () => {
@@ -277,6 +325,46 @@ describe('tokens', () => {
             // This simulates what happens in segmenter.ts when using lineStartsAfter
             const pattern = expandTokens('^(?:{{numbered}})(.*)');
             expect(pattern).toBe('^(?:[\\u0660-\\u0669]+ [-–—ـ] )(.*)');
+        });
+    });
+
+    describe('shouldDefaultToFuzzy', () => {
+        // Import at runtime to avoid circular deps during test setup
+        const { shouldDefaultToFuzzy } = require('./tokens.js');
+
+        it('should return true for patterns containing {{bab}}', () => {
+            expect(shouldDefaultToFuzzy('{{bab}} الإيمان')).toBeTrue();
+        });
+
+        it('should return true for patterns containing {{basmalah}}', () => {
+            expect(shouldDefaultToFuzzy('{{basmalah}}')).toBeTrue();
+        });
+
+        it('should return true for patterns containing {{fasl}}', () => {
+            expect(shouldDefaultToFuzzy('{{fasl}}')).toBeTrue();
+        });
+
+        it('should return true for patterns containing {{kitab}}', () => {
+            expect(shouldDefaultToFuzzy('{{kitab}} الصلاة')).toBeTrue();
+        });
+
+        it('should return true for patterns containing {{naql}}', () => {
+            expect(shouldDefaultToFuzzy('{{naql}}')).toBeTrue();
+        });
+
+        it('should return false for patterns without fuzzy-default tokens', () => {
+            expect(shouldDefaultToFuzzy('{{raqms}} {{dash}}')).toBeFalse();
+            expect(shouldDefaultToFuzzy('{{numbered}}')).toBeFalse();
+            expect(shouldDefaultToFuzzy('plain text')).toBeFalse();
+        });
+
+        it('should return true if any pattern in array contains fuzzy-default token', () => {
+            expect(shouldDefaultToFuzzy(['{{raqms}}', '{{bab}}'])).toBeTrue();
+            expect(shouldDefaultToFuzzy(['{{numbered}}', '{{kitab}} '])).toBeTrue();
+        });
+
+        it('should return false if no patterns contain fuzzy-default tokens', () => {
+            expect(shouldDefaultToFuzzy(['{{raqms}}', '{{dash}}'])).toBeFalse();
         });
     });
 });

@@ -742,19 +742,6 @@ describe('index', () => {
 
             const segments = segmentPages(pages, options);
 
-            if (process.env.FLAPPA_DEBUG) {
-                console.log('\n\n=== SEGMENTS DEBUG ===');
-                console.log('Total segments:', segments.length);
-                for (let i = 0; i < segments.length; i++) {
-                    console.log(`\n--- Segment ${i} ---`);
-                    console.log('from:', segments[i].from, 'to:', segments[i].to);
-                    console.log('content length:', segments[i].content.length);
-                    console.log('starts:', segments[i].content.slice(0, 50));
-                    console.log('ends:', segments[i].content.slice(-50));
-                }
-                console.log('\n=== END SEGMENTS DEBUG ===\n');
-            }
-
             expect(segments).toHaveLength(2);
 
             testSegment(segments[0], {
@@ -854,5 +841,20 @@ describe('index', () => {
                 from: 14218,
             });
         });
+    });
+
+    it('should not match عَ with diacritics or followed by another character that is not a ramz', () => {
+        initPages(['٤٩٢٢ - عَن: قَيْس بن مُسْلِم الْمَذْحَجِيّ (١) ، شامي.\r• • •']);
+
+        const segments = segmentPages(pages, {
+            replace: [{ regex: '\r• • •', replacement: '' }],
+            rules: [
+                {
+                    lineStartsAfter: ['{{raqms:num}} {{dash}} {{rumuz:rumuz}}:\\s*'],
+                },
+            ],
+        });
+
+        expect(segments).toEqual([{ content: pages[0].content, from: 0 }]);
     });
 });

@@ -59,7 +59,9 @@ src/
 2. **`tokens.ts`** - Template system
    - `TOKEN_PATTERNS` - Map of token names to regex patterns
    - `expandTokensWithCaptures()` - Expands `{{token:name}}` syntax
+   - `shouldDefaultToFuzzy()` - Checks if patterns contain fuzzy-default tokens (bab, basmalah, fasl, kitab, naql)
    - Supports fuzzy transform for diacritic-insensitive matching
+   - **Fuzzy-default tokens**: `bab`, `basmalah`, `fasl`, `kitab`, `naql` - auto-enable fuzzy matching unless `fuzzy: false` is set
 
 3. **`match-utils.ts`** - Extracted utilities (for testability)
    - `extractNamedCaptures()` - Get named groups from regex match

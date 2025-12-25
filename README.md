@@ -50,7 +50,7 @@ Working with Arabic hadith and Islamic text collections requires splitting conti
 
 ✅ **Readable templates**: `{{raqms}} {{dash}}` instead of cryptic regex  
 ✅ **Named captures**: `{{raqms:hadithNum}}` auto-extracts to `meta.hadithNum`  
-✅ **Fuzzy matching**: Ignore diacritics with `fuzzy: true`  
+✅ **Fuzzy matching**: Auto-enabled for `{{bab}}`, `{{kitab}}`, `{{basmalah}}`, `{{fasl}}`, `{{naql}}` (override with `fuzzy: false`)  
 ✅ **Page tracking**: Know which page each segment came from  
 ✅ **Declarative rules**: Describe *what* to match, not *how*
 
@@ -344,6 +344,10 @@ const segments = segmentPages(pages, {
 // meta: { num: '١١١٨' }
 // content: '...' (rumuz stripped)
 ```
+
+**Supported codes**: Single-letter (`ع`, `خ`, `م`, `د`, etc.), two-letter (`خت`, `عس`, `سي`, etc.), digit `٤`, and the word `تمييز` (used in jarḥ wa taʿdīl books).
+
+> **Note**: Single-letter rumuz like `ع` are only matched when they appear as standalone codes, not as the first letter of words like `عَن`. The pattern is diacritic-safe.
 
 If your data uses *only single-letter codes separated by spaces* (e.g., `د ت س ي ق`), you can also use `{{harfs}}`.
 
