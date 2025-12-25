@@ -413,8 +413,10 @@ export const buildBoundaryPositions = (
         if (isValidPosition) {
             boundaryPositions.push(pos);
         } else {
-            // Fallback for whitespace-only pages, identical content, or stripped markers
-            const estimate = Math.max(prevBoundary, expectedBoundary);
+            // Fallback for whitespace-only pages, identical content, or stripped markers.
+            // Ensure estimate is strictly > prevBoundary to prevent duplicate zero-length
+            // boundaries, which would break binary-search page-attribution logic.
+            const estimate = Math.max(prevBoundary + 1, expectedBoundary);
             boundaryPositions.push(Math.min(estimate, segmentContent.length));
         }
     }

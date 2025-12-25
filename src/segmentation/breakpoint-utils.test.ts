@@ -9,6 +9,7 @@ import { describe, expect, it } from 'bun:test';
 import { computeNextFromIdx, computeWindowEndIdx } from './breakpoint-processor.js';
 import {
     applyPageJoinerBetweenPages,
+    buildBoundaryPositions,
     buildExcludeSet,
     createSegment,
     estimateStartOffsetInCurrentPage,
@@ -16,6 +17,7 @@ import {
     findBreakpointWindowEndPosition,
     findExclusionBreakPosition,
     findNextPagePosition,
+    findPageIndexForPosition,
     findPatternBreakPosition,
     hasExcludedPageInRange,
     isInBreakpointRange,
@@ -522,7 +524,6 @@ describe('breakpoint-utils', () => {
             const segmentContent = 'First page content here.\nShort\nThird page content.';
             const cumulativeOffsets = [0, 25, 31, 51];
 
-            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
             const boundaries = buildBoundaryPositions(
                 segmentContent,
                 0,
@@ -545,7 +546,6 @@ describe('breakpoint-utils', () => {
             const segmentContent = 'Page one.\nPage two.';
             const cumulativeOffsets = [0, 10, 20];
 
-            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
             const boundaries = buildBoundaryPositions(
                 segmentContent,
                 0,
@@ -558,11 +558,89 @@ describe('breakpoint-utils', () => {
             // Last element should be content length (sentinel)
             expect(boundaries[boundaries.length - 1]).toBe(segmentContent.length);
         });
+
+        it('should handle identical-prefix collisions by preferring proximity to expected offset', () => {
+            // Pages with identical short prefixes - "Intro" appears in all three
+            const pageIds = [100, 200, 300];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [100, { content: 'Introduction to chapter one. More content follows here.', index: 0, length: 55 }],
+                [200, { content: 'Introductory remarks for section two. Additional text.', index: 1, length: 54 }],
+                [300, { content: 'Intro paragraph for part three. Final content here.', index: 2, length: 51 }],
+            ]);
+
+            // Segment with all three pages concatenated with newlines
+            const segmentContent =
+                'Introduction to chapter one. More content follows here.\n' +
+                'Introductory remarks for section two. Additional text.\n' +
+                'Intro paragraph for part three. Final content here.';
+
+            // Cumulative offsets reflecting page boundaries
+            const cumulativeOffsets = [0, 56, 111, 162];
+
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                2,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // Verify first boundary is always 0
+            expect(boundaries[0]).toBe(0);
+
+            // Verify monotonicity: each boundary must be strictly greater than previous
+            for (let i = 1; i < boundaries.length; i++) {
+                expect(boundaries[i]).toBeGreaterThan(boundaries[i - 1]);
+            }
+
+            // Verify sentinel equals segment content length
+            expect(boundaries[boundaries.length - 1]).toBe(segmentContent.length);
+
+            // Verify the boundaries are at or near expected positions
+            // Page 200 starts at position 56 (after newline)
+            expect(boundaries[1]).toBe(56);
+            // Page 300 starts at position 111 (after second newline)
+            expect(boundaries[2]).toBe(111);
+        });
+
+        it('should produce strictly increasing boundaries even with duplicate prefix content', () => {
+            // Worst case: pages with identical first 10 characters
+            const pageIds = [1, 2, 3];
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [1, { content: 'AAAAAAAAAA first page unique end', index: 0, length: 32 }],
+                [2, { content: 'AAAAAAAAAA second page unique end', index: 1, length: 33 }],
+                [3, { content: 'AAAAAAAAAA third page unique end', index: 2, length: 32 }],
+            ]);
+
+            const segmentContent =
+                'AAAAAAAAAA first page unique end\n' +
+                'AAAAAAAAAA second page unique end\n' +
+                'AAAAAAAAAA third page unique end';
+
+            const cumulativeOffsets = [0, 33, 67, 99];
+
+            const boundaries = buildBoundaryPositions(
+                segmentContent,
+                0,
+                2,
+                pageIds,
+                normalizedPages,
+                cumulativeOffsets,
+            );
+
+            // Verify strict monotonicity (no duplicates)
+            for (let i = 1; i < boundaries.length; i++) {
+                expect(boundaries[i]).toBeGreaterThan(boundaries[i - 1]);
+            }
+
+            // Verify sentinel
+            expect(boundaries[boundaries.length - 1]).toBe(segmentContent.length);
+        });
     });
 
     describe('findPageIndexForPosition', () => {
         it('should return first page for position 0', () => {
-            const { findPageIndexForPosition } = require('./breakpoint-utils.js');
             const boundaries = [0, 20, 40, 60]; // 3 pages + sentinel
             const fromIdx = 5;
 
@@ -570,7 +648,6 @@ describe('breakpoint-utils', () => {
         });
 
         it('should return correct page for mid-content position', () => {
-            const { findPageIndexForPosition } = require('./breakpoint-utils.js');
             const boundaries = [0, 20, 40, 60]; // 3 pages + sentinel
             const fromIdx = 0;
 
@@ -580,7 +657,6 @@ describe('breakpoint-utils', () => {
         });
 
         it('should return correct page when position is exactly on boundary', () => {
-            const { findPageIndexForPosition } = require('./breakpoint-utils.js');
             const boundaries = [0, 20, 40, 60]; // 3 pages + sentinel
             const fromIdx = 0;
 
@@ -590,7 +666,6 @@ describe('breakpoint-utils', () => {
         });
 
         it('should return last page for position at or after last boundary', () => {
-            const { findPageIndexForPosition } = require('./breakpoint-utils.js');
             const boundaries = [0, 20, 40, 60];
             const fromIdx = 0;
 
@@ -600,7 +675,6 @@ describe('breakpoint-utils', () => {
         });
 
         it('should handle single-page boundary array', () => {
-            const { findPageIndexForPosition } = require('./breakpoint-utils.js');
             const boundaries = [0, 50]; // 1 page + sentinel
             const fromIdx = 10;
 

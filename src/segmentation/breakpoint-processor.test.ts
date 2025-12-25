@@ -189,18 +189,73 @@ describe('breakpoint-processor', () => {
             expect(result[0].from).toBe(1);
         });
 
-        it('should apply pageJoiner space by default', () => {
+        it('should apply pageJoiner space by default (replaces newlines with spaces)', () => {
             const pages = [
-                { content: 'First', id: 1 },
-                { content: 'Second', id: 2 },
+                { content: 'First page content', id: 1 },
+                { content: 'Second page content', id: 2 },
+                { content: 'Third page content', id: 3 },
             ];
-            const segments: Segment[] = [{ content: 'First\nSecond', from: 1, to: 2 }];
-            const normalizedContent = ['First', 'Second'];
+            // Content with newlines between pages that will be broken and rejoined
+            const segments: Segment[] = [
+                { content: 'First page content\nSecond page content\nThird page content', from: 1, to: 3 },
+            ];
+            const normalizedContent = pages.map((p) => p.content);
 
-            const result = applyBreakpoints(segments, pages, normalizedContent, 2, [], 'longer', patternProcessor);
+            // maxPages=1 forces breaking, pageJoiner=space should replace newlines with spaces
+            const result = applyBreakpoints(
+                segments,
+                pages,
+                normalizedContent,
+                1,
+                [''],
+                'longer',
+                patternProcessor,
+                undefined,
+                'space',
+            );
 
-            expect(result).toHaveLength(1);
-            // Content should have page join normalized
+            expect(result.length).toBeGreaterThan(1);
+            // Broken segments spanning multiple pages have newlines replaced with spaces
+            for (const seg of result) {
+                if (seg.to && seg.to > seg.from) {
+                    // Should not have newlines at page boundaries (normalized to space)
+                    expect(seg.content).not.toContain('\n');
+                }
+            }
+        });
+
+        it('should preserve newlines when pageJoiner is newline', () => {
+            const pages = [
+                { content: 'First page content', id: 1 },
+                { content: 'Second page content', id: 2 },
+                { content: 'Third page content', id: 3 },
+            ];
+            // Content with newlines between pages
+            const segments: Segment[] = [
+                { content: 'First page content\nSecond page content\nThird page content', from: 1, to: 3 },
+            ];
+            const normalizedContent = pages.map((p) => p.content);
+
+            // maxPages=1 forces breaking, pageJoiner=newline preserves newlines
+            const result = applyBreakpoints(
+                segments,
+                pages,
+                normalizedContent,
+                1,
+                [''],
+                'longer',
+                patternProcessor,
+                undefined,
+                'newline',
+            );
+
+            expect(result.length).toBeGreaterThan(1);
+            // When pageJoiner is 'newline', newlines at page boundaries are preserved
+            for (const seg of result) {
+                if (seg.to && seg.to > seg.from) {
+                    expect(seg.content).toContain('\n');
+                }
+            }
         });
     });
 });
