@@ -28,6 +28,8 @@ src/
 ├── index.ts                    # Main entry point and exports
 ├── pattern-detection.ts        # Token detection for auto-generating rules (NEW)
 ├── pattern-detection.test.ts   # Pattern detection tests (22 tests)
+├── recovery.ts                 # Marker recovery utility (recover mistaken lineStartsAfter)
+├── recovery.test.ts            # Marker recovery tests
 └── segmentation/
     ├── types.ts                # TypeScript type definitions for rules/segments
     ├── segmenter.ts            # Core segmentation engine (segmentPages)
@@ -55,6 +57,11 @@ src/
 1. **`segmentPages(pages, options)`** - Main entry point
    - Takes array of `{id, content}` pages and split rules
    - Returns array of `{content, from, to?, meta?}` segments
+
+1. **`recoverMistakenLineStartsAfterMarkers(pages, segments, options, selector)`** - Recovery helper
+   - Use when a client mistakenly used `lineStartsAfter` where `lineStartsWith` was intended
+   - Deterministic mode reruns segmentation with selected rules converted to `lineStartsWith` and merges recovered `content` back into the provided segments
+   - Optional `mode: 'best_effort_then_rerun'` attempts a conservative anchor-based recovery first, then falls back to rerun for unresolved segments
 
 2. **`tokens.ts`** - Template system
    - `TOKEN_PATTERNS` - Map of token names to regex patterns
@@ -361,6 +368,39 @@ bunx biome lint .
 10. **Page boundary detection needs progressive prefixes**: When breakpoints split content mid-page, checking only the first N characters of a page to detect if the segment ends on that page can fail. Solution: try progressively shorter prefixes (`[80, 60, 40, 30, 20, 15, 12, 10, 8, 6]`) via `JOINER_PREFIX_LENGTHS`. The check uses `indexOf(...) > 0` (not `>= 0`) to avoid false positives when a page prefix appears at position 0 (which indicates the segment *starts* with that page, not *ends* on it).
 
 11. **Boundary-position algorithm improves page attribution**: Building a position map of page boundaries once per segment (O(n)) enables binary search for O(log n) lookups per piece. Key insight: when a segment starts mid-page (common after structural rules), expected boundary estimates must account for the offset into the starting page. Without this adjustment, position-based lookups can return the wrong page when pages have identical content prefixes.
+
+### For Future AI Agents (Recovery + Repo gotchas)
+
+1. **`lineStartsAfter` vs `lineStartsWith` is not “cosmetic”**: `lineStartsAfter` changes output by stripping the matched marker via an internal `contentStartOffset` during segment construction. If a client used it by accident, you cannot reconstruct the exact stripped prefix from output alone without referencing the original pages and re-matching the marker.
+
+2. **Recovery must mirror segmentation’s preprocessing**: If `SegmentationOptions.replace` was used, recovery must apply the same replacements (see `src/segmentation/replace.ts`) before attempting anchoring or rerun alignment, otherwise substring matching and page joins will drift.
+
+3. **Page joining differs between matching and output**:
+   - Matching always happens on pages concatenated with `\\n` separators.
+   - Output segments may normalize page boundaries (`pageJoiner: 'space' | 'newline'`) and breakpoints post-processing uses its own join normalization utilities.
+   Recovery code must be explicit about which representation it’s searching.
+
+4. **Breakpoints can produce “pieces” that were never marker-stripped**: When `maxPages` + `breakpoints` are enabled, only the piece that starts at the original structural boundary could have lost a marker due to `lineStartsAfter`. Mid-segment breakpoint pieces should not be “recovered” unless you can anchor them confidently.
+
+5. **Fuzzy defaults are easy to miss**: Some tokens auto-enable fuzzy matching unless `fuzzy: false` is set (`bab`, `basmalah`, `fasl`, `kitab`, `naql`). If you are validating markers or re-matching prefixes, use the same compilation path as segmentation (`buildRuleRegex` / `processPattern`) so diacritics and token expansion behave identically.
+
+6. **Auto-escaping applies to template-like patterns**: `lineStartsWith`, `lineStartsAfter`, `lineEndsWith`, and `template` auto-escape `()[]` outside `{{tokens}}`. Raw `regex` does not. If you compare patterns by string equality, be careful about escaping and whitespace.
+
+7. **TypeScript union pitfalls with `SplitRule`**: `SplitRule` is a union where only one pattern type should exist. Avoid mutating rules in-place with `delete` on fields (TS often narrows unions and then complains). Prefer rebuilding converted rules via destructuring (e.g. `{ lineStartsAfter, ...rest }` then create `{...rest, lineStartsWith: lineStartsAfter}`).
+
+8. **Biome lint constraints shape implementation**: The repo enforces low function complexity. Expect to extract helpers (alignment, selector resolution, anchoring) to keep Biome happy. Also, Biome can flag regex character-class usage as misleading; prefer alternation (e.g. `(?:\\u200C|\\u200D|\\uFEFF)`) when removing specific codepoints.
+
+9. **When debugging recovery, start here**:
+   - `src/segmentation/segmenter.ts` (how content is sliced/trimmed and how `from/to` are computed)
+   - `src/segmentation/rule-regex.ts` + `src/segmentation/tokens.ts` (token expansion + fuzzy behavior)
+   - `src/segmentation/replace.ts` (preprocessing parity)
+   - `src/recovery.ts` (recovery implementation)
+
+### Process Template (Multi-agent design review, TDD-first)
+
+If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:
+
+- `docs/ai-multi-agent-tdd-template.md`
 
 ### Architecture Insights
 

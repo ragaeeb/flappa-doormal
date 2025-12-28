@@ -697,6 +697,53 @@ const options: SegmentationOptions = {
 const segments: Segment[] = segmentPages(pages, options);
 ```
 
+### Marker recovery (when `lineStartsAfter` was used by accident)
+
+If you accidentally used `lineStartsAfter` for markers that should have been preserved (e.g. Arabic connective phrases like `وروى` / `وذكر`), you can recover those missing prefixes from existing segments.
+
+#### `recoverMistakenLineStartsAfterMarkers(pages, segments, options, selector, opts?)`
+
+This function returns new segments with recovered `content` plus a `report` describing what happened.
+
+**Recommended (deterministic) mode**: rerun segmentation with selected rules converted to `lineStartsWith`, then merge recovered content back.
+
+```ts
+import { recoverMistakenLineStartsAfterMarkers, segmentPages } from 'flappa-doormal';
+
+const pages = [{ id: 1, content: 'وروى أحمد\nوذكر خالد' }];
+const options = { rules: [{ lineStartsAfter: ['وروى '] }, { lineStartsAfter: ['وذكر '] }] };
+
+const segments = segmentPages(pages, options);
+// segments[0].content === 'أحمد' (marker stripped)
+
+const { segments: recovered, report } = recoverMistakenLineStartsAfterMarkers(
+  pages,
+  segments,
+  options,
+  { type: 'rule_indices', indices: [0] }, // recover only the first rule
+);
+
+// recovered[0].content === 'وروى أحمد'
+// recovered[1].content === 'خالد'  (unchanged)
+console.log(report.summary);
+```
+
+**Optional**: best-effort anchoring mode attempts to recover without rerunning first, then falls back to rerun for unresolved segments:
+
+```ts
+const { segments: recovered } = recoverMistakenLineStartsAfterMarkers(
+  pages,
+  segments,
+  options,
+  { type: 'rule_indices', indices: [0] },
+  { mode: 'best_effort_then_rerun' }
+);
+```
+
+Notes:
+- Recovery is **explicitly scoped** by the `selector`; it will not “guess” which rules are mistaken.
+- If your segments were heavily post-processed (trimmed/normalized/reordered), recovery may return unresolved items; see the report for details.
+
 ### `stripHtmlTags(html)`
 
 Remove all HTML tags from content, keeping only text.

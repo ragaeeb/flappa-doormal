@@ -90,3 +90,9 @@ export {
     generateTemplateFromText,
     suggestPatternConfig,
 } from './detection.js';
+
+// ─────────────────────────────────────────────────────────────
+// Recovery helpers
+// ─────────────────────────────────────────────────────────────
+export type { MarkerRecoveryReport, MarkerRecoveryRun, MarkerRecoverySelector } from './recovery.js';
+export { recoverMistakenLineStartsAfterMarkers, recoverMistakenMarkersForRuns } from './recovery.js';
