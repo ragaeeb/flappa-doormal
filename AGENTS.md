@@ -26,8 +26,14 @@ Traditional Arabic text segmentation requires:
 ```text
 src/
 ├── index.ts                    # Main entry point and exports
-├── pattern-detection.ts        # Token detection for auto-generating rules (NEW)
-├── pattern-detection.test.ts   # Pattern detection tests (22 tests)
+├── analysis/                   # Analysis helpers module
+│   ├── index.ts                # Barrel exports for analysis functions
+│   ├── shared.ts               # Shared utilities for analysis
+│   ├── line-starts.ts          # analyzeCommonLineStarts (line-based patterns)
+│   ├── repeating-sequences.ts  # analyzeRepeatingSequences (continuous text N-grams)
+│   └── *.test.ts               # Analysis tests
+├── pattern-detection.ts        # Token detection for auto-generating rules
+├── pattern-detection.test.ts   # Pattern detection tests
 ├── recovery.ts                 # Marker recovery utility (recover mistaken lineStartsAfter)
 ├── recovery.test.ts            # Marker recovery tests
 └── segmentation/
@@ -493,4 +499,33 @@ const quoted = analyzeCommonLineStarts(pages, {
   sortBy: 'count',
 });
 ```
+
+## Repeating Sequence Analysis (`analyzeRepeatingSequences`)
+
+For continuous text **without line breaks** (prose-like content), use `analyzeRepeatingSequences(pages)`. It scans for commonly repeating word/token sequences (N-grams) across pages.
+
+Key options:
+- `minElements` / `maxElements`: N-gram size range (default 1-3)
+- `minCount`: Minimum occurrences to include (default 3)
+- `topK`: Maximum patterns to return (default 20)
+- `requireToken`: Only patterns containing `{{tokens}}` (default true)
+- `normalizeArabicDiacritics`: Ignore diacritics when matching (default true)
+
+Example:
+```typescript
+import { analyzeRepeatingSequences } from 'flappa-doormal';
+
+const patterns = analyzeRepeatingSequences(pages, { minCount: 3, topK: 20 });
+// [{ pattern: '{{naql}}', count: 42, examples: [...] }, ...]
+```
+
+## Analysis → Segmentation Workflow
+
+Use analysis functions to discover patterns, then pass to `segmentPages()`:
+
+1. **Continuous text**: `analyzeRepeatingSequences()` → build rules → `segmentPages()`
+2. **Structured text**: `analyzeCommonLineStarts()` → build rules → `segmentPages()`
+
+See README.md for complete examples.
+
 

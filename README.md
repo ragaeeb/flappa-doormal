@@ -406,7 +406,98 @@ Key options:
 - If you paste these signatures into `lineStartsWith` / `lineStartsAfter` / `template`, that’s fine: those template pattern types **auto-escape `()[]`** outside `{{tokens}}`.
 - If you paste them into a raw `regex` rule, you may need to escape literal brackets yourself.
 
+### Repeating Sequence Analysis (continuous text)
+
+For texts without line breaks (continuous prose), use `analyzeRepeatingSequences()`:
+
+```typescript
+import { analyzeRepeatingSequences } from 'flappa-doormal';
+
+const patterns = analyzeRepeatingSequences(pages, {
+  minElements: 2,
+  maxElements: 4,
+  minCount: 3,
+  topK: 20,
+});
+// [{ pattern: "{{naql}}\\s*{{harf}}", count: 42, examples: [...] }, ...]
+```
+
+Key options:
+- `minElements` / `maxElements`: N-gram size range (default 1-3)
+- `minCount`: Minimum occurrences to include (default 3)
+- `topK`: Maximum patterns to return (default 20)
+- `requireToken`: Only patterns containing `{{tokens}}` (default true)
+- `normalizeArabicDiacritics`: Ignore diacritics when matching (default true)
+
+## Analysis → Segmentation Workflow
+
+Use analysis functions to discover patterns, then pass to `segmentPages()`.
+
+### Example A: Continuous Text (No Punctuation)
+
+For prose-like text without structural line breaks:
+
+```typescript
+import { analyzeRepeatingSequences, segmentPages, type Page } from 'flappa-doormal';
+
+// Continuous Arabic text with narrator phrases
+const pages: Page[] = [
+  { id: 1, content: 'حدثنا أحمد بن محمد عن عمر قال سمعت النبي حدثنا خالد بن زيد عن علي' },
+  { id: 2, content: 'حدثنا سعيد بن جبير عن ابن عباس أخبرنا يوسف عن أنس' },
+];
+
+// Step 1: Discover repeating patterns
+const patterns = analyzeRepeatingSequences(pages, { minCount: 2, topK: 10 });
+// [{ pattern: '{{naql}}', count: 5, examples: [...] }, ...]
+
+// Step 2: Build rules from discovered patterns
+const rules = patterns.filter(p => p.count >= 3).map(p => ({
+  lineStartsWith: [p.pattern],
+  split: 'at' as const,
+  fuzzy: true,
+}));
+
+// Step 3: Segment
+const segments = segmentPages(pages, { rules });
+// [{ content: 'حدثنا أحمد بن محمد عن عمر قال سمعت النبي', from: 1 }, ...]
+```
+
+### Example B: Structured Text (With Numbering)
+
+For hadith-style numbered entries:
+
+```typescript
+import { analyzeCommonLineStarts, segmentPages, type Page } from 'flappa-doormal';
+
+// Numbered hadith text
+const pages: Page[] = [
+  { id: 1, content: '٦٦٩٦ - حَدَّثَنَا أَبُو بَكْرٍ عَنِ النَّبِيِّ\n٦٦٩٧ - أَخْبَرَنَا عُمَرُ قَالَ' },
+  { id: 2, content: '٦٦٩٨ - حَدَّثَنِي مُحَمَّدٌ عَنْ عَائِشَةَ' },
+];
+
+// Step 1: Discover common line-start patterns
+const patterns = analyzeCommonLineStarts(pages, { topK: 10, minCount: 2 });
+// [{ pattern: '{{raqms}}\\s*{{dash}}', count: 3, examples: [...] }, ...]
+
+// Step 2: Build rules (add named capture for hadith number)
+const topPattern = patterns[0]?.pattern ?? '{{raqms}} {{dash}} ';
+const rules = [{
+  lineStartsAfter: [topPattern.replace('{{raqms}}', '{{raqms:num}}')],
+  split: 'at' as const,
+  meta: { type: 'hadith' }
+}];
+
+// Step 3: Segment
+const segments = segmentPages(pages, { rules });
+// [
+//   { content: 'حَدَّثَنَا أَبُو بَكْرٍ...', from: 1, meta: { type: 'hadith', num: '٦٦٩٦' } },
+//   { content: 'أَخْبَرَنَا عُمَرُ قَالَ', from: 1, meta: { type: 'hadith', num: '٦٦٩٧' } },
+//   { content: 'حَدَّثَنِي مُحَمَّدٌ...', from: 2, meta: { type: 'hadith', num: '٦٦٩٨' } },
+// ]
+```
+
 ## Rule Validation
+
 
 Use `validateRules()` to detect common mistakes in rule patterns before running segmentation:
 
