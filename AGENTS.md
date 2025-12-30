@@ -208,7 +208,7 @@ Raw `regex` patterns now support named capture groups for metadata extraction:
 
 ### Breakpoints Post-Processing Algorithm
 
-The `breakpoints` option provides a post-processing mechanism for limiting segment size. Unlike the deprecated `maxSpan` (which was per-rule), breakpoints runs AFTER all structural rules.
+The `breakpoints` option provides a post-processing mechanism for limiting segment size. Breakpoints runs AFTER all structural rules.
 
 **API Options:**
 ```typescript
@@ -250,7 +250,7 @@ segmentPages(pages, {
 - **`prefer: 'shorter'`**: Finds FIRST match (conservative)
 - **Recursive**: If split result still exceeds `maxPages`, breakpoints runs again
 
-> **Note**: The old `maxSpan` and `fallback` properties on `SplitRule` are deprecated and removed.
+> **Note**: Older per-rule span limiting approaches were removed in favor of post-processing `breakpoints`.
 
 ## Design Decisions
 
@@ -363,7 +363,7 @@ bunx biome lint .
 
 5. **Rule order matters for specificity**: When multiple rules can match the same position, put specific patterns BEFORE generic ones. Example: `## {{raqms:num}} {{dash}}` must come before `##` to capture the number.
 
-6. **Post-processing beats per-rule limits**: The `maxSpan` approach (per-rule page limits) caused premature splits. Moving to post-processing `breakpoints` preserves structural integrity while still limiting segment size.
+6. **Post-processing beats per-rule limits**: Per-rule span limiting caused premature splits. Moving to post-processing `breakpoints` preserves structural integrity while still limiting segment size.
 
 7. **Window padding matters**: When calculating approximate content windows, 50% padding is needed (not 20%) to ensure enough content is captured for `prefer: 'longer'` scenarios.
 

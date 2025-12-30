@@ -44,6 +44,8 @@ export type SplitPoint = {
     index: number;
     /** Static metadata from the matched rule */
     meta?: Record<string, unknown>;
+    /** Rule index that produced this split point (for debugging/provenance) */
+    ruleIndex?: number;
     /** Content captured by regex patterns with capturing groups */
     capturedContent?: string;
     /** Named captures from `{{token:name}}` patterns */

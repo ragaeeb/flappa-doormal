@@ -11,7 +11,7 @@ import type { SplitRule } from './types.js';
 /**
  * Types of validation issues that can be detected.
  */
-export type ValidationIssueType = 'missing_braces' | 'unknown_token' | 'duplicate';
+export type ValidationIssueType = 'missing_braces' | 'unknown_token' | 'duplicate' | 'empty_pattern';
 
 /**
  * A validation issue found in a pattern.
@@ -53,6 +53,9 @@ const buildBareTokenRegex = (): RegExp => {
  * Validates a single pattern for common issues.
  */
 const validatePattern = (pattern: string, seenPatterns: Set<string>): ValidationIssue | undefined => {
+    if (!pattern.trim()) {
+        return { message: 'Empty pattern is not allowed', type: 'empty_pattern' };
+    }
     // Check for duplicates
     if (seenPatterns.has(pattern)) {
         return {
@@ -159,7 +162,7 @@ export const validateRules = (rules: SplitRule[]): (RuleValidationResult | undef
             }
         }
 
-        if ('template' in rule && rule.template) {
+        if ('template' in rule && rule.template !== undefined) {
             const seenPatterns = new Set<string>();
             const issue = validatePattern(rule.template, seenPatterns);
             if (issue) {

@@ -19,6 +19,7 @@ import {
     type NormalizedPage,
 } from './breakpoint-utils.js';
 import type { Breakpoint, Logger, Page, Segment } from './types.js';
+import { buildBreakpointDebugPatch, mergeDebugIntoMeta } from './debug-meta.js';
 
 export type BreakpointPatternProcessor = (pattern: string) => string;
 
@@ -172,7 +173,7 @@ const findBreakOffsetForWindow = (
     cumulativeOffsets: number[],
     normalizedPages: Map<number, NormalizedPage>,
     prefer: 'longer' | 'shorter',
-): number => {
+): { breakpointIndex?: number; breakOffset: number; breakpointRule?: { pattern: string } } => {
     const windowHasExclusions = hasAnyExclusionsInRange(expandedBreakpoints, pageIds, currentFromIdx, windowEndIdx);
 
     if (windowHasExclusions) {
@@ -185,12 +186,12 @@ const findBreakOffsetForWindow = (
             cumulativeOffsets,
         );
         if (exclusionBreak > 0) {
-            return exclusionBreak;
+            return { breakOffset: exclusionBreak };
         }
     }
 
     const breakpointCtx: BreakpointContext = { expandedBreakpoints, normalizedPages, pageIds, prefer };
-    const patternBreak = findBreakPosition(
+    const patternMatch = findBreakPosition(
         remainingContent,
         currentFromIdx,
         toIdx,
@@ -199,7 +200,10 @@ const findBreakOffsetForWindow = (
         breakpointCtx,
     );
 
-    return patternBreak > 0 ? patternBreak : windowEndPosition;
+    if (patternMatch && patternMatch.breakPos > 0) {
+        return { breakOffset: patternMatch.breakPos, breakpointIndex: patternMatch.breakpointIndex, breakpointRule: patternMatch.rule };
+    }
+    return { breakOffset: windowEndPosition };
 };
 
 /**
@@ -230,12 +234,14 @@ const processOversizedSegment = (
     maxPages: number,
     prefer: 'longer' | 'shorter',
     logger?: Logger,
+    debugMetaKey?: string,
 ): Segment[] => {
     const result: Segment[] = [];
     const fullContent = segment.content;
     let cursorPos = 0;
     let currentFromIdx = fromIdx;
     let isFirstPiece = true;
+    let lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null = null;
 
     const boundaryPositions = buildBoundaryPositions(
         fullContent,
@@ -264,13 +270,24 @@ const processOversizedSegment = (
         const remainingHasExclusions = hasAnyExclusionsInRange(expandedBreakpoints, pageIds, currentFromIdx, toIdx);
 
         if (remainingSpan <= maxPages && !remainingHasExclusions) {
+            const includeMeta = isFirstPiece || Boolean(debugMetaKey);
+            const meta =
+                debugMetaKey && lastBreakpoint
+                    ? mergeDebugIntoMeta(
+                          includeMeta ? segment.meta : undefined,
+                          debugMetaKey,
+                          buildBreakpointDebugPatch(lastBreakpoint.breakpointIndex, lastBreakpoint.rule as any),
+                      )
+                    : includeMeta
+                      ? segment.meta
+                      : undefined;
             const finalSeg = createFinalSegment(
                 remainingContent,
                 currentFromIdx,
                 toIdx,
                 pageIds,
-                segment.meta,
-                isFirstPiece,
+                meta,
+                includeMeta,
             );
             if (finalSeg) {
                 result.push(finalSeg);
@@ -291,7 +308,7 @@ const processOversizedSegment = (
 
         logger?.debug?.(`[breakpoints] iteration=${i}`, { currentFromIdx, cursorPos, windowEndIdx });
 
-        const breakOffset = findBreakOffsetForWindow(
+        const found = findBreakOffsetForWindow(
             remainingContent,
             currentFromIdx,
             windowEndIdx,
@@ -304,7 +321,11 @@ const processOversizedSegment = (
             prefer,
         );
 
-        const breakPos = cursorPos + breakOffset;
+        if (found.breakpointIndex !== undefined && found.breakpointRule) {
+            lastBreakpoint = { breakpointIndex: found.breakpointIndex, rule: found.breakpointRule };
+        }
+
+        const breakPos = cursorPos + found.breakOffset;
         const pieceContent = fullContent.slice(cursorPos, breakPos).trim();
         const { actualEndIdx, actualStartIdx } = computePiecePages(
             cursorPos,
@@ -317,13 +338,24 @@ const processOversizedSegment = (
         logger?.trace?.('[breakpoints] piece', { actualEndIdx, actualStartIdx, pieceLength: pieceContent.length });
 
         if (pieceContent) {
+            const includeMeta = isFirstPiece || Boolean(debugMetaKey);
+            const meta =
+                debugMetaKey && lastBreakpoint
+                    ? mergeDebugIntoMeta(
+                          includeMeta ? segment.meta : undefined,
+                          debugMetaKey,
+                          buildBreakpointDebugPatch(lastBreakpoint.breakpointIndex, lastBreakpoint.rule as any),
+                      )
+                    : includeMeta
+                      ? segment.meta
+                      : undefined;
             const pieceSeg = createPieceSegment(
                 pieceContent,
                 actualStartIdx,
                 actualEndIdx,
                 pageIds,
-                segment.meta,
-                isFirstPiece,
+                meta,
+                includeMeta,
             );
             if (pieceSeg) {
                 result.push(pieceSeg);
@@ -360,6 +392,7 @@ export const applyBreakpoints = (
     patternProcessor: BreakpointPatternProcessor,
     logger?: Logger,
     pageJoiner: 'space' | 'newline' = 'space',
+    debugMetaKey?: string,
 ) => {
     const pageIds = pages.map((p) => p.id);
     const pageIdToIndex = buildPageIdToIndexMap(pageIds);
@@ -399,6 +432,7 @@ export const applyBreakpoints = (
             maxPages,
             prefer,
             logger,
+            debugMetaKey,
         );
         // Normalize page joins for breakpoint-created pieces
         result.push(

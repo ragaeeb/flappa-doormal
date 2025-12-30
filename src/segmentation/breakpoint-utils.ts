@@ -677,10 +677,11 @@ export const findBreakPosition = (
     windowEndIdx: number,
     windowEndPosition: number,
     ctx: BreakpointContext,
-): number => {
+): { breakpointIndex: number; breakPos: number; rule: BreakpointRule } | null => {
     const { pageIds, normalizedPages, expandedBreakpoints, prefer } = ctx;
 
-    for (const { rule, regex, excludeSet, skipWhenRegex } of expandedBreakpoints) {
+    for (let i = 0; i < expandedBreakpoints.length; i++) {
+        const { rule, regex, excludeSet, skipWhenRegex } = expandedBreakpoints[i];
         // Check if this breakpoint applies to the current segment's starting page
         if (!isInBreakpointRange(pageIds[currentFromIdx], rule)) {
             continue;
@@ -698,23 +699,27 @@ export const findBreakPosition = (
 
         // Handle page boundary (empty pattern)
         if (regex === null) {
-            return handlePageBoundaryBreak(
-                remainingContent,
-                windowEndIdx,
-                windowEndPosition,
-                toIdx,
-                pageIds,
-                normalizedPages,
-            );
+            return {
+                breakpointIndex: i,
+                breakPos: handlePageBoundaryBreak(
+                    remainingContent,
+                    windowEndIdx,
+                    windowEndPosition,
+                    toIdx,
+                    pageIds,
+                    normalizedPages,
+                ),
+                rule,
+            };
         }
 
         // Find matches within window
         const windowContent = remainingContent.slice(0, Math.min(windowEndPosition, remainingContent.length));
         const breakPos = findPatternBreakPosition(windowContent, regex, prefer);
         if (breakPos > 0) {
-            return breakPos;
+            return { breakpointIndex: i, breakPos, rule };
         }
     }
 
-    return -1;
+    return null;
 };

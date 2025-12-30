@@ -766,6 +766,69 @@ describe('segmenter', () => {
                 from: 11,
             });
         });
+
+        describe('debug provenance', () => {
+            it('should not attach provenance when debug is not enabled', () => {
+                const pages: Page[] = [{ content: '## Chapter 1\nContent', id: 1 }];
+                const rules: SplitRule[] = [{ lineStartsWith: ['## '], meta: { type: 'chapter' } }];
+
+                const result = segmentPages(pages, { rules });
+
+                expect(result).toHaveLength(1);
+                expect(result[0].meta).toEqual({ type: 'chapter' });
+            });
+
+            it('should attach rule provenance when debug is enabled', () => {
+                const pages: Page[] = [
+                    { content: '## Chapter 1\nContent one', id: 1 },
+                    { content: '## Chapter 2\nContent two', id: 2 },
+                ];
+                const rules: SplitRule[] = [{ lineStartsWith: ['## '], meta: { type: 'chapter' } }];
+
+                const result = segmentPages(pages, { debug: true, rules } as any);
+
+                expect(result).toHaveLength(2);
+                expect(result[0].meta?.type).toBe('chapter');
+                expect((result[0].meta as any)?._flappa?.rule).toEqual({ index: 0, patternType: 'lineStartsWith' });
+            });
+
+            it('should merge provenance into existing meta._flappa object', () => {
+                const pages: Page[] = [{ content: '## Chapter 1\nContent', id: 1 }];
+                const rules: SplitRule[] = [
+                    { lineStartsWith: ['## '], meta: { _flappa: { custom: true }, type: 'chapter' } },
+                ];
+
+                const result = segmentPages(pages, { debug: true, rules } as any);
+
+                expect(result).toHaveLength(1);
+                expect((result[0].meta as any)?._flappa?.custom).toBe(true);
+                expect((result[0].meta as any)?._flappa?.rule).toEqual({ index: 0, patternType: 'lineStartsWith' });
+            });
+
+            it('should override non-object meta._flappa when debug is enabled', () => {
+                const pages: Page[] = [{ content: '## Chapter 1\nContent', id: 1 }];
+                const rules: SplitRule[] = [{ lineStartsWith: ['## '], meta: { _flappa: 'x', type: 'chapter' } }];
+
+                const result = segmentPages(pages, { debug: true, rules } as any);
+
+                expect(result).toHaveLength(1);
+                expect(typeof (result[0].meta as any)?._flappa).toBe('object');
+                expect((result[0].meta as any)?._flappa?.rule).toEqual({ index: 0, patternType: 'lineStartsWith' });
+            });
+
+            it('should attach breakpoint provenance when breakpoints split a fallback segment', () => {
+                const pages: Page[] = [
+                    { content: 'Page one content', id: 1 },
+                    { content: 'Page two content', id: 2 },
+                ];
+
+                const result = segmentPages(pages, { breakpoints: [''], debug: true, maxPages: 0 } as any);
+
+                expect(result).toHaveLength(2);
+                expect((result[0].meta as any)?._flappa?.breakpoint?.index).toBe(0);
+                expect((result[1].meta as any)?._flappa?.breakpoint?.index).toBe(0);
+            });
+        });
     });
 
     // ─────────────────────────────────────────────────────────────
@@ -1496,7 +1559,7 @@ describe('segmenter', () => {
 
             describe('original problem: premature cuts', () => {
                 it('should NOT create tiny segments from punctuation in titles', () => {
-                    // This was the original problem: tarqim with maxSpan:1 was
+                    // This was the original problem: tarqim was
                     // cutting at semicolons in titles like "٣١ - مسألة؛"
                     const pages: Page[] = [{ content: '٣١ - مسألة؛ قال: Content here.', id: 1 }];
 

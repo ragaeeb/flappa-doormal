@@ -87,11 +87,43 @@ describe('validateRules', () => {
             expect(result[0]?.template?.type).toBe('missing_braces');
         });
 
+        it('should reject empty template patterns', () => {
+            const result = validateRules([{ split: 'at', template: '' } as never]);
+            expect(result).toHaveLength(1);
+            expect(result[0]?.template?.type).toBe('empty_pattern');
+        });
+
+        it('should reject whitespace-only template patterns', () => {
+            const result = validateRules([{ split: 'at', template: '   ' } as never]);
+            expect(result).toHaveLength(1);
+            expect(result[0]?.template?.type).toBe('empty_pattern');
+        });
+
         it('should not validate regex patterns (raw regex)', () => {
             // regex patterns are raw, not templates - we skip them
             const result = validateRules([{ regex: 'raqms \\d+', split: 'at' }]);
             expect(result).toHaveLength(1);
             expect(result[0]).toBeUndefined();
+        });
+    });
+
+    describe('empty patterns', () => {
+        it('should reject empty lineStartsWith items', () => {
+            const result = validateRules([{ lineStartsWith: [''], split: 'at' }]);
+            expect(result).toHaveLength(1);
+            expect(result[0]?.lineStartsWith?.[0]?.type).toBe('empty_pattern');
+        });
+
+        it('should reject whitespace-only lineStartsAfter items', () => {
+            const result = validateRules([{ lineStartsAfter: ['   '], split: 'at' }]);
+            expect(result).toHaveLength(1);
+            expect(result[0]?.lineStartsAfter?.[0]?.type).toBe('empty_pattern');
+        });
+
+        it('should reject empty lineEndsWith items', () => {
+            const result = validateRules([{ lineEndsWith: [''], split: 'after' }]);
+            expect(result).toHaveLength(1);
+            expect(result[0]?.lineEndsWith?.[0]?.type).toBe('empty_pattern');
         });
     });
 

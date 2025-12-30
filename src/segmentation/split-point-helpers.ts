@@ -13,6 +13,7 @@ import {
 import { buildRuleRegex, type RuleRegex } from './rule-regex.js';
 import type { PageMap, SplitPoint } from './segmenter-types.js';
 import type { Logger, SplitRule } from './types.js';
+import { buildRuleDebugPatch, mergeDebugIntoMeta } from './debug-meta.js';
 
 // Maximum iterations before throwing to prevent infinite loops
 const MAX_REGEX_ITERATIONS = 100000;
@@ -207,6 +208,7 @@ const findMatchesInContent = (
 export const applyOccurrenceFilter = (
     rules: SplitRule[],
     splitPointsByRule: Map<number, SplitPoint[]>,
+    debugMetaKey?: string,
 ): SplitPoint[] => {
     const result: SplitPoint[] = [];
 
@@ -219,7 +221,19 @@ export const applyOccurrenceFilter = (
         const filtered =
             rule.occurrence === 'first' ? [points[0]] : rule.occurrence === 'last' ? [points.at(-1)!] : points;
 
-        result.push(...filtered);
+        if (!debugMetaKey) {
+            result.push(...filtered.map((p) => ({ ...p, ruleIndex: index })));
+            return;
+        }
+
+        const debugPatch = buildRuleDebugPatch(index, rule);
+        result.push(
+            ...filtered.map((p) => ({
+                ...p,
+                meta: mergeDebugIntoMeta(p.meta, debugMetaKey, debugPatch),
+                ruleIndex: index,
+            })),
+        );
     });
 
     return result;

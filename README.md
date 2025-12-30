@@ -228,7 +228,6 @@ Control which matches to use:
   lineEndsWith: ['\\.'],
   split: 'after',
   occurrence: 'last',  // Only split at LAST period on page
-  maxSpan: 1,          // Apply per-page
 }
 ```
 
@@ -710,31 +709,9 @@ const segments = segmentPages(pages, {
     lineEndsWith: ['\\.'],
     split: 'after',
     occurrence: 'last',
-    maxSpan: 1
   }]
 });
 ```
-
-### Page Fallback for Unmatched Content
-
-When using `maxSpan` to group matches per page, use `fallback: 'page'` to prevent unmatched pages from merging with adjacent segments:
-
-```typescript
-const segments = segmentPages(pages, {
-  rules: [{
-    template: '{{tarqim}}',  // Match punctuation marks
-    split: 'after',
-    occurrence: 'last',
-    maxSpan: 1,
-    fallback: 'page'  // If no punctuation found, segment the page anyway
-  }]
-});
-```
-
-**Without `fallback`**: Pages without matches merge into the next segment  
-**With `fallback: 'page'`**: Each page becomes its own segment even without matches
-
-> **Future extensions**: The `fallback` option may support additional values like `'skip'` (omit unmatched content) or `'line'` (split at line breaks) in future versions.
 
 ### Multiple Rules with Priority
 
@@ -1003,9 +980,7 @@ type SplitRule = {
   // Split behavior
   split?: 'at' | 'after';  // Default: 'at'
   occurrence?: 'first' | 'last' | 'all';
-  maxSpan?: number;
   fuzzy?: boolean;
-  fallback?: 'page';  // NEW: Page-boundary fallback
 
   // Constraints
   min?: number;
@@ -1132,28 +1107,6 @@ The library concatenates all pages into a single string for pattern matching acr
 | 40,000 | 5 KB | ~200 MB |
 
 For typical book processing (up to 6,000 pages), memory usage is well within Node.js defaults. For very large books (40,000+ pages), ensure adequate heap size.
-
-### `maxSpan` Sliding Window Behavior
-
-The `maxSpan` option uses a **sliding window algorithm** based on page ID difference:
-
-```typescript
-// maxSpan = maximum page ID difference when looking ahead for split points
-// Algorithm prefers LONGER segments by looking as far ahead as allowed
-
-// Pages [1, 2, 3, 4] with maxSpan: 1, occurrence: 'last'
-// Window from page 1: pages 1-2 (diff <= 1), splits at page 2's last match
-// Window from page 3: pages 3-4 (diff <= 1), splits at page 4's last match
-// Result: 2 segments spanning pages 1-2 and 3-4
-
-// Pages [1, 5, 10] with maxSpan: 1, occurrence: 'last'  
-// Window from page 1: only page 1 (5-1=4 > 1), splits at page 1
-// Window from page 5: only page 5 (10-5=5 > 1), splits at page 5
-// Window from page 10: only page 10, splits at page 10
-// Result: 3 segments (pages too far apart to merge)
-```
-
-This is intentional for books where page IDs represent actual page numbers. With `occurrence: 'last'`, the algorithm finds the last match within the lookahead window, creating longer segments where possible.
 
 ## For AI Agents
 

@@ -190,39 +190,9 @@ type SplitBehavior = {
      * - `'first'`: Only split at the first match
      * - `'last'`: Only split at the last match
      *
-     * When `maxSpan` is set, occurrence filtering is applied per sliding
-     * window rather than globally. With `'last'`, the algorithm prefers
-     * longer segments by looking as far ahead as allowed before selecting
-     * the last match in the window.
-     *
      * @default 'all'
      */
     occurrence?: 'first' | 'last' | 'all';
-
-    /**
-     * Maximum page ID difference allowed when looking ahead for split points.
-     *
-     * Uses a sliding window algorithm that prefers longer segments:
-     * 1. Start from the first page of the current segment
-     * 2. Look for matches within pages where `pageId - startPageId <= maxSpan`
-     * 3. Apply occurrence filter (e.g., 'last') to select a match
-     * 4. Next window starts from the page after the match
-     *
-     * Examples:
-     * - `maxSpan: 1` = look 1 page ahead (segments span at most 2 pages)
-     * - `maxSpan: 2` = look 2 pages ahead (segments span at most 3 pages)
-     * - `undefined` = no limit (entire content treated as one group)
-     *
-     * Note: With non-consecutive page IDs, the algorithm uses actual ID
-     * difference, not array index. Pages 1 and 5 have a difference of 4.
-     *
-     * @example
-     * // Split at last period, looking up to 1 page ahead
-     * // Pages 1,2: split at page 2's last period
-     * // Page 3: split at page 3's last period
-     * { lineEndsWith: ['.'], split: 'after', occurrence: 'last', maxSpan: 1 }
-     */
-    maxSpan?: number;
 
     /**
      * Enable diacritic-insensitive matching for Arabic text.
@@ -323,13 +293,6 @@ type RuleConstraints = {
     meta?: Record<string, unknown>;
 
     /**
-     * Fallback behavior when no matches are found within a maxSpan boundary.
-     * - 'page': Create split points at page boundaries
-     * - undefined: No fallback (current behavior)
-     */
-    fallback?: 'page';
-
-    /**
      * Page-start guard: only allow this rule to match at the START of a page if the
      * previous page's last non-whitespace character matches this pattern.
      *
@@ -362,7 +325,7 @@ type RuleConstraints = {
  * Each rule must specify:
  * - **Pattern** (exactly one): `regex`, `template`, `lineStartsWith`,
  *   `lineStartsAfter`, or `lineEndsWith`
- * - **Split behavior**: `split` (optional, defaults to `'at'`), `occurrence`, `maxSpan`, `fuzzy`
+ * - **Split behavior**: `split` (optional, defaults to `'at'`), `occurrence`, `fuzzy`
  * - **Constraints** (optional): `min`, `max`, `meta`
  *
  * @example
@@ -403,7 +366,6 @@ export type SplitRule = PatternType & SplitBehavior & RuleConstraints;
 export type Page = {
     /**
      * Unique page/entry ID used for:
-     * - `maxSpan` grouping (segments spanning multiple pages)
      * - `min`/`max` constraint filtering
      * - `from`/`to` tracking in output segments
      */
@@ -627,6 +589,24 @@ export type SegmentationOptions = {
      * rule's metadata is used for each segment.
      */
     rules?: SplitRule[];
+
+    /**
+     * Attach debugging provenance into `segment.meta` indicating which rule and/or breakpoint
+     * created the segment boundary.
+     *
+     * This is opt-in because it increases output size.
+     *
+     * When enabled (default metaKey: `_flappa`), segments may include:
+     * `meta._flappa.rule` and/or `meta._flappa.breakpoint`.
+     */
+    debug?:
+        | boolean
+        | {
+              /** Where to store provenance in meta. @default '_flappa' */
+              metaKey?: string;
+              /** Which kinds of provenance to include. @default ['rule','breakpoint'] */
+              include?: Array<'rule' | 'breakpoint'>;
+          };
 
     /**
      * Maximum pages per segment before breakpoints are applied.

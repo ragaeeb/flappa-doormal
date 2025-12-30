@@ -12,6 +12,7 @@ import { applyBreakpoints } from './breakpoint-processor.js';
 import { anyRuleAllowsId } from './match-utils.js';
 import { applyReplacements } from './replace.js';
 import { processPattern } from './rule-regex.js';
+import { resolveDebugConfig } from './debug-meta.js';
 import {
     collectFastFuzzySplitPoints,
     createPageStartGuardChecker,
@@ -163,6 +164,7 @@ const collectSplitPointsFromRules = (
     rules: SplitRule[],
     matchContent: string,
     pageMap: PageMap,
+    debugMetaKey: string | undefined,
     logger?: Logger,
 ): SplitPoint[] => {
     logger?.debug?.('[segmenter] collecting split points from rules', {
@@ -203,7 +205,7 @@ const collectSplitPointsFromRules = (
     }
 
     // Apply occurrence filtering and flatten
-    return applyOccurrenceFilter(rules, splitPointsByRule);
+    return applyOccurrenceFilter(rules, splitPointsByRule, debugMetaKey);
 };
 
 /**
@@ -372,6 +374,8 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
  */
 export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
     const { rules = [], maxPages = 0, breakpoints = [], prefer = 'longer', pageJoiner = 'space', logger } = options;
+    const debug = resolveDebugConfig((options as any).debug);
+    const debugMetaKey = debug?.includeRule ? debug.metaKey : undefined;
 
     logger?.info?.('[segmenter] starting segmentation', {
         breakpointCount: breakpoints.length,
@@ -389,7 +393,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
         totalContentLength: matchContent.length,
     });
 
-    const splitPoints = collectSplitPointsFromRules(rules, matchContent, pageMap, logger);
+    const splitPoints = collectSplitPointsFromRules(rules, matchContent, pageMap, debugMetaKey, logger);
     const unique = dedupeSplitPoints(splitPoints);
 
     logger?.debug?.('[segmenter] split points collected', {
@@ -421,6 +425,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
             patternProcessor,
             logger,
             pageJoiner,
+            debug?.includeBreakpoint ? debug.metaKey : undefined,
         );
         logger?.info?.('[segmenter] segmentation complete (with breakpoints)', {
             finalSegmentCount: result.length,

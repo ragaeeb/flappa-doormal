@@ -5,7 +5,6 @@ import {
     filterByConstraints,
     filterByOccurrence,
     getLastPositionalCapture,
-    groupBySpanAndFilter,
     type MatchResult,
 } from './match-utils';
 
@@ -146,64 +145,6 @@ describe('match-utils', () => {
 
         it('should return all matches when occurrence is undefined', () => {
             expect(filterByOccurrence(matches, undefined)).toEqual(matches);
-        });
-    });
-
-    describe('groupBySpanAndFilter', () => {
-        // Matches on pages 0, 0, 1, 1, 2
-        const matches: MatchResult[] = [
-            { end: 10, start: 0 },
-            { end: 30, start: 20 },
-            { end: 110, start: 100 },
-            { end: 130, start: 120 },
-            { end: 210, start: 200 },
-        ];
-        const getId = (offset: number) => Math.floor(offset / 100);
-        const pageIds = [0, 1, 2];
-
-        it('should use sliding window with maxSpan=1 and occurrence first', () => {
-            // maxSpan=1 means look 1 page ahead
-            // Window from page 0: pages 0-1, first match is start=0 (page 0)
-            // Window advances to page 1 (after match's page 0)
-            // Window from page 1: pages 1-2, first match is start=100 (page 1)
-            // Window advances to page 2 (after match's page 1)
-            // Window from page 2: page 2 only, first match is start=200
-            const result = groupBySpanAndFilter(matches, 1, 'first', getId, pageIds);
-            expect(result).toHaveLength(3);
-            expect(result[0].start).toBe(0);
-            expect(result[1].start).toBe(100);
-            expect(result[2].start).toBe(200);
-        });
-
-        it('should use sliding window with maxSpan=1 and occurrence last (longer segments)', () => {
-            // With 'last', the algorithm prefers longer segments
-            // Window from page 0: pages 0-1, last match is start=120 (page 1)
-            // Window advances to page 2 (after match's page 1)
-            // Window from page 2: page 2 only, last match is start=200
-            const result = groupBySpanAndFilter(matches, 1, 'last', getId, pageIds);
-            expect(result).toHaveLength(2);
-            expect(result[0].start).toBe(120); // Last on pages 0-1
-            expect(result[1].start).toBe(200); // Only match on page 2
-        });
-
-        it('should use sliding window with maxSpan=2 and occurrence first', () => {
-            // maxSpan=2 means look 2 pages ahead
-            // Window from page 0: pages 0-2, first match is start=0 (page 0)
-            // Window advances to page 1
-            // Window from page 1: pages 1-3, first match is start=100 (page 1)
-            // Window advances to page 2
-            // Window from page 2: pages 2-4, first match is start=200 (page 2)
-            const result = groupBySpanAndFilter(matches, 2, 'first', getId, pageIds);
-            expect(result).toHaveLength(3);
-            expect(result[0].start).toBe(0);
-            expect(result[1].start).toBe(100);
-            expect(result[2].start).toBe(200);
-        });
-
-        it('should return all matches per window when occurrence is undefined', () => {
-            // With occurrence=undefined, all matches in each window are returned
-            const result = groupBySpanAndFilter(matches, 1, undefined, getId, pageIds);
-            expect(result).toHaveLength(5); // All matches returned
         });
     });
 
