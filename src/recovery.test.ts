@@ -142,4 +142,28 @@ describe('marker recovery (rerun-only MVP)', () => {
         // First detail should be stage1 recovered or rerun recovered; we require stage1 to be used for this simple case.
         expect(recovered.report.details[0].strategy).toBe('stage1');
     });
+
+    it('predicate selector selects rules matching the predicate', () => {
+        const pages: Page[] = [{ content: 'وروى أحمد\nوذكر خالد', id: 1 }];
+        const options: SegmentationOptions = {
+            rules: [
+                { lineStartsAfter: ['وروى '], meta: { recover: true } },
+                { lineStartsAfter: ['وذكر '], meta: { recover: false } },
+            ],
+        };
+
+        const segments = segmentPages(pages, options);
+        expect(segments.map((s) => s.content)).toEqual(['أحمد', 'خالد']);
+
+        // Use predicate to select only rules with meta.recover === true
+        const recovered = recoverMistakenLineStartsAfterMarkers(pages, segments, options, {
+            predicate: (rule) => (rule.meta as { recover?: boolean })?.recover === true,
+            type: 'predicate',
+        });
+
+        expect(recovered.segments).toHaveLength(2);
+        expect(recovered.segments[0].content).toBe('وروى أحمد'); // recovered by predicate
+        expect(recovered.segments[1].content).toBe('خالد'); // not selected by predicate
+        expect(recovered.report.summary.recovered).toBe(1);
+    });
 });

@@ -359,17 +359,28 @@ const longestCommonSuffixLength = (a: string, b: string): number => {
     return i;
 };
 
+// Minimum score difference required to confidently disambiguate between candidates.
+// If the gap between best and second-best is smaller, we consider the match ambiguous.
+const AMBIGUITY_SCORE_GAP = 5;
+
 const scoreCandidate = (
     orig: Segment,
     fixed: Segment,
     normalizeMode: NormalizeCompareMode,
 ): AlignmentCandidate | null => {
+    // Scoring hierarchy:
+    //   exact (100)           - Content is identical, no recovery needed
+    //   exact_suffix (90-120) - Fixed ends with original; fixed = marker + orig (most reliable)
+    //   normalized_suffix (70-90) - Suffix match after whitespace/NFKC normalization
+    // Higher scores indicate more confident alignment.
+
     if (fixed.content === orig.content) {
         return { fixedIndex: -1, kind: 'exact', score: 100 };
     }
 
     if (fixed.content.endsWith(orig.content)) {
-        // Most reliable. This is the expected case: fixed = marker + orig.
+        // Most reliable case: fixed = marker + orig.
+        // Bonus points for longer markers (up to 30) to prefer substantive recovery.
         const markerLen = fixed.content.length - orig.content.length;
         const bonus = Math.min(30, markerLen);
         return { fixedIndex: -1, kind: 'exact_suffix', score: 90 + bonus };
@@ -379,6 +390,7 @@ const scoreCandidate = (
         const normFixed = normalizeForCompare(fixed.content, normalizeMode);
         const normOrig = normalizeForCompare(orig.content, normalizeMode);
         if (normFixed.endsWith(normOrig) && normOrig.length > 0) {
+            // Base score 70, plus up to 20 bonus based on overlap ratio
             const overlap = longestCommonSuffixLength(normFixed, normOrig) / normOrig.length;
             return { fixedIndex: -1, kind: 'normalized_suffix', score: 70 + Math.floor(overlap * 20) };
         }
@@ -521,7 +533,7 @@ const findBestFixedMatch = (
     if (!best) {
         return { kind: 'none' };
     }
-    if (best.score - secondBestScore < 5 && candidates.length > 1) {
+    if (best.score - secondBestScore < AMBIGUITY_SCORE_GAP && candidates.length > 1) {
         return { kind: 'ambiguous' };
     }
     return { fixedIdx: best.fixedIdx, kind: 'match' };
