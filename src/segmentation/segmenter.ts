@@ -9,27 +9,23 @@
  */
 
 import { applyBreakpoints } from './breakpoint-processor.js';
-import { isPageExcluded } from './breakpoint-utils.js';
-import {
-    anyRuleAllowsId,
-    extractNamedCaptures,
-    filterByConstraints,
-    getLastPositionalCapture,
-    type MatchResult,
-} from './match-utils.js';
+import { anyRuleAllowsId } from './match-utils.js';
 import { applyReplacements } from './replace.js';
-import { buildRuleRegex, processPattern } from './rule-regex.js';
+import { processPattern } from './rule-regex.js';
 import {
     collectFastFuzzySplitPoints,
     createPageStartGuardChecker,
     partitionRulesForMatching,
 } from './segmenter-rule-utils.js';
 import type { PageBoundary, PageMap, SplitPoint } from './segmenter-types.js';
+import {
+    applyOccurrenceFilter,
+    buildRuleRegexes,
+    processCombinedMatches,
+    processStandaloneRule,
+} from './split-point-helpers.js';
 import { normalizeLineEndings } from './textUtils.js';
 import type { Logger, Page, Segment, SegmentationOptions, SplitRule } from './types.js';
-
-// Maximum number of regex match iterations before throwing an error to prevent infinite loops
-const MAX_REGEX_ITERATIONS = 100000;
 
 // buildRuleRegex + processPattern extracted to src/segmentation/rule-regex.ts
 
@@ -150,7 +146,7 @@ export const ensureFallbackSegment = (
         return segments;
     }
     const firstPage = pages[0];
-    const lastPage = pages[pages.length - 1];
+    const lastPage = pages.at(-1)!;
     const joinChar = pageJoiner === 'newline' ? '\n' : ' ';
     const allContent = normalizedContent.join(joinChar).trim();
     if (!allContent) {
@@ -183,176 +179,31 @@ const collectSplitPointsFromRules = (
         standaloneCount: standaloneRules.length,
     });
 
-    // Store split points by rule index to apply occurrence filtering later.
-    // Start with fast-fuzzy matches (if any) and then add regex-based matches.
+    // Start with fast-fuzzy matches
     const splitPointsByRule = collectFastFuzzySplitPoints(matchContent, pageMap, fastFuzzyRules, passesPageStartGuard);
 
     // Process combinable rules in a single pass
     if (combinableRules.length > 0) {
-        const ruleRegexes = combinableRules.map(({ rule, prefix }) => {
-            const built = buildRuleRegex(rule, prefix);
-            return {
-                prefix,
-                source: `(?<${prefix}>${built.regex.source})`,
-                ...built,
-            };
-        });
-
-        const combinedSource = ruleRegexes.map((r) => r.source).join('|');
-        const combinedRegex = new RegExp(combinedSource, 'gm');
-
-        logger?.debug?.('[segmenter] combined regex built', {
-            combinableRuleCount: combinableRules.length,
-            combinedSourceLength: combinedSource.length,
-        });
-
-        combinedRegex.lastIndex = 0;
-        let m = combinedRegex.exec(matchContent);
-        let iterationCount = 0;
-
-        while (m !== null) {
-            iterationCount++;
-
-            // Prevent infinite loops from hanging - throw error if iteration count is too high
-            if (iterationCount > MAX_REGEX_ITERATIONS) {
-                throw new Error(
-                    `[segmenter] Possible infinite loop detected: regex matching exceeded ${MAX_REGEX_ITERATIONS} iterations. ` +
-                        `Last match at position ${m.index} (length ${m[0].length}). ` +
-                        `Check for patterns that may match empty strings or cause catastrophic backtracking.`,
-                );
-            }
-
-            // Log every 10000 iterations to help diagnose performance issues
-            if (iterationCount % 10000 === 0) {
-                logger?.warn?.('[segmenter] high iteration count in regex loop', {
-                    iterationCount,
-                    lastIndex: combinedRegex.lastIndex,
-                    matchLength: m[0].length,
-                    matchPosition: m.index,
-                });
-            }
-            // Find which rule matched by checking which prefix group is defined
-            const matchedRuleIndex = combinableRules.findIndex(({ prefix }) => m?.groups?.[prefix] !== undefined);
-
-            if (matchedRuleIndex !== -1) {
-                const { rule, prefix, index: originalIndex } = combinableRules[matchedRuleIndex];
-                const ruleInfo = ruleRegexes[matchedRuleIndex];
-
-                // Extract named captures for this specific rule (stripping the prefix)
-                const namedCaptures: Record<string, string> = {};
-                if (m.groups) {
-                    for (const prefixedName of ruleInfo.captureNames) {
-                        if (m.groups[prefixedName] !== undefined) {
-                            const cleanName = prefixedName.slice(prefix.length);
-                            namedCaptures[cleanName] = m.groups[prefixedName];
-                        }
-                    }
-                }
-
-                // Handle lineStartsAfter content capture
-                let capturedContent: string | undefined;
-                let contentStartOffset: number | undefined;
-
-                if (ruleInfo.usesLineStartsAfter) {
-                    // The internal content capture is named `${prefix}__content` (not a user capture).
-                    capturedContent = m.groups?.[`${prefix}__content`];
-                    if (capturedContent !== undefined) {
-                        // Calculate marker length: (full match length) - (content length)
-                        // Note: m[0] is the full match of the combined group
-                        const fullMatch = m.groups?.[prefix] || m[0];
-                        const markerLength = fullMatch.length - capturedContent.length;
-                        contentStartOffset = markerLength;
-                    }
-                }
-
-                // Check constraints
-                const start = m.index;
-                const end = m.index + m[0].length;
-                const pageId = pageMap.getId(start);
-
-                // Apply min/max/exclude page constraints
-                const passesConstraints =
-                    (rule.min === undefined || pageId >= rule.min) &&
-                    (rule.max === undefined || pageId <= rule.max) &&
-                    !isPageExcluded(pageId, rule.exclude);
-
-                if (passesConstraints && passesPageStartGuard(rule, originalIndex, start)) {
-                    const sp: SplitPoint = {
-                        capturedContent: undefined, // For combinable rules, we don't use captured content for the segment text
-                        contentStartOffset,
-                        index: (rule.split ?? 'at') === 'at' ? start : end,
-                        meta: rule.meta,
-                        namedCaptures: Object.keys(namedCaptures).length > 0 ? namedCaptures : undefined,
-                    };
-
-                    if (!splitPointsByRule.has(originalIndex)) {
-                        splitPointsByRule.set(originalIndex, []);
-                    }
-                    splitPointsByRule.get(originalIndex)!.push(sp);
-                }
-            }
-
-            // IMPORTANT: Always advance the regex before next iteration
-            // This must happen after processing, even when we `continue` above
-            if (m[0].length === 0) {
-                combinedRegex.lastIndex++;
-            }
-            m = combinedRegex.exec(matchContent);
-        }
+        const ruleRegexes = buildRuleRegexes(combinableRules);
+        processCombinedMatches(
+            matchContent,
+            combinableRules,
+            ruleRegexes,
+            pageMap,
+            passesPageStartGuard,
+            splitPointsByRule,
+            logger,
+        );
     }
 
-    // Process standalone rules individually (legacy path)
-    const collectSplitPointsFromRule = (rule: SplitRule, ruleIndex: number): void => {
-        const { regex, usesCapture, captureNames, usesLineStartsAfter } = buildRuleRegex(rule);
-        const allMatches = findMatches(matchContent, regex, usesCapture, captureNames);
-        const constrainedMatches = filterByConstraints(allMatches, rule, pageMap.getId);
-        const guarded = constrainedMatches.filter((m) => passesPageStartGuard(rule, ruleIndex, m.start));
-        // We don't filter by occurrence here yet, we do it uniformly later
-        // But wait, filterByConstraints returns MatchResult, we need SplitPoint
-
-        const points = guarded.map((m) => {
-            const isLineStartsAfter = usesLineStartsAfter && m.captured !== undefined;
-            const markerLength = isLineStartsAfter ? m.end - m.captured!.length - m.start : 0;
-            return {
-                capturedContent: isLineStartsAfter ? undefined : m.captured,
-                contentStartOffset: isLineStartsAfter ? markerLength : undefined,
-                index: (rule.split ?? 'at') === 'at' ? m.start : m.end,
-                meta: rule.meta,
-                namedCaptures: m.namedCaptures,
-            };
-        });
-
-        if (!splitPointsByRule.has(ruleIndex)) {
-            splitPointsByRule.set(ruleIndex, []);
-        }
-        splitPointsByRule.get(ruleIndex)!.push(...points);
-    };
-
-    standaloneRules.forEach((rule) => {
-        // Find original index
+    // Process standalone rules
+    for (const rule of standaloneRules) {
         const originalIndex = rules.indexOf(rule);
-        collectSplitPointsFromRule(rule, originalIndex);
-    });
+        processStandaloneRule(rule, originalIndex, matchContent, pageMap, passesPageStartGuard, splitPointsByRule);
+    }
 
     // Apply occurrence filtering and flatten
-    const finalSplitPoints: SplitPoint[] = [];
-    rules.forEach((rule, index) => {
-        const points = splitPointsByRule.get(index);
-        if (!points || points.length === 0) {
-            return;
-        }
-
-        let filtered = points;
-        if (rule.occurrence === 'first') {
-            filtered = [points[0]];
-        } else if (rule.occurrence === 'last') {
-            filtered = [points[points.length - 1]];
-        }
-
-        finalSplitPoints.push(...filtered);
-    });
-
-    return finalSplitPoints;
+    return applyOccurrenceFilter(rules, splitPointsByRule);
 };
 
 /**
@@ -519,7 +370,7 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
  *   ]
  * });
  */
-export const segmentPages = (pages: Page[], options: SegmentationOptions): Segment[] => {
+export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
     const { rules = [], maxPages = 0, breakpoints = [], prefer = 'longer', pageJoiner = 'space', logger } = options;
 
     logger?.info?.('[segmenter] starting segmentation', {
@@ -641,7 +492,7 @@ const buildSegments = (splitPoints: SplitPoint[], content: string, pageMap: Page
         const result: Segment[] = [];
         for (let i = 0; i < splitPoints.length; i++) {
             const sp = splitPoints[i];
-            const end = i < splitPoints.length - 1 ? splitPoints[i + 1].index : content.length;
+            const end = splitPoints[i + 1]?.index ?? content.length;
             const s = createSegment(
                 sp.index,
                 end,

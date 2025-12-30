@@ -79,8 +79,11 @@ export type {
     CommonLineStartPattern,
     LineStartAnalysisOptions,
     LineStartPatternExample,
-} from './analysis.js';
-export { analyzeCommonLineStarts } from './analysis.js';
+    RepeatingSequenceExample,
+    RepeatingSequenceOptions,
+    RepeatingSequencePattern,
+} from './analysis/index.js';
+export { analyzeCommonLineStarts, analyzeRepeatingSequences } from './analysis/index.js';
 // Pattern detection types
 export type { DetectedPattern } from './detection.js';
 // Pattern detection utilities
