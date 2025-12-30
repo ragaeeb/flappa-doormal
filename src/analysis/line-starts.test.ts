@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import { analyzeCommonLineStarts } from './analysis.js';
-import type { Page } from './segmentation/types.js';
+import type { Page } from '../segmentation/types.js';
+import { analyzeCommonLineStarts } from './line-starts.js';
 
-describe('analysis', () => {
+describe('analyzeCommonLineStarts', () => {
     it('should find common tokenized line-start patterns', () => {
         const pages: Page[] = [
             {
@@ -103,7 +103,12 @@ describe('analysis', () => {
             },
         ];
 
-        const result = analyzeCommonLineStarts(pages, { includeFirstWordFallback: false, maxExamples: 1, minCount: 2, topK: 10 });
+        const result = analyzeCommonLineStarts(pages, {
+            includeFirstWordFallback: false,
+            maxExamples: 1,
+            minCount: 2,
+            topK: 10,
+        });
         expect(result).toEqual([
             { count: 2, examples: [{ line: '١١ - [X] نص', pageId: 1 }], pattern: '{{numbered}}[' },
             { count: 10, examples: [{ line: '١ - نص', pageId: 1 }], pattern: '{{numbered}}' },
@@ -281,7 +286,15 @@ describe('analysis', () => {
             },
         ];
 
-        const result = analyzeCommonLineStarts(pages, { maxExamples: 1, minCount: 2, prefixChars: 60, sortBy: 'count', topK: 5 });
-        expect(result).toEqual([{ count: 2, examples: [{ line: '(ح) وأَخْبَرَنَا أَبُو إِسْحَاقَ', pageId: 1 }], pattern: '(ح)' }]);
+        const result = analyzeCommonLineStarts(pages, {
+            maxExamples: 1,
+            minCount: 2,
+            prefixChars: 60,
+            sortBy: 'count',
+            topK: 5,
+        });
+        expect(result).toEqual([
+            { count: 2, examples: [{ line: '(ح) وأَخْبَرَنَا أَبُو إِسْحَاقَ', pageId: 1 }], pattern: '(ح)' },
+        ]);
     });
 });

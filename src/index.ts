@@ -79,8 +79,11 @@ export type {
     CommonLineStartPattern,
     LineStartAnalysisOptions,
     LineStartPatternExample,
-} from './analysis.js';
-export { analyzeCommonLineStarts } from './analysis.js';
+    RepeatingSequenceExample,
+    RepeatingSequenceOptions,
+    RepeatingSequencePattern,
+} from './analysis/index.js';
+export { analyzeCommonLineStarts, analyzeRepeatingSequences } from './analysis/index.js';
 // Pattern detection types
 export type { DetectedPattern } from './detection.js';
 // Pattern detection utilities
@@ -90,3 +93,9 @@ export {
     generateTemplateFromText,
     suggestPatternConfig,
 } from './detection.js';
+
+// ─────────────────────────────────────────────────────────────
+// Recovery helpers
+// ─────────────────────────────────────────────────────────────
+export type { MarkerRecoveryReport, MarkerRecoveryRun, MarkerRecoverySelector } from './recovery.js';
+export { recoverMistakenLineStartsAfterMarkers, recoverMistakenMarkersForRuns } from './recovery.js';
