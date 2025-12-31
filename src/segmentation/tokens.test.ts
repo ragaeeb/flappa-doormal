@@ -367,4 +367,55 @@ describe('tokens', () => {
             expect(shouldDefaultToFuzzy(['{{raqms}}', '{{dash}}'])).toBeFalse();
         });
     });
+
+    describe('applyTokenMappings', () => {
+        // Import at runtime
+        const { applyTokenMappings } = require('./tokens.js');
+
+        it('should transform {{token}} to {{token:name}}', () => {
+            const t = '{{raqms}} {{dash}}';
+            const m = [{ name: 'num', token: 'raqms' }];
+            expect(applyTokenMappings(t, m)).toBe('{{raqms:num}} {{dash}}');
+        });
+
+        it('should handle multiple mappings', () => {
+            const t = '{{raqms}} {{harf}}';
+            const m = [
+                { name: 'num', token: 'raqms' },
+                { name: 'char', token: 'harf' },
+            ];
+            expect(applyTokenMappings(t, m)).toBe('{{raqms:num}} {{harf:char}}');
+        });
+
+        it('should not touch tokens that already have captures', () => {
+            const t = '{{raqms:existing}} {{dash}}';
+            const m = [{ name: 'new', token: 'raqms' }];
+            expect(applyTokenMappings(t, m)).toBe('{{raqms:existing}} {{dash}}');
+        });
+
+        it('should ignore empty mappings', () => {
+            const t = '{{raqms}}';
+            const m = [
+                { name: 'num', token: '' },
+                { name: '', token: 'raqms' },
+            ];
+            expect(applyTokenMappings(t, m)).toBe('{{raqms}}');
+        });
+    });
+
+    describe('stripTokenMappings', () => {
+        const { stripTokenMappings } = require('./tokens.js');
+
+        it('should transform {{token:name}} to {{token}}', () => {
+            expect(stripTokenMappings('{{raqms:num}}')).toBe('{{raqms}}');
+        });
+
+        it('should handle multiple captures', () => {
+            expect(stripTokenMappings('{{raqms:num}} {{harf:char}}')).toBe('{{raqms}} {{harf}}');
+        });
+
+        it('should preserve tokens without captures', () => {
+            expect(stripTokenMappings('{{raqms}} {{dash}}')).toBe('{{raqms}} {{dash}}');
+        });
+    });
 });

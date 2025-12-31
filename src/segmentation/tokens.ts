@@ -749,3 +749,60 @@ export const shouldDefaultToFuzzy = (patterns: string | string[]): boolean => {
         return FUZZY_TOKEN_REGEX.test(p);
     });
 };
+
+/**
+ * Structure for mapping a token to a capture name.
+ */
+export type TokenMapping = { token: string; name: string };
+
+/**
+ * Apply token mappings to a template string.
+ *
+ * Transforms `{{token}}` into `{{token:name}}` based on the provided mappings.
+ * Useful for applying user-configured capture names to a raw template.
+ *
+ * - Only affects exact matches of `{{token}}`.
+ * - Does NOT affect tokens that already have a capture name (e.g. `{{token:existing}}`).
+ * - Does NOT affect capture-only tokens (e.g. `{{:name}}`).
+ *
+ * @param template - The template string to transform
+ * @param mappings - Array of mappings from token name to capture name
+ * @returns Transformed template string with captures applied
+ *
+ * @example
+ * applyTokenMappings('{{raqms}} {{dash}}', [{ token: 'raqms', name: 'num' }])
+ * // → '{{raqms:num}} {{dash}}'
+ */
+export const applyTokenMappings = (template: string, mappings: TokenMapping[]): string => {
+    let result = template;
+    for (const { token, name } of mappings) {
+        if (!token || !name) {
+            continue;
+        }
+        // Match {{token}} but ensure it doesn't already have a suffix like :name
+        // We use a regex dealing with the brace syntax
+        const regex = new RegExp(`\\{\\{${token}\\}\\}`, 'g');
+        result = result.replace(regex, `{{${token}:${name}}}`);
+    }
+    return result;
+};
+
+/**
+ * Strip token mappings from a template string.
+ *
+ * Transforms `{{token:name}}` back into `{{token}}`.
+ * Also transforms `{{:name}}` patterns (capture-only) into `{{}}` (which is invalid/empty).
+ *
+ * Useful for normalizing templates for storage or comparison.
+ *
+ * @param template - The template string to strip
+ * @returns Template string with capture names removed
+ *
+ * @example
+ * stripTokenMappings('{{raqms:num}} {{dash}}')
+ * // → '{{raqms}} {{dash}}'
+ */
+export const stripTokenMappings = (template: string): string => {
+    // Match {{token:name}} and replace with {{token}}
+    return template.replace(/\{\{([^:}]+):[^}]+\}\}/g, '{{$1}}');
+};

@@ -158,6 +158,23 @@ const rules = [{
 | `template` | Depends | Custom pattern with full control |
 | `regex` | Depends | Raw regex for complex cases |
 
+#### Building UIs with Pattern Type Keys
+
+The library exports `PATTERN_TYPE_KEYS` (a const array) and `PatternTypeKey` (a type) for building UIs that let users select pattern types:
+
+```typescript
+import { PATTERN_TYPE_KEYS, type PatternTypeKey } from 'flappa-doormal';
+
+// PATTERN_TYPE_KEYS = ['lineStartsWith', 'lineStartsAfter', 'lineEndsWith', 'template', 'regex']
+
+// Build a dropdown/select
+PATTERN_TYPE_KEYS.map(key => <option value={key}>{key}</option>)
+
+// Type-safe validation
+const isPatternKey = (k: string): k is PatternTypeKey =>
+  (PATTERN_TYPE_KEYS as readonly string[]).includes(k);
+```
+
 ### 4.1 Page-start Guard (avoid page-wrap false positives)
 
 When matching at line starts (e.g., `{{naql}}`), a new page can begin with a marker that is actually a **continuation** of the previous page (page wrap), not a true new segment.
@@ -495,8 +512,34 @@ const segments = segmentPages(pages, { rules });
 // ]
 ```
 
-## Rule Validation
+## Rule Optimization
 
+Use `optimizeRules()` to automatically merge compatible rules, remove duplicate patterns, and sort rules by specificity (longest patterns first):
+
+```typescript
+import { optimizeRules } from 'flappa-doormal';
+
+const rules = [
+  // These will be merged because meta/fuzzy options match
+  { lineStartsWith: ['{{kitab}}'], fuzzy: true, meta: { type: 'header' } },
+  { lineStartsWith: ['{{bab}}'], fuzzy: true, meta: { type: 'header' } },
+  
+  // This will be kept separate
+  { lineStartsAfter: ['{{numbered}}'], meta: { type: 'entry' } },
+];
+
+const { rules: optimized, mergedCount } = optimizeRules(rules);
+
+// Result:
+// optimized[0] = { 
+//   lineStartsWith: ['{{kitab}}', '{{bab}}'], 
+//   fuzzy: true, 
+//   meta: { type: 'header' } 
+// }
+// optimized[1] = { lineStartsAfter: ['{{numbered}}'], ... }
+```
+
+## Rule Validation
 
 Use `validateRules()` to detect common mistakes in rule patterns before running segmentation:
 
@@ -512,12 +555,41 @@ const issues = validateRules([
 // issues[0]?.lineStartsAfter?.[0]?.type === 'missing_braces'
 // issues[1]?.lineStartsWith?.[0]?.type === 'unknown_token'
 // issues[2]?.lineStartsAfter?.[0]?.type === 'missing_braces'
+
+// To get a simple list of error strings for UI display:
+import { formatValidationReport } from 'flappa-doormal';
+
+const errors = formatValidationReport(issues);
+// [
+//   'Rule 1, lineStartsAfter: Missing {{}} around token "raqms:num"',
+//   'Rule 2, lineStartsWith: Unknown token "{{unknown}}"',
+//   ...
+// ]
 ```
 
 **Checks performed:**
 - **Missing braces**: Detects token names like `raqms:num` without `{{}}`
 - **Unknown tokens**: Flags tokens inside `{{}}` that don't exist (e.g., `{{nonexistent}}`)
 - **Duplicates**: Finds duplicate patterns within the same rule
+
+## Token Mapping Utilities
+
+When building UIs for rule editing, it's often useful to separate the *token pattern* (e.g., `{{raqms}}`) from the *capture name* (e.g., `{{raqms:hadithNum}}`).
+
+```typescript
+import { applyTokenMappings, stripTokenMappings } from 'flappa-doormal';
+
+// 1. Apply user-defined mappings to a raw template
+const template = '{{raqms}} {{dash}}';
+const mappings = [{ token: 'raqms', name: 'num' }];
+
+const result = applyTokenMappings(template, mappings);
+// result = '{{raqms:num}} {{dash}}'
+
+// 2. Strip captures to get back to the canonical pattern
+const raw = stripTokenMappings(result);
+// raw = '{{raqms}} {{dash}}'
+```
 
 ## Prompting LLMs / Agents to Generate Rules (Shamela books)
 

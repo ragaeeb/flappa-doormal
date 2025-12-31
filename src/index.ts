@@ -29,22 +29,26 @@
 
 // Fuzzy matching utilities
 export { escapeRegex, makeDiacriticInsensitive } from './segmentation/fuzzy.js';
+// Rule optimization utilities
+export type { OptimizeResult } from './segmentation/optimize-rules.js';
+export { optimizeRules } from './segmentation/optimize-rules.js';
 export type {
     RuleValidationResult,
     ValidationIssue,
     ValidationIssueType,
 } from './segmentation/pattern-validator.js';
 // Pattern validation utilities
-export { validateRules } from './segmentation/pattern-validator.js';
+export { formatValidationReport, validateRules } from './segmentation/pattern-validator.js';
 export type { ReplaceRule } from './segmentation/replace.js';
 // Replace preprocessor (optional, also used internally by segmentPages when options.replace is set)
 export { applyReplacements } from './segmentation/replace.js';
 // Core segmentation
 export { segmentPages } from './segmentation/segmenter.js';
 // Token expansion types
-export type { ExpandResult } from './segmentation/tokens.js';
+export type { ExpandResult, TokenMapping } from './segmentation/tokens.js';
 // Token expansion (with named capture support)
 export {
+    applyTokenMappings,
     containsTokens,
     escapeTemplateBrackets,
     expandCompositeTokensInTemplate,
@@ -52,10 +56,11 @@ export {
     expandTokensWithCaptures,
     getAvailableTokens,
     getTokenPattern,
+    shouldDefaultToFuzzy,
+    stripTokenMappings,
     TOKEN_PATTERNS,
     templateToRegex,
 } from './segmentation/tokens.js';
-
 // Type definitions
 export type {
     Breakpoint,
@@ -63,10 +68,13 @@ export type {
     Logger,
     Page,
     PageRange,
+    PatternTypeKey,
     Segment,
     SegmentationOptions,
     SplitRule,
 } from './segmentation/types.js';
+// Pattern type keys (runtime array for UI building)
+export { PATTERN_TYPE_KEYS } from './segmentation/types.js';
 
 // ─────────────────────────────────────────────────────────────
 // Pattern Detection
