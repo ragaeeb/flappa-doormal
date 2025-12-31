@@ -39,9 +39,10 @@ export const collapseWhitespace = (s: string): string => s.replace(/\s+/g, ' ').
 
 // Arabic diacritics / tashkeel marks that commonly appear in Shamela texts.
 // This is intentionally conservative: remove combining marks but keep letters.
+// NOTE: Tatweel (U+0640) is NOT stripped here because it's used semantically as a dash/separator.
 export const stripArabicDiacritics = (s: string): string =>
-    // harakat + common Quranic marks + tatweel
-    s.replace(/[\u064B-\u065F\u0670\u06D6-\u06ED\u0640]/gu, '');
+    // harakat + common Quranic marks (no tatweel - it's used as a dash)
+    s.replace(/[\u064B-\u065F\u0670\u06D6-\u06ED]/gu, '');
 
 export type CompiledTokenRegex = { token: string; re: RegExp };
 

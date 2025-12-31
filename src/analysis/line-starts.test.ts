@@ -297,4 +297,24 @@ describe('analyzeCommonLineStarts', () => {
             { count: 2, examples: [{ line: '(ح) وأَخْبَرَنَا أَبُو إِسْحَاقَ', pageId: 1 }], pattern: '(ح)' },
         ]);
     });
+
+    it('should match list item with tatweel dash', () => {
+        const pages = [{ content: '١ ـ قائل ذلك معذور ـ في الجملة ـ لجهله', id: 1 }];
+
+        const result = analyzeCommonLineStarts(pages, {
+            maxExamples: 1,
+            minCount: 1,
+            prefixChars: 60,
+            sortBy: 'count',
+            topK: 5,
+        });
+
+        expect(result).toEqual([
+            {
+                count: 1,
+                examples: [{ line: '١ ـ قائل ذلك معذور ـ في الجملة ـ لجهله', pageId: 1 }],
+                pattern: '{{numbered}}',
+            },
+        ]);
+    });
 });

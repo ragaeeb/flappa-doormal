@@ -42,6 +42,7 @@ src/
     ├── breakpoint-processor.ts # Breakpoint post-processing engine (applyBreakpoints)
     ├── breakpoint-utils.ts     # Breakpoint processing utilities (windowing, excludes, page joins)
     ├── rule-regex.ts           # SplitRule -> compiled regex builder (buildRuleRegex, processPattern)
+    ├── optimize-rules.ts       # Rule optimization logic (merge, dedupe, sort)
     ├── tokens.ts               # Token definitions and expansion logic  
     ├── fuzzy.ts                # Diacritic-insensitive matching utilities
     ├── html.ts                 # HTML utilities (stripHtmlTags)
@@ -69,32 +70,38 @@ src/
    - Deterministic mode reruns segmentation with selected rules converted to `lineStartsWith` and merges recovered `content` back into the provided segments
    - Optional `mode: 'best_effort_then_rerun'` attempts a conservative anchor-based recovery first, then falls back to rerun for unresolved segments
 
-2. **`tokens.ts`** - Template system
+3. **`tokens.ts`** - Template system
    - `TOKEN_PATTERNS` - Map of token names to regex patterns
    - `expandTokensWithCaptures()` - Expands `{{token:name}}` syntax
    - `shouldDefaultToFuzzy()` - Checks if patterns contain fuzzy-default tokens (bab, basmalah, fasl, kitab, naql)
+   - `applyTokenMappings()` - Applies named captures (`{{token:name}}`) to raw templates
+   - `stripTokenMappings()` - Strips named captures (reverts to `{{token}}`)
    - Supports fuzzy transform for diacritic-insensitive matching
    - **Fuzzy-default tokens**: `bab`, `basmalah`, `fasl`, `kitab`, `naql` - auto-enable fuzzy matching unless `fuzzy: false` is set
 
-3. **`match-utils.ts`** - Extracted utilities (for testability)
+4. **`match-utils.ts`** - Extracted utilities (for testability)
    - `extractNamedCaptures()` - Get named groups from regex match
    - `filterByConstraints()` - Apply min/max page filters
    - `anyRuleAllowsId()` - Check if page passes rule constraints
 
-4. **`rule-regex.ts`** - SplitRule → compiled regex builder
+5. **`rule-regex.ts`** - SplitRule → compiled regex builder
    - `buildRuleRegex()` - Compiles rule patterns (`lineStartsWith`, `lineStartsAfter`, `lineEndsWith`, `template`, `regex`)
    - `processPattern()` - Token expansion + auto-escaping + optional fuzzy application
    - `extractNamedCaptureNames()` - Extract `(?<name>...)` groups from raw regex patterns
 
-5. **`pattern-validator.ts`** - Rule validation utilities
+6. **`optimize-rules.ts`** - Rule management logic
+   - `optimizeRules()` - Merges compatible rules, deduplicates patterns, and sorts by specificity (longest patterns first)
+
+7. **`pattern-validator.ts`** - Rule validation utilities
    - `validateRules()` - Detects typos in patterns (missing `{{}}`, unknown tokens, duplicates)
+   - `formatValidationReport()` - Formats validation issues into human-readable strings
    - Returns parallel array structure for easy error tracking
 
-6. **`breakpoint-processor.ts`** - Breakpoint post-processing engine
+8. **`breakpoint-processor.ts`** - Breakpoint post-processing engine
    - `applyBreakpoints()` - Splits oversized structural segments using breakpoint patterns + windowing
    - Applies `pageJoiner` normalization to breakpoint-created segments
 
-7. **`breakpoint-utils.ts`** - Breakpoint processing utilities
+9. **`breakpoint-utils.ts`** - Breakpoint processing utilities
    - `normalizeBreakpoint()` - Convert string to BreakpointRule object
    - `isPageExcluded()` - Check if page is in exclude list
    - `isInBreakpointRange()` - Validate page against min/max/exclude constraints
@@ -111,16 +118,17 @@ src/
    - `findNextPagePosition()` - Find next page content position
    - `findPatternBreakPosition()` - Find pattern match by preference
 
-7. **`types.ts`** - Type definitions
+10. **`types.ts`** - Type definitions
    - `Logger` interface - Optional logging for debugging
    - `SegmentationOptions` - Options with `logger` property
    - `pageJoiner` - Controls how page boundaries are represented in output (`space` default)
+   - `PATTERN_TYPE_KEYS` - Runtime array of all pattern types (for UI building)
    - Verbosity levels: `trace`, `debug`, `info`, `warn`, `error`
 
-8. **`fuzzy.ts`** - Arabic text normalization
+11. **`fuzzy.ts`** - Arabic text normalization
    - `makeDiacriticInsensitive()` - Generate regex that ignores diacritics
 
-9. **`pattern-detection.ts`** - Token auto-detection (NEW)
+12. **`pattern-detection.ts`** - Token auto-detection (NEW)
    - `detectTokenPatterns()` - Detect tokens in text with positions
    - `generateTemplateFromText()` - Convert text to template string
    - `suggestPatternConfig()` - Suggest rule configuration
@@ -401,6 +409,8 @@ bunx biome lint .
    - `src/segmentation/rule-regex.ts` + `src/segmentation/tokens.ts` (token expansion + fuzzy behavior)
    - `src/segmentation/replace.ts` (preprocessing parity)
    - `src/recovery.ts` (recovery implementation)
+
+10. **Prefer library utilities for UI tasks**: Instead of re-implementing rule merging, validation, or token mapping in client code, use `optimizeRules`, `validateRules`/`formatValidationReport`, and `applyTokenMappings`. They handle edge cases (like duplicate patterns, regex safety, or diacritic handling) that ad-hoc implementations might miss.
 
 ### Process Template (Multi-agent design review, TDD-first)
 

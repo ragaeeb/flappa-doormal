@@ -165,6 +165,30 @@ type PatternType =
     | LineStartsAfterPattern
     | LineEndsWithPattern;
 
+/**
+ * Pattern type key names for split rules.
+ *
+ * Use this array to dynamically iterate over pattern types in UIs,
+ * or use the `PatternTypeKey` type for type-safe string unions.
+ *
+ * @example
+ * // Build a dropdown/select in UI
+ * PATTERN_TYPE_KEYS.map(key => <option value={key}>{key}</option>)
+ *
+ * @example
+ * // Type-safe pattern key validation
+ * const validateKey = (k: string): k is PatternTypeKey =>
+ *   (PATTERN_TYPE_KEYS as readonly string[]).includes(k);
+ */
+export const PATTERN_TYPE_KEYS = ['lineStartsWith', 'lineStartsAfter', 'lineEndsWith', 'template', 'regex'] as const;
+
+/**
+ * String union of pattern type key names.
+ *
+ * Derived from `PATTERN_TYPE_KEYS` to stay in sync automatically.
+ */
+export type PatternTypeKey = (typeof PATTERN_TYPE_KEYS)[number];
+
 // ─────────────────────────────────────────────────────────────
 // Split Behavior
 // ─────────────────────────────────────────────────────────────

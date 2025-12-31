@@ -20,6 +20,10 @@ export type ValidationIssue = {
     type: ValidationIssueType;
     message: string;
     suggestion?: string;
+    /** The token name involved in the issue (for unknown_token / missing_braces) */
+    token?: string;
+    /** The specific pattern involved (for duplicate) */
+    pattern?: string;
 };
 
 /**
@@ -60,6 +64,7 @@ const validatePattern = (pattern: string, seenPatterns: Set<string>): Validation
     if (seenPatterns.has(pattern)) {
         return {
             message: `Duplicate pattern: "${pattern}"`,
+            pattern,
             type: 'duplicate',
         };
     }
@@ -73,6 +78,7 @@ const validatePattern = (pattern: string, seenPatterns: Set<string>): Validation
             return {
                 message: `Unknown token: {{${tokenName}}}. Available tokens: ${[...KNOWN_TOKENS].slice(0, 5).join(', ')}...`,
                 suggestion: `Check spelling or use a known token`,
+                token: tokenName,
                 type: 'unknown_token',
             };
         }
@@ -92,6 +98,7 @@ const validatePattern = (pattern: string, seenPatterns: Set<string>): Validation
             return {
                 message: `Token "${tokenName}" appears to be missing {{}}. Did you mean "{{${fullMatch}}}"?`,
                 suggestion: `{{${fullMatch}}}`,
+                token: tokenName,
                 type: 'missing_braces',
             };
         }
@@ -175,4 +182,59 @@ export const validateRules = (rules: SplitRule[]): (RuleValidationResult | undef
 
         return hasIssues ? result : undefined;
     });
+};
+/**
+ * Formats a validation result array into a list of human-readable error messages.
+ *
+ * Useful for displaying validation errors in UIs.
+ *
+ * @param results - The result array from `validateRules()`
+ * @returns Array of formatted error strings
+ *
+ * @example
+ * const issues = validateRules(rules);
+ * const errors = formatValidationReport(issues);
+ * // ["Rule 1, lineStartsWith: Missing {{}} around token..."]
+ */
+export const formatValidationReport = (results: (RuleValidationResult | undefined)[]): string[] => {
+    const errors: string[] = [];
+
+    results.forEach((result, ruleIndex) => {
+        if (!result) {
+            return;
+        }
+
+        // Helper to format a single issue
+        // eslint-disable-next-line
+        const formatIssue = (issue: any, location: string) => {
+            if (!issue) {
+                return;
+            }
+            const type = issue.type as ValidationIssueType;
+
+            if (type === 'missing_braces' && issue.token) {
+                errors.push(`${location}: Missing {{}} around token "${issue.token}"`);
+            } else if (type === 'unknown_token' && issue.token) {
+                errors.push(`${location}: Unknown token "{{${issue.token}}}"`);
+            } else if (type === 'duplicate' && issue.pattern) {
+                errors.push(`${location}: Duplicate pattern "${issue.pattern}"`);
+            } else if (issue.message) {
+                errors.push(`${location}: ${issue.message}`);
+            } else {
+                errors.push(`${location}: ${type}`);
+            }
+        };
+
+        // Each result is a Record with pattern types as keys
+        for (const [patternType, issues] of Object.entries(result)) {
+            const list = Array.isArray(issues) ? issues : [issues];
+            for (const issue of list) {
+                if (issue) {
+                    formatIssue(issue, `Rule ${ruleIndex + 1}, ${patternType}`);
+                }
+            }
+        }
+    });
+
+    return errors;
 };
