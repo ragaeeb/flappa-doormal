@@ -255,7 +255,7 @@ const processOversizedSegment = (
     logger?: Logger,
     debugMetaKey?: string,
     maxContentLength?: number,
-): Segment[] => {
+) => {
     const result: Segment[] = [];
     const fullContent = segment.content;
     let cursorPos = 0;
@@ -281,42 +281,35 @@ const processOversizedSegment = (
     });
 
     let i = 0;
-    // Removed fixed maxIterations cap to support large files; relying on progress/validation
-    while (cursorPos < fullContent.length && currentFromIdx <= toIdx) {
+    const MAX_SAFE_ITERATIONS = 100_000;
+    while (cursorPos < fullContent.length && currentFromIdx <= toIdx && i < MAX_SAFE_ITERATIONS) {
         i++;
         const remainingContent = fullContent.slice(cursorPos);
         if (!remainingContent.trim()) {
             break;
         }
 
-        const remainingSpan = computeRemainingSpan(currentFromIdx, toIdx, pageIds);
-        const remainingHasExclusions = hasAnyExclusionsInRange(expandedBreakpoints, pageIds, currentFromIdx, toIdx);
-
-        // Verification check: Does the remaining content fit within limits?
-        const fitsInPages = remainingSpan <= maxPages;
-        const fitsInLength = !maxContentLength || remainingContent.length <= maxContentLength;
-
-        if (fitsInPages && fitsInLength && !remainingHasExclusions) {
-            const includeMeta = isFirstPiece || Boolean(debugMetaKey);
-            const meta =
-                debugMetaKey && lastBreakpoint
-                    ? mergeDebugIntoMeta(
-                          includeMeta ? segment.meta : undefined,
-                          debugMetaKey,
-                          buildBreakpointDebugPatch(lastBreakpoint.breakpointIndex, lastBreakpoint.rule as any),
-                      )
-                    : includeMeta
-                      ? segment.meta
-                      : undefined;
-            const finalSeg = createFinalSegment(remainingContent, currentFromIdx, toIdx, pageIds, meta, includeMeta);
-            if (finalSeg) {
-                result.push(finalSeg);
-            }
+        if (
+            handleOversizedSegmentFit(
+                remainingContent,
+                currentFromIdx,
+                toIdx,
+                pageIds,
+                expandedBreakpoints,
+                maxPages,
+                maxContentLength,
+                isFirstPiece,
+                debugMetaKey,
+                segment.meta,
+                lastBreakpoint,
+                result,
+            )
+        ) {
             break;
         }
 
         const windowEndIdx = computeWindowEndIdx(currentFromIdx, toIdx, pageIds, maxPages);
-        let windowEndPosition = findBreakpointWindowEndPosition(
+        const windowEndPosition = getWindowEndPosition(
             remainingContent,
             currentFromIdx,
             windowEndIdx,
@@ -324,13 +317,9 @@ const processOversizedSegment = (
             pageIds,
             normalizedPages,
             cumulativeOffsets,
+            maxContentLength,
             logger,
         );
-
-        // Apply maxContentLength constraint (Intersection logic)
-        if (maxContentLength && maxContentLength < windowEndPosition) {
-            windowEndPosition = maxContentLength;
-        }
 
         logger?.debug?.(`[breakpoints] iteration=${i}`, { currentFromIdx, cursorPos, windowEndIdx, windowEndPosition });
 
@@ -347,7 +336,18 @@ const processOversizedSegment = (
             prefer,
             maxContentLength,
         );
-        const breakOffset = found.breakOffset;
+
+        // Progress safeguard: Ensure we advance by at least one character to prevent infinite loops.
+        // This is critical if findBreakOffsetForWindow returns 0 (e.g. from an empty windowEndPosition).
+        let breakOffset = found.breakOffset;
+        if (breakOffset <= 0) {
+            const fallbackPos = maxContentLength ? Math.min(maxContentLength, remainingContent.length) : 1;
+            breakOffset = Math.max(1, fallbackPos);
+            logger?.warn?.('[breakpoints] No progress from findBreakOffsetForWindow; forcing forward movement', {
+                breakOffset,
+                cursorPos,
+            });
+        }
 
         if (found.breakpointIndex !== undefined && found.breakpointRule) {
             lastBreakpoint = { breakpointIndex: found.breakpointIndex, rule: found.breakpointRule };
@@ -355,47 +355,154 @@ const processOversizedSegment = (
 
         const breakPos = cursorPos + breakOffset;
         const pieceContent = fullContent.slice(cursorPos, breakPos).trim();
-        const { actualEndIdx, actualStartIdx } = computePiecePages(
-            cursorPos,
-            breakPos,
-            boundaryPositions,
-            fromIdx,
-            toIdx,
-        );
-
-        logger?.trace?.('[breakpoints] piece', { actualEndIdx, actualStartIdx, pieceLength: pieceContent.length });
 
         if (pieceContent) {
-            const includeMeta = isFirstPiece || Boolean(debugMetaKey);
-            const meta =
-                debugMetaKey && lastBreakpoint
-                    ? mergeDebugIntoMeta(
-                          includeMeta ? segment.meta : undefined,
-                          debugMetaKey,
-                          buildBreakpointDebugPatch(lastBreakpoint.breakpointIndex, lastBreakpoint.rule as any),
-                      )
-                    : includeMeta
-                      ? segment.meta
-                      : undefined;
-            const pieceSeg = createPieceSegment(pieceContent, actualStartIdx, actualEndIdx, pageIds, meta, includeMeta);
+            const { actualEndIdx, actualStartIdx } = computePiecePages(
+                cursorPos,
+                breakPos,
+                boundaryPositions,
+                fromIdx,
+                toIdx,
+            );
+            const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, segment.meta, lastBreakpoint);
+            const pieceSeg = createPieceSegment(pieceContent, actualStartIdx, actualEndIdx, pageIds, meta, true);
             if (pieceSeg) {
                 result.push(pieceSeg);
             }
+
+            const next = advanceCursorAndIndex(fullContent, breakPos, actualEndIdx, toIdx, pageIds, normalizedPages);
+            cursorPos = next.cursorPos;
+            currentFromIdx = next.currentFromIdx;
+        } else {
+            cursorPos = breakPos;
         }
 
-        cursorPos = skipWhitespace(fullContent, breakPos);
-        currentFromIdx = computeNextFromIdx(
-            fullContent.slice(cursorPos),
-            actualEndIdx,
-            toIdx,
-            pageIds,
-            normalizedPages,
-        );
         isFirstPiece = false;
+    }
+
+    if (i >= MAX_SAFE_ITERATIONS) {
+        logger?.error?.('[breakpoints] Stopped processing oversized segment: reached MAX_SAFE_ITERATIONS', {
+            cursorPos,
+            fullContentLength: fullContent.length,
+            iterations: i,
+        });
     }
 
     logger?.debug?.('[breakpoints] done', { resultCount: result.length });
     return result;
+};
+
+/**
+ * Checks if the remaining content fits within paged/length limits.
+ * If so, pushes the final segment and returns true.
+ */
+const handleOversizedSegmentFit = (
+    remainingContent: string,
+    currentFromIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    expandedBreakpoints: Array<{ excludeSet: Set<number> }>,
+    maxPages: number,
+    maxContentLength: number | undefined,
+    isFirstPiece: boolean,
+    debugMetaKey: string | undefined,
+    originalMeta: Segment['meta'] | undefined,
+    lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null,
+    result: Segment[],
+): boolean => {
+    const remainingSpan = computeRemainingSpan(currentFromIdx, toIdx, pageIds);
+    const remainingHasExclusions = hasAnyExclusionsInRange(expandedBreakpoints, pageIds, currentFromIdx, toIdx);
+
+    const fitsInPages = remainingSpan <= maxPages;
+    const fitsInLength = !maxContentLength || remainingContent.length <= maxContentLength;
+
+    if (fitsInPages && fitsInLength && !remainingHasExclusions) {
+        const includeMeta = isFirstPiece || Boolean(debugMetaKey);
+        const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, originalMeta, lastBreakpoint);
+        const finalSeg = createFinalSegment(remainingContent, currentFromIdx, toIdx, pageIds, meta, includeMeta);
+        if (finalSeg) {
+            result.push(finalSeg);
+        }
+        return true;
+    }
+    return false;
+};
+
+/**
+ * Builds metadata for a segment piece, optionally including debug info.
+ */
+const getSegmentMetaWithDebug = (
+    isFirstPiece: boolean,
+    debugMetaKey: string | undefined,
+    originalMeta: Segment['meta'] | undefined,
+    lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null,
+): Segment['meta'] | undefined => {
+    const includeMeta = isFirstPiece || Boolean(debugMetaKey);
+    if (!includeMeta) {
+        return undefined;
+    }
+
+    if (debugMetaKey && lastBreakpoint) {
+        return mergeDebugIntoMeta(
+            isFirstPiece ? originalMeta : undefined,
+            debugMetaKey,
+            buildBreakpointDebugPatch(lastBreakpoint.breakpointIndex, lastBreakpoint.rule as any),
+        );
+    }
+    return isFirstPiece ? originalMeta : undefined;
+};
+
+/**
+ * Calculates window end position, capped by maxContentLength if present.
+ */
+const getWindowEndPosition = (
+    remainingContent: string,
+    currentFromIdx: number,
+    windowEndIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    cumulativeOffsets: number[],
+    maxContentLength: number | undefined,
+    logger?: Logger,
+): number => {
+    let windowEndPosition = findBreakpointWindowEndPosition(
+        remainingContent,
+        currentFromIdx,
+        windowEndIdx,
+        toIdx,
+        pageIds,
+        normalizedPages,
+        cumulativeOffsets,
+        logger,
+    );
+
+    if (maxContentLength && maxContentLength < windowEndPosition) {
+        windowEndPosition = maxContentLength;
+    }
+    return windowEndPosition;
+};
+
+/**
+ * Advances cursorPos and currentFromIdx for the next iteration.
+ */
+const advanceCursorAndIndex = (
+    fullContent: string,
+    breakPos: number,
+    actualEndIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+): { currentFromIdx: number; cursorPos: number } => {
+    const nextCursorPos = skipWhitespace(fullContent, breakPos);
+    const nextFromIdx = computeNextFromIdx(
+        fullContent.slice(nextCursorPos),
+        actualEndIdx,
+        toIdx,
+        pageIds,
+        normalizedPages,
+    );
+    return { currentFromIdx: nextFromIdx, cursorPos: nextCursorPos };
 };
 
 /**

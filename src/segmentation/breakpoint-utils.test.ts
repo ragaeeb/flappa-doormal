@@ -747,5 +747,9 @@ describe('adjustForSurrogate', () => {
         expect(adjustForSurrogate(content, 3)).toBe(3);
         // Target 5 (after emoji).
         expect(adjustForSurrogate(content, 5)).toBe(5);
+
+        // Boundary conditions
+        expect(adjustForSurrogate(content, 0)).toBe(0);
+        expect(adjustForSurrogate(content, content.length)).toBe(content.length);
     });
 });

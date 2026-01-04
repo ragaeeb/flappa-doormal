@@ -126,12 +126,75 @@ export const createPageStartGuardChecker = (matchContent: string, pageMap: PageM
     };
 };
 
+/**
+ * Checks if a pageId matches the min/max/exclude constraints of a rule.
+ */
+const passesRuleConstraints = (rule: SplitRule, pageId: number): boolean => {
+    return (
+        (rule.min === undefined || pageId >= rule.min) &&
+        (rule.max === undefined || pageId <= rule.max) &&
+        !isPageExcluded(pageId, rule.exclude)
+    );
+};
+
+/**
+ * Records a split point for a specific rule.
+ */
+const recordSplitPointAt = (splitPointsByRule: Map<number, SplitPoint[]>, ruleIndex: number, sp: SplitPoint) => {
+    const arr = splitPointsByRule.get(ruleIndex);
+    if (!arr) {
+        splitPointsByRule.set(ruleIndex, [sp]);
+        return;
+    }
+    arr.push(sp);
+};
+
+/**
+ * Processes matches for all fast-fuzzy rules at a specific line start.
+ */
+const processFastFuzzyMatchesAt = (
+    matchContent: string,
+    lineStart: number,
+    pageId: number,
+    fastFuzzyRules: FastFuzzyRule[],
+    passesPageStartGuard: PageStartGuardChecker,
+    isPageStart: boolean,
+    splitPointsByRule: Map<number, SplitPoint[]>,
+) => {
+    for (const { compiled, kind, rule, ruleIndex } of fastFuzzyRules) {
+        if (!passesRuleConstraints(rule, pageId)) {
+            continue;
+        }
+
+        if (isPageStart && !passesPageStartGuard(rule, ruleIndex, lineStart)) {
+            continue;
+        }
+
+        const end = matchFastFuzzyTokenAt(matchContent, lineStart, compiled);
+        if (end === null) {
+            continue;
+        }
+
+        const splitIndex = (rule.split ?? 'at') === 'at' ? lineStart : end;
+        if (kind === 'startsWith') {
+            recordSplitPointAt(splitPointsByRule, ruleIndex, { index: splitIndex, meta: rule.meta });
+        } else {
+            const markerLength = end - lineStart;
+            recordSplitPointAt(splitPointsByRule, ruleIndex, {
+                contentStartOffset: (rule.split ?? 'at') === 'at' ? markerLength : undefined,
+                index: splitIndex,
+                meta: rule.meta,
+            });
+        }
+    }
+};
+
 export const collectFastFuzzySplitPoints = (
     matchContent: string,
     pageMap: PageMap,
     fastFuzzyRules: FastFuzzyRule[],
     passesPageStartGuard: PageStartGuardChecker,
-): Map<number, SplitPoint[]> => {
+) => {
     const splitPointsByRule = new Map<number, SplitPoint[]>();
     if (fastFuzzyRules.length === 0 || pageMap.boundaries.length === 0) {
         return splitPointsByRule;
@@ -147,15 +210,6 @@ export const collectFastFuzzySplitPoints = (
         }
     };
 
-    const recordSplitPoint = (ruleIndex: number, sp: SplitPoint) => {
-        const arr = splitPointsByRule.get(ruleIndex);
-        if (!arr) {
-            splitPointsByRule.set(ruleIndex, [sp]);
-            return;
-        }
-        arr.push(sp);
-    };
-
     const isPageStart = (offset: number): boolean => offset === currentBoundary?.start;
 
     // Line starts are offset 0 and any char after '\n'
@@ -167,36 +221,15 @@ export const collectFastFuzzySplitPoints = (
             break;
         }
 
-        for (const { compiled, kind, rule, ruleIndex } of fastFuzzyRules) {
-            const passesConstraints =
-                (rule.min === undefined || pageId >= rule.min) &&
-                (rule.max === undefined || pageId <= rule.max) &&
-                !isPageExcluded(pageId, rule.exclude);
-            if (!passesConstraints) {
-                continue;
-            }
-
-            if (isPageStart(lineStart) && !passesPageStartGuard(rule, ruleIndex, lineStart)) {
-                continue;
-            }
-
-            const end = matchFastFuzzyTokenAt(matchContent, lineStart, compiled);
-            if (end === null) {
-                continue;
-            }
-
-            const splitIndex = (rule.split ?? 'at') === 'at' ? lineStart : end;
-            if (kind === 'startsWith') {
-                recordSplitPoint(ruleIndex, { index: splitIndex, meta: rule.meta });
-            } else {
-                const markerLength = end - lineStart;
-                recordSplitPoint(ruleIndex, {
-                    contentStartOffset: (rule.split ?? 'at') === 'at' ? markerLength : undefined,
-                    index: splitIndex,
-                    meta: rule.meta,
-                });
-            }
-        }
+        processFastFuzzyMatchesAt(
+            matchContent,
+            lineStart,
+            pageId,
+            fastFuzzyRules,
+            passesPageStartGuard,
+            isPageStart(lineStart),
+            splitPointsByRule,
+        );
 
         const nextNl = matchContent.indexOf('\n', lineStart);
         if (nextNl === -1) {
