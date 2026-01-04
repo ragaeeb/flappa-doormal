@@ -7,7 +7,7 @@
  * @module breakpoint-utils
  */
 
-import type { Breakpoint, BreakpointRule, PageRange, Segment } from './types.js';
+import type { Breakpoint, BreakpointRule, PageRange, Segment, Logger } from './types.js';
 
 const WINDOW_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15] as const;
 // For page-join normalization we need to handle cases where only the very beginning of the next page
@@ -315,6 +315,7 @@ export const findPageStartNearExpectedBoundary = (
     expectedBoundary: number,
     pageIds: number[],
     normalizedPages: Map<number, NormalizedPage>,
+    logger?: Logger,
 ): number => {
     const targetPageData = normalizedPages.get(pageIds[targetPageIdx]);
     if (!targetPageData) {
@@ -370,10 +371,23 @@ export const findPageStartNearExpectedBoundary = (
 
             // Only accept the match if it's within MAX_DEVIATION of the expected boundary.
             // This prevents false positives when content is duplicated within pages.
+            // MAX_DEVIATION of 2000 chars allows ~50-100% variance for typical
+            // Arabic book pages (1000-3000 chars) while rejecting false positives
+            // from duplicated content appearing mid-page.
             const MAX_DEVIATION = 2000;
             if (bestDistance <= MAX_DEVIATION) {
                 return bestCandidate.pos;
             }
+
+            logger?.debug?.('[breakpoints] findPageStartNearExpectedBoundary: Rejected match exceeding deviation', {
+                targetPageIdx,
+                expectedBoundary,
+                bestDistance,
+                maxDeviation: MAX_DEVIATION,
+                matchPos: bestCandidate.pos,
+                prefixLength: len,
+            });
+
             // If best match is too far, continue to try shorter prefixes or return -1
         }
     }
@@ -397,6 +411,7 @@ export const findPageStartNearExpectedBoundary = (
  * @param pageIds - Array of all page IDs
  * @param normalizedPages - Map of page ID to normalized content
  * @param cumulativeOffsets - Cumulative character offsets (for estimates)
+ * @param logger - Optional logger for debugging
  * @returns Array where boundaryPositions[i] = start position of page (fromIdx + i),
  *          with a sentinel boundary at segmentContent.length as the last element
  *
@@ -412,6 +427,7 @@ export const buildBoundaryPositions = (
     pageIds: number[],
     normalizedPages: Map<number, NormalizedPage>,
     cumulativeOffsets: number[],
+    logger?: Logger,
 ): number[] => {
     const boundaryPositions: number[] = [0];
     const startOffsetInFromPage = estimateStartOffsetInCurrentPage(segmentContent, fromIdx, pageIds, normalizedPages);
@@ -429,6 +445,7 @@ export const buildBoundaryPositions = (
             expectedBoundary,
             pageIds,
             normalizedPages,
+            logger,
         );
 
         const prevBoundary = boundaryPositions[boundaryPositions.length - 1];
@@ -503,6 +520,7 @@ export const findBreakpointWindowEndPosition = (
     pageIds: number[],
     normalizedPages: Map<number, NormalizedPage>,
     cumulativeOffsets: number[],
+    logger?: Logger,
 ): number => {
     // If the window already reaches the end of the segment, the window is the remaining content.
     if (windowEndIdx >= toIdx) {
@@ -543,6 +561,7 @@ export const findBreakpointWindowEndPosition = (
             expectedBoundary,
             pageIds,
             normalizedPages,
+            logger,
         );
         if (pos > 0) {
             return pos;

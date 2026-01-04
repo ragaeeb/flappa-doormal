@@ -250,6 +250,7 @@ const processOversizedSegment = (
         pageIds,
         normalizedPages,
         cumulativeOffsets,
+        logger,
     );
 
     logger?.debug?.('[breakpoints] boundaryPositions built', {
@@ -304,6 +305,7 @@ const processOversizedSegment = (
             pageIds,
             normalizedPages,
             cumulativeOffsets,
+            logger,
         );
 
         logger?.debug?.(`[breakpoints] iteration=${i}`, { currentFromIdx, cursorPos, windowEndIdx });
