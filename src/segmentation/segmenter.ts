@@ -9,10 +9,10 @@
  */
 
 import { applyBreakpoints } from './breakpoint-processor.js';
+import { resolveDebugConfig } from './debug-meta.js';
 import { anyRuleAllowsId } from './match-utils.js';
 import { applyReplacements } from './replace.js';
 import { processPattern } from './rule-regex.js';
-import { resolveDebugConfig } from './debug-meta.js';
 import {
     collectFastFuzzySplitPoints,
     createPageStartGuardChecker,
@@ -373,12 +373,16 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
  * });
  */
 export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
-    const { rules = [], maxPages = 0, breakpoints = [], prefer = 'longer', pageJoiner = 'space', logger } = options;
+    const { rules = [], breakpoints = [], prefer = 'longer', pageJoiner = 'space', logger, maxContentLength } = options;
+    // Default maxPages to 0 (single page) unless maxContentLength is provided
+    const maxPages = options.maxPages ?? (maxContentLength ? Number.MAX_SAFE_INTEGER : 0);
+
     const debug = resolveDebugConfig((options as any).debug);
     const debugMetaKey = debug?.includeRule ? debug.metaKey : undefined;
 
     logger?.info?.('[segmenter] starting segmentation', {
         breakpointCount: breakpoints.length,
+        maxContentLength,
         maxPages,
         pageCount: pages.length,
         prefer,
@@ -412,7 +416,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
     segments = ensureFallbackSegment(segments, processedPages, normalizedContent, pageJoiner);
 
     // Apply breakpoints post-processing for oversized segments
-    if (maxPages >= 0 && breakpoints.length) {
+    if ((maxPages >= 0 || (maxContentLength && maxContentLength > 0)) && breakpoints.length) {
         logger?.debug?.('[segmenter] applying breakpoints to oversized segments');
         const patternProcessor = (p: string) => processPattern(p, false).pattern;
         const result = applyBreakpoints(
@@ -426,13 +430,13 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
             logger,
             pageJoiner,
             debug?.includeBreakpoint ? debug.metaKey : undefined,
+            maxContentLength,
         );
         logger?.info?.('[segmenter] segmentation complete (with breakpoints)', {
             finalSegmentCount: result.length,
         });
         return result;
     }
-
     logger?.info?.('[segmenter] segmentation complete (structural only)', {
         finalSegmentCount: segments.length,
     });

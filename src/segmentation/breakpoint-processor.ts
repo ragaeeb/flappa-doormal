@@ -18,8 +18,8 @@ import {
     hasExcludedPageInRange,
     type NormalizedPage,
 } from './breakpoint-utils.js';
-import type { Breakpoint, Logger, Page, Segment } from './types.js';
 import { buildBreakpointDebugPatch, mergeDebugIntoMeta } from './debug-meta.js';
+import type { Breakpoint, Logger, Page, Segment } from './types.js';
 
 export type BreakpointPatternProcessor = (pattern: string) => string;
 
@@ -201,7 +201,11 @@ const findBreakOffsetForWindow = (
     );
 
     if (patternMatch && patternMatch.breakPos > 0) {
-        return { breakOffset: patternMatch.breakPos, breakpointIndex: patternMatch.breakpointIndex, breakpointRule: patternMatch.rule };
+        return {
+            breakOffset: patternMatch.breakPos,
+            breakpointIndex: patternMatch.breakpointIndex,
+            breakpointRule: patternMatch.rule,
+        };
     }
     return { breakOffset: windowEndPosition };
 };
@@ -235,6 +239,7 @@ const processOversizedSegment = (
     prefer: 'longer' | 'shorter',
     logger?: Logger,
     debugMetaKey?: string,
+    maxContentLength?: number,
 ): Segment[] => {
     const result: Segment[] = [];
     const fullContent = segment.content;
@@ -270,7 +275,11 @@ const processOversizedSegment = (
         const remainingSpan = computeRemainingSpan(currentFromIdx, toIdx, pageIds);
         const remainingHasExclusions = hasAnyExclusionsInRange(expandedBreakpoints, pageIds, currentFromIdx, toIdx);
 
-        if (remainingSpan <= maxPages && !remainingHasExclusions) {
+        // Verification check: Does the remaining content fit within limits?
+        const fitsInPages = remainingSpan <= maxPages;
+        const fitsInLength = !maxContentLength || remainingContent.length <= maxContentLength;
+
+        if (fitsInPages && fitsInLength && !remainingHasExclusions) {
             const includeMeta = isFirstPiece || Boolean(debugMetaKey);
             const meta =
                 debugMetaKey && lastBreakpoint
@@ -282,14 +291,7 @@ const processOversizedSegment = (
                     : includeMeta
                       ? segment.meta
                       : undefined;
-            const finalSeg = createFinalSegment(
-                remainingContent,
-                currentFromIdx,
-                toIdx,
-                pageIds,
-                meta,
-                includeMeta,
-            );
+            const finalSeg = createFinalSegment(remainingContent, currentFromIdx, toIdx, pageIds, meta, includeMeta);
             if (finalSeg) {
                 result.push(finalSeg);
             }
@@ -297,7 +299,7 @@ const processOversizedSegment = (
         }
 
         const windowEndIdx = computeWindowEndIdx(currentFromIdx, toIdx, pageIds, maxPages);
-        const windowEndPosition = findBreakpointWindowEndPosition(
+        let windowEndPosition = findBreakpointWindowEndPosition(
             remainingContent,
             currentFromIdx,
             windowEndIdx,
@@ -308,7 +310,12 @@ const processOversizedSegment = (
             logger,
         );
 
-        logger?.debug?.(`[breakpoints] iteration=${i}`, { currentFromIdx, cursorPos, windowEndIdx });
+        // Apply maxContentLength constraint (Intersection logic)
+        if (maxContentLength && maxContentLength < windowEndPosition) {
+            windowEndPosition = maxContentLength;
+        }
+
+        logger?.debug?.(`[breakpoints] iteration=${i}`, { currentFromIdx, cursorPos, windowEndIdx, windowEndPosition });
 
         const found = findBreakOffsetForWindow(
             remainingContent,
@@ -351,14 +358,7 @@ const processOversizedSegment = (
                     : includeMeta
                       ? segment.meta
                       : undefined;
-            const pieceSeg = createPieceSegment(
-                pieceContent,
-                actualStartIdx,
-                actualEndIdx,
-                pageIds,
-                meta,
-                includeMeta,
-            );
+            const pieceSeg = createPieceSegment(pieceContent, actualStartIdx, actualEndIdx, pageIds, meta, includeMeta);
             if (pieceSeg) {
                 result.push(pieceSeg);
             }
@@ -395,6 +395,7 @@ export const applyBreakpoints = (
     logger?: Logger,
     pageJoiner: 'space' | 'newline' = 'space',
     debugMetaKey?: string,
+    maxContentLength?: number,
 ) => {
     const pageIds = pages.map((p) => p.id);
     const pageIdToIndex = buildPageIdToIndexMap(pageIds);
@@ -418,7 +419,10 @@ export const applyBreakpoints = (
         const segmentSpan = (segment.to ?? segment.from) - segment.from;
         const hasExclusions = hasAnyExclusionsInRange(expandedBreakpoints, pageIds, fromIdx, toIdx);
 
-        if (segmentSpan <= maxPages && !hasExclusions) {
+        const fitsInPages = segmentSpan <= maxPages;
+        const fitsInLength = !maxContentLength || segment.content.length <= maxContentLength;
+
+        if (fitsInPages && fitsInLength && !hasExclusions) {
             result.push(segment);
             continue;
         }
@@ -435,6 +439,7 @@ export const applyBreakpoints = (
             prefer,
             logger,
             debugMetaKey,
+            maxContentLength,
         );
         // Normalize page joins for breakpoint-created pieces
         result.push(
