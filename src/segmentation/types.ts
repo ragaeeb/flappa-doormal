@@ -649,6 +649,19 @@ export type SegmentationOptions = {
     maxPages?: number;
 
     /**
+     * Maximum length (in characters) per segment.
+     *
+     * When a segment exceeds this length, breakpoints are applied to split it.
+     * This can typically be used in conjunction with `maxPages`, where the
+     * strictest constraint (intersection) determines the split window.
+     *
+     * @example
+     * // Break segments that exceed 2000 chars
+     * { maxContentLength: 2000, breakpoints: ['{{tarqim}}'] }
+     */
+    maxContentLength?: number;
+
+    /**
      * Patterns tried in order to break oversized segments.
      *
      * Each pattern is tried until one matches within the allowed page window.

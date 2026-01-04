@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'bun:test';
 import { computeNextFromIdx, computeWindowEndIdx } from './breakpoint-processor.js';
 import {
+    adjustForSurrogate,
     applyPageJoinerBetweenPages,
     buildBoundaryPositions,
     buildExcludeSet,
@@ -19,6 +20,7 @@ import {
     findNextPagePosition,
     findPageIndexForPosition,
     findPatternBreakPosition,
+    findSafeBreakPosition,
     hasExcludedPageInRange,
     isInBreakpointRange,
     isPageExcluded,
@@ -682,5 +684,72 @@ describe('breakpoint-utils', () => {
             expect(findPageIndexForPosition(25, boundaries, fromIdx)).toBe(10);
             expect(findPageIndexForPosition(50, boundaries, fromIdx)).toBe(10);
         });
+    });
+});
+
+describe('findSafeBreakPosition', () => {
+    it('should fallback to the nearest preceding whitespace', () => {
+        const content = 'hello beautiful world';
+        // Target is at 'bea|utiful' (index ~9)
+        // 'hello ' is index 6.
+        // We want it to find the space at index 5 (split after space => 6) or index 5?
+        // Usually split point is "after" the char.
+        // If content[5] is ' ', split at 6.
+
+        // "hello beautiful" -> length 15.
+        // Target 10: "hello beau"
+        // Should find space at 5. Return 6.
+        const target = 10;
+        // lookback 100
+        const result = findSafeBreakPosition(content, target, 100);
+        expect(result).toBe(6); // index of 'b'
+    });
+
+    it('should return -1 if no safe break found within lookback', () => {
+        const content = 'longwordwithoutbreaks';
+        const target = 10;
+        const result = findSafeBreakPosition(content, target, 5); // Lookback 5 chars
+        expect(result).toBe(-1);
+    });
+
+    it('should respect punctuation as safe break', () => {
+        const content = 'word.another';
+        // Target 8: 'word.ano'
+        // '.' at 4. Split at 5.
+        const result = findSafeBreakPosition(content, 8, 10);
+        expect(result).toBe(5);
+    });
+
+    it('should handle Arabic punctuation', () => {
+        const content = 'كلمة،وأخرى'; // Removed space to force comma match
+        // 'كلمة' (4) + '،' (1) = 5. 'و' at 5.
+        // Target 7. Loop: 6('أ'), 5('و'), 4('،'). Matches at 4. Returns 5.
+        const result = findSafeBreakPosition(content, 7, 10);
+        expect(result).toBe(5);
+    });
+});
+
+describe('adjustForSurrogate', () => {
+    it('should avoid splitting inside a surrogate pair (Emoji)', () => {
+        // 'abc' (3) + Emoji (2) = 5 chars total
+        // Emoji: \uD83D \uDE02. Indices 3, 4.
+        const content = 'abc😂def';
+
+        // Target 4 (between high and low surrogate).
+        // Should back up to 3 (before emoji).
+        const result = adjustForSurrogate(content, 4);
+        expect(result).toBe(3);
+    });
+
+    it('should not change safe positions', () => {
+        const content = 'abc😂def';
+        // Target 3 (before emoji).
+        expect(adjustForSurrogate(content, 3)).toBe(3);
+        // Target 5 (after emoji).
+        expect(adjustForSurrogate(content, 5)).toBe(5);
+
+        // Boundary conditions
+        expect(adjustForSurrogate(content, 0)).toBe(0);
+        expect(adjustForSurrogate(content, content.length)).toBe(content.length);
     });
 });

@@ -9,10 +9,10 @@
  */
 
 import { applyBreakpoints } from './breakpoint-processor.js';
+import { resolveDebugConfig } from './debug-meta.js';
 import { anyRuleAllowsId } from './match-utils.js';
 import { applyReplacements } from './replace.js';
 import { processPattern } from './rule-regex.js';
-import { resolveDebugConfig } from './debug-meta.js';
 import {
     collectFastFuzzySplitPoints,
     createPageStartGuardChecker,
@@ -27,8 +27,6 @@ import {
 } from './split-point-helpers.js';
 import { normalizeLineEndings } from './textUtils.js';
 import type { Logger, Page, Segment, SegmentationOptions, SplitRule } from './types.js';
-
-// buildRuleRegex + processPattern extracted to src/segmentation/rule-regex.ts
 
 /**
  * Builds a concatenated content string and page mapping from input pages.
@@ -113,7 +111,7 @@ const buildPageMap = (pages: Page[]): { content: string; normalizedPages: string
  * - Prefer a split with `contentStartOffset` (needed for `lineStartsAfter` marker stripping)
  * - Otherwise prefer a split with `meta` over one without
  */
-export const dedupeSplitPoints = (splitPoints: SplitPoint[]): SplitPoint[] => {
+export const dedupeSplitPoints = (splitPoints: SplitPoint[]) => {
     const byIndex = new Map<number, SplitPoint>();
     for (const p of splitPoints) {
         const existing = byIndex.get(p.index);
@@ -142,7 +140,7 @@ export const ensureFallbackSegment = (
     pages: Page[],
     normalizedContent: string[],
     pageJoiner: 'space' | 'newline',
-): Segment[] => {
+) => {
     if (segments.length > 0 || pages.length === 0) {
         return segments;
     }
@@ -166,7 +164,7 @@ const collectSplitPointsFromRules = (
     pageMap: PageMap,
     debugMetaKey: string | undefined,
     logger?: Logger,
-): SplitPoint[] => {
+) => {
     logger?.debug?.('[segmenter] collecting split points from rules', {
         contentLength: matchContent.length,
         ruleCount: rules.length,
@@ -206,42 +204,6 @@ const collectSplitPointsFromRules = (
 
     // Apply occurrence filtering and flatten
     return applyOccurrenceFilter(rules, splitPointsByRule, debugMetaKey);
-};
-
-/**
- * Executes a regex against content and extracts match results with capture information.
- *
- * @param content - Full content string to search
- * @param regex - Compiled regex with 'g' flag
- * @param usesCapture - Whether to extract captured content
- * @param captureNames - Names of expected named capture groups
- * @returns Array of match results with positions and captures
- */
-const findMatches = (content: string, regex: RegExp, usesCapture: boolean, captureNames: string[]) => {
-    const matches: MatchResult[] = [];
-    regex.lastIndex = 0;
-    let m = regex.exec(content);
-
-    while (m !== null) {
-        const result: MatchResult = { end: m.index + m[0].length, start: m.index };
-
-        // Extract named captures if present
-        result.namedCaptures = extractNamedCaptures(m.groups, captureNames);
-
-        // For lineStartsAfter, get the last positional capture (the .* content)
-        if (usesCapture) {
-            result.captured = getLastPositionalCapture(m);
-        }
-
-        matches.push(result);
-
-        if (m[0].length === 0) {
-            regex.lastIndex++;
-        }
-        m = regex.exec(content);
-    }
-
-    return matches;
 };
 
 /**
@@ -292,7 +254,7 @@ const findBreaksInRange = (startOffset: number, endOffset: number, sortedBreaks:
  * @param pageBreaks - Sorted array of page break offsets
  * @returns Content with page-break newlines converted to spaces
  */
-const convertPageBreaks = (content: string, startOffset: number, pageBreaks: number[]): string => {
+const convertPageBreaks = (content: string, startOffset: number, pageBreaks: number[]) => {
     // OPTIMIZATION: Fast-path for empty or no-newline content (common cases)
     if (!content || !content.includes('\n')) {
         return content;
@@ -313,22 +275,6 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
     const breakSet = new Set(breaksInRange);
     return content.replace(/\n/g, (match, offset: number) => (breakSet.has(offset) ? ' ' : match));
 };
-
-/**
- * Applies breakpoints to oversized segments.
- *
- * For each segment that spans more than maxPages, tries the breakpoint patterns
- * in order to find a suitable split point. Structural markers (from rules) are
- * always respected - segments are only broken within their boundaries.
- *
- * @param segments - Initial segments from rule processing
- * @param pages - Original pages for page lookup
- * @param maxPages - Maximum pages before breakpoints apply
- * @param breakpoints - Patterns to try in order (tokens supported)
- * @param prefer - 'longer' for last match, 'shorter' for first match
- * @returns Processed segments with oversized ones broken up
- */
-// applyBreakpoints implementation moved to breakpoint-processor.ts to reduce complexity in this module.
 
 /**
  * Segments pages of content based on pattern-matching rules.
@@ -373,12 +319,21 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
  * });
  */
 export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
-    const { rules = [], maxPages = 0, breakpoints = [], prefer = 'longer', pageJoiner = 'space', logger } = options;
+    const { rules = [], breakpoints = [], prefer = 'longer', pageJoiner = 'space', logger, maxContentLength } = options;
+
+    if (maxContentLength && maxContentLength < 50) {
+        throw new Error(`maxContentLength must be at least 50 characters.`);
+    }
+
+    // Default maxPages to 0 (single page) unless maxContentLength is provided
+    const maxPages = options.maxPages ?? (maxContentLength ? Number.MAX_SAFE_INTEGER : 0);
+
     const debug = resolveDebugConfig((options as any).debug);
     const debugMetaKey = debug?.includeRule ? debug.metaKey : undefined;
 
     logger?.info?.('[segmenter] starting segmentation', {
         breakpointCount: breakpoints.length,
+        maxContentLength,
         maxPages,
         pageCount: pages.length,
         prefer,
@@ -412,7 +367,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
     segments = ensureFallbackSegment(segments, processedPages, normalizedContent, pageJoiner);
 
     // Apply breakpoints post-processing for oversized segments
-    if (maxPages >= 0 && breakpoints.length) {
+    if ((maxPages >= 0 || (maxContentLength && maxContentLength > 0)) && breakpoints.length) {
         logger?.debug?.('[segmenter] applying breakpoints to oversized segments');
         const patternProcessor = (p: string) => processPattern(p, false).pattern;
         const result = applyBreakpoints(
@@ -426,13 +381,13 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
             logger,
             pageJoiner,
             debug?.includeBreakpoint ? debug.metaKey : undefined,
+            maxContentLength,
         );
         logger?.info?.('[segmenter] segmentation complete (with breakpoints)', {
             finalSegmentCount: result.length,
         });
         return result;
     }
-
     logger?.info?.('[segmenter] segmentation complete (structural only)', {
         finalSegmentCount: segments.length,
     });
@@ -454,7 +409,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
  * @param rules - Original rules (for constraint checking on first segment)
  * @returns Array of segment objects
  */
-const buildSegments = (splitPoints: SplitPoint[], content: string, pageMap: PageMap, rules: SplitRule[]): Segment[] => {
+const buildSegments = (splitPoints: SplitPoint[], content: string, pageMap: PageMap, rules: SplitRule[]) => {
     /**
      * Creates a single segment from a content range.
      */

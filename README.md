@@ -51,6 +51,7 @@ Working with Arabic hadith and Islamic text collections requires splitting conti
 ✅ **Readable templates**: `{{raqms}} {{dash}}` instead of cryptic regex  
 ✅ **Named captures**: `{{raqms:hadithNum}}` auto-extracts to `meta.hadithNum`  
 ✅ **Fuzzy matching**: Auto-enabled for `{{bab}}`, `{{kitab}}`, `{{basmalah}}`, `{{fasl}}`, `{{naql}}` (override with `fuzzy: false`)  
+✅ **Content limits**: `maxPages` and `maxContentLength` (safety-hardened) control segment size  
 ✅ **Page tracking**: Know which page each segment came from  
 ✅ **Declarative rules**: Describe *what* to match, not *how*
 
@@ -236,7 +237,92 @@ Limit rules to specific page ranges:
 }
 ```
 
-### 7. Occurrence Filtering
+### 7. Max Content Length (Safety Hardened)
+
+Split oversized segments based on character count:
+
+```typescript
+{
+  maxContentLength: 500, // Split after 500 characters
+  prefer: 'longer',      // Try to fill the character bucket
+  breakpoints: ['\\.'], // Recommended: split on punctuation within window
+}
+```
+
+The library implements **safety hardening** for character-based splits:
+- **Safe Fallback**: If no breakpoint matches, it searches backward up to 100 characters for a delimiter (whitespace or punctuation) to avoid chopping words.
+- **Unicode Safety**: Automatically prevents splitting inside Unicode surrogate pairs (e.g., emojis), preventing text corruption.
+- **Validation**: `maxContentLength` must be at least **50**.
+
+### 8. Advanced Structural Filters
+
+Refine rule matching with page-specific constraints:
+
+```typescript
+{
+  lineStartsWith: ['### '],
+  split: 'at',
+  // Range constraints
+  min: 10,    // Only match on pages 10 and above
+  max: 500,   // Only match on pages 500 and below
+  exclude: [50, [100, 110]], // Skip page 50 and range 100-110
+
+  // Negative lookahead: skip rule if content matches this pattern
+  // (e.g. skip chapter marker if it appears inside a table/list)
+  skipWhen: '^\s*- ', 
+}
+```
+
+### 9. Debugging & Logging
+
+Pass an optional `logger` to trace segmentation decisions or enable `debug` to attach match metadata to segments:
+
+```typescript
+const segments = segmentPages(pages, {
+  rules: [...],
+  debug: true, // Attaches .meta.debug with regex and match indices
+  logger: {
+    debug: (msg, data) => console.log(`[DEBUG] ${msg}`, data),
+    info: (msg, data) => console.info(`[INFO] ${msg}`, data),
+    warn: (msg, data) => console.warn(`[WARN] ${msg}`, data),
+    error: (msg, data) => console.error(`[ERROR] ${msg}`, data),
+  }
+});
+```
+
+### 10. Page Joiners
+
+Control how text from different pages is stitched together:
+
+```typescript
+// Default: space ' ' joiner
+// Result: "...end of page 1. Start of page 2..."
+segmentPages(pages, { pageJoiner: 'space' });
+
+// Result: "...end of page 1.\nStart of page 2..."
+segmentPages(pages, { pageJoiner: 'newline' });
+```
+
+### 11. Breakpoint Preferences
+
+When a segment exceeds `maxPages` or `maxContentLength`, breakpoints split it at the "best" available match:
+
+```typescript
+{
+  maxPages: 1, // Minimum segment size (page span)
+  breakpoints: ['{{tarqim}}'],
+  
+  // 'longer' (default): Greedy. Finds the match furthest in the window.
+  // Result: Segments stay close to the max limit.
+  prefer: 'longer', 
+
+  // 'shorter': Conservative. Finds the first available match.
+  // Result: Segments split as early as possible.
+  prefer: 'shorter',
+}
+```
+
+### 12. Occurrence Filtering
 
 Control which matches to use:
 
@@ -831,7 +917,27 @@ const options: SegmentationOptions = {
   // How to join content across page boundaries in OUTPUT segments:
   // - 'space' (default): page boundaries become spaces
   // - 'newline': preserve page boundaries as newlines
-  pageJoiner: 'space',
+  pageJoiner: 'newline',
+
+  // Breakpoint preferences for resizing oversized segments:
+  // - 'longer' (default): maximizes segment size within limits
+  // - 'shorter': minimizes segment size (splits at first match)
+  prefer: 'longer',
+
+  // Post-structural limit: split if segment spans more than 2 pages
+  maxPages: 2,
+
+  // Post-structural limit: split if segment exceeds 5000 characters
+  maxContentLength: 5000,
+
+  // Enable match metadata in segments (meta.debug)
+  debug: true,
+
+  // Custom logger for tracing
+  logger: {
+    info: (m) => console.log(m),
+    warn: (m) => console.warn(m),
+  }
 };
 
 const segments: Segment[] = segmentPages(pages, options);
@@ -1057,6 +1163,8 @@ type SplitRule = {
   // Constraints
   min?: number;
   max?: number;
+  exclude?: (number | [number, number])[]; // Single page or [start, end] range
+  skipWhen?: string; // Regex pattern (tokens supported)
   meta?: Record<string, unknown>;
 };
 ```
