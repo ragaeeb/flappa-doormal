@@ -437,6 +437,8 @@ bunx biome lint .
 
 14. **Accidental File Overwrites**: Be extremely careful when using tools like `replace_file_content` with large ranges. Verify file integrity frequently (e.g., `git diff`) to catch accidental deletions of existing code or tests. Merging new tests into existing files is a high-risk operation for AI agents.
 
+15. **Invisible Unicode Marks Break Regex Anchors**: Arabic text often contains invisible bidirectional formatting marks like Left-to-Right Mark (`U+200E`), Right-to-Left Mark (`U+200F`), or Arabic Letter Mark (`U+061C`). These appear at line starts after `\n` but before visible characters, breaking `^` anchored patterns. Solution: include an optional zero-width character class prefix in line-start patterns: `^[\u200E\u200F\u061C\u200B\uFEFF]*(?:pattern)`. The library now handles this automatically in `buildLineStartsWithRegexSource` and `buildLineStartsAfterRegexSource`.
+
 ### Process Template (Multi-agent design review, TDD-first)
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:
