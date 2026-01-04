@@ -828,6 +828,35 @@ describe('segmenter', () => {
                 expect((result[0].meta as any)?._flappa?.breakpoint?.index).toBe(0);
                 expect((result[1].meta as any)?._flappa?.breakpoint?.index).toBe(0);
             });
+
+            it('should correctly split pages when pages have identical prefixes and duplicated content', () => {
+                // Regression test: when pages start with the same prefix AND that prefix
+                // appears multiple times within a page, the boundary detection was finding
+                // false matches, causing pages to be incorrectly merged.
+                // The bug requires: 1) identical prefixes, 2) duplicated prefix within page,
+                // 3) large enough content that false match is closer to expected boundary than true match
+                const sharedPrefix = 'الحمد لله رب العالمين ';
+                const filler = 'Lorem ipsum dolor sit amet. '.repeat(200); // ~6000 chars
+                const pages: Page[] = [
+                    // Page 0: long page with duplicated prefix in the middle
+                    { content: `${sharedPrefix}page0 start ${filler}${sharedPrefix}page0 end`, id: 0 },
+                    // Page 1: starts with the same prefix
+                    { content: `${sharedPrefix}page1 content`, id: 1 },
+                    // Page 2: starts with the same prefix
+                    { content: `${sharedPrefix}page2 content`, id: 2 },
+                ];
+
+                const result = segmentPages(pages, { breakpoints: [''], maxPages: 0 });
+
+                // With maxPages=0, each page should be its own segment
+                expect(result).toHaveLength(3);
+                expect(result[0]).toMatchObject({ from: 0 });
+                expect(result[0].to).toBeUndefined();
+                expect(result[1]).toMatchObject({ from: 1 });
+                expect(result[1].to).toBeUndefined();
+                expect(result[2]).toMatchObject({ from: 2 });
+                expect(result[2].to).toBeUndefined();
+            });
         });
     });
 

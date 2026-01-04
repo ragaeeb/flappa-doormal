@@ -335,19 +335,46 @@ export const findPageStartNearExpectedBoundary = (
             continue;
         }
 
+        // Collect all candidate positions within the search range
+        const candidates: { pos: number; isNewline: boolean }[] = [];
         let pos = remainingContent.indexOf(prefix, searchStart);
         while (pos !== -1 && pos <= searchEnd) {
-            // Prefer matches that look like page boundaries (preceded by whitespace).
-            if (pos > 0 && /\s/.test(remainingContent[pos - 1] ?? '')) {
-                return pos;
+            if (pos > 0) {
+                const charBefore = remainingContent[pos - 1];
+                if (charBefore === '\n') {
+                    // Page boundaries are marked by newlines - this is the strongest signal
+                    candidates.push({ isNewline: true, pos });
+                } else if (/\s/.test(charBefore)) {
+                    // Other whitespace is acceptable but less preferred
+                    candidates.push({ isNewline: false, pos });
+                }
             }
             pos = remainingContent.indexOf(prefix, pos + 1);
         }
 
-        // Fallback: take the last occurrence at or before approx (still anchored).
-        const last = remainingContent.lastIndexOf(prefix, approx);
-        if (last > 0) {
-            return last;
+        if (candidates.length > 0) {
+            // Prioritize: 1) newline-preceded matches, 2) closest to expected boundary
+            const newlineCandidates = candidates.filter((c) => c.isNewline);
+            const pool = newlineCandidates.length > 0 ? newlineCandidates : candidates;
+
+            // Select the candidate closest to the expected boundary
+            let bestCandidate = pool[0];
+            let bestDistance = Math.abs(pool[0].pos - expectedBoundary);
+            for (let i = 1; i < pool.length; i++) {
+                const dist = Math.abs(pool[i].pos - expectedBoundary);
+                if (dist < bestDistance) {
+                    bestDistance = dist;
+                    bestCandidate = pool[i];
+                }
+            }
+
+            // Only accept the match if it's within MAX_DEVIATION of the expected boundary.
+            // This prevents false positives when content is duplicated within pages.
+            const MAX_DEVIATION = 2000;
+            if (bestDistance <= MAX_DEVIATION) {
+                return bestCandidate.pos;
+            }
+            // If best match is too far, continue to try shorter prefixes or return -1
         }
     }
 
@@ -461,7 +488,6 @@ export const findPageIndexForPosition = (position: number, boundaryPositions: nu
 
     return fromIdx + left;
 };
-
 /**
  * Finds the end position of a breakpoint window inside `remainingContent`.
  *
@@ -494,6 +520,9 @@ export const findBreakpointWindowEndPosition = (
         normalizedPages,
     );
 
+    // Track the best expected boundary for fallback
+    let bestExpectedBoundary = remainingContent.length;
+
     // If we can't find the boundary for the desired next page, progressively fall back
     // to earlier page boundaries (smaller window), which is conservative but still correct.
     for (let nextIdx = maxNextIdx; nextIdx >= minNextIdx; nextIdx--) {
@@ -501,6 +530,11 @@ export const findBreakpointWindowEndPosition = (
             cumulativeOffsets[nextIdx] !== undefined && cumulativeOffsets[currentFromIdx] !== undefined
                 ? Math.max(0, cumulativeOffsets[nextIdx] - cumulativeOffsets[currentFromIdx] - startOffsetInCurrentPage)
                 : remainingContent.length;
+
+        // Keep track of the expected boundary for fallback
+        if (nextIdx === maxNextIdx) {
+            bestExpectedBoundary = expectedBoundary;
+        }
 
         const pos = findPageStartNearExpectedBoundary(
             remainingContent,
@@ -515,9 +549,10 @@ export const findBreakpointWindowEndPosition = (
         }
     }
 
-    // As a last resort (should be rare), treat the entire remaining content as the window.
-    // This may under-enforce maxPages if boundary detection fails, but avoids infinite loops.
-    return remainingContent.length;
+    // Fallback: Use the expected boundary from cumulative offsets.
+    // This is more accurate than returning remainingContent.length, which would
+    // merge all remaining pages into one segment.
+    return Math.min(bestExpectedBoundary, remainingContent.length);
 };
 
 /**
@@ -651,11 +686,16 @@ const handlePageBoundaryBreak = (
         const nextPageData = normalizedPages.get(pageIds[nextPageIdx]);
         if (nextPageData) {
             const pos = findNextPagePosition(remainingContent, nextPageData);
-            if (pos > 0) {
+            // Only trust findNextPagePosition if the result is reasonably close to windowEndPosition.
+            // This prevents incorrect breaks when content is duplicated within pages.
+            // Use a generous tolerance (2000 chars or 50% of windowEndPosition, whichever is larger).
+            const tolerance = Math.max(2000, windowEndPosition * 0.5);
+            if (pos > 0 && Math.abs(pos - windowEndPosition) <= tolerance) {
                 return Math.min(pos, windowEndPosition, remainingContent.length);
             }
         }
     }
+    // Fall back to windowEndPosition which is computed from cumulative offsets
     return Math.min(windowEndPosition, remainingContent.length);
 };
 
@@ -700,7 +740,6 @@ export const findBreakPosition = (
         // Handle page boundary (empty pattern)
         if (regex === null) {
             return {
-                breakpointIndex: i,
                 breakPos: handlePageBoundaryBreak(
                     remainingContent,
                     windowEndIdx,
@@ -709,6 +748,7 @@ export const findBreakPosition = (
                     pageIds,
                     normalizedPages,
                 ),
+                breakpointIndex: i,
                 rule,
             };
         }
@@ -717,7 +757,7 @@ export const findBreakPosition = (
         const windowContent = remainingContent.slice(0, Math.min(windowEndPosition, remainingContent.length));
         const breakPos = findPatternBreakPosition(windowContent, regex, prefer);
         if (breakPos > 0) {
-            return { breakpointIndex: i, breakPos, rule };
+            return { breakPos, breakpointIndex: i, rule };
         }
     }
 

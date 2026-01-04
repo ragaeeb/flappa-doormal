@@ -383,6 +383,8 @@ bunx biome lint .
 
 11. **Boundary-position algorithm improves page attribution**: Building a position map of page boundaries once per segment (O(n)) enables binary search for O(log n) lookups per piece. Key insight: when a segment starts mid-page (common after structural rules), expected boundary estimates must account for the offset into the starting page. Without this adjustment, position-based lookups can return the wrong page when pages have identical content prefixes.
 
+12. **Prefix matching fails with duplicated content**: When using `indexOf()` to find page boundaries by matching prefixes, false positives occur when pages have identical prefixes AND content is duplicated within pages. Solution: use cumulative byte offsets as the source of truth for expected boundaries, and only accept prefix matches within a strict deviation threshold (2000 chars). When content-based detection fails, fall back directly to the calculated offset rather than returning `remainingContent.length` (which merges all remaining pages).
+
 ### For Future AI Agents (Recovery + Repo gotchas)
 
 1. **`lineStartsAfter` vs `lineStartsWith` is not “cosmetic”**: `lineStartsAfter` changes output by stripping the matched marker via an internal `contentStartOffset` during segment construction. If a client used it by accident, you cannot reconstruct the exact stripped prefix from output alone without referencing the original pages and re-matching the marker.
@@ -538,4 +540,69 @@ Use analysis functions to discover patterns, then pass to `segmentPages()`:
 
 See README.md for complete examples.
 
+---
 
+## Debugging Page Boundary Detection (Added 2026-01-04)
+
+### The Problem: False Positives in Prefix Matching
+
+When using `maxPages=0` with empty breakpoint `['']` (page boundary breaks), the segmenter can fail when:
+1. **Pages have identical prefixes** - All pages start with the same text
+2. **Duplicated content within pages** - The same phrase appears multiple times in a single page
+3. **Long content** - Pages are thousands of characters, putting false matches closer to expected boundaries
+
+**Root cause**: The `findPageStartNearExpectedBoundary` function in `breakpoint-utils.ts` uses prefix matching to find page boundaries. When content is duplicated, it finds matches at incorrect positions within the current page instead of at the actual page boundary.
+
+### Key Functions in the Breakpoint Chain
+
+1. **`applyBreakpoints()`** - Entry point for breakpoint processing
+2. **`processOversizedSegment()`** - Iteratively breaks segments exceeding `maxPages`
+3. **`computeWindowEndIdx()`** - Calculates max page index for current window
+4. **`findBreakpointWindowEndPosition()`** - Finds the byte position where the window ends
+5. **`findPageStartNearExpectedBoundary()`** - Content-based search for page start position
+6. **`handlePageBoundaryBreak()`** - Handles empty pattern `''` (page boundary)
+7. **`buildCumulativeOffsets()`** - Pre-computes exact byte positions for each page
+
+### Debug Strategy
+
+1. **Check cumulative offsets first** - `buildCumulativeOffsets()` returns correct positions from `pages.join('\n')`
+2. **Trace `expectedBoundary`** - This is calculated correctly from cumulative offsets
+3. **Check `findPageStartNearExpectedBoundary` candidates** - The bug is usually here; it finds false matches
+4. **Verify the deviation check** - Matches must be within `MAX_DEVIATION` (2000 chars) of expected boundary
+
+### The Fix Applied
+
+Two changes in `breakpoint-utils.ts`:
+
+1. **`findPageStartNearExpectedBoundary`** - Added `MAX_DEVIATION` check to reject matches too far from expected boundary:
+   ```typescript
+   const MAX_DEVIATION = 2000;
+   if (bestDistance <= MAX_DEVIATION) {
+       return bestCandidate.pos;
+   }
+   // Continue trying shorter prefixes or return -1
+   ```
+
+2. **`findBreakpointWindowEndPosition`** - Changed fallback from `remainingContent.length` to `bestExpectedBoundary`:
+   ```typescript
+   // Before (bug): return remainingContent.length; // Merges all remaining pages!
+   // After (fix): return Math.min(bestExpectedBoundary, remainingContent.length);
+   ```
+
+### Test Case Pattern for This Bug
+
+```typescript
+it('should correctly split pages with identical prefixes and duplicated content', () => {
+    const sharedPrefix = 'SHARED PREFIX ';
+    const filler = 'Lorem ipsum. '.repeat(200); // ~6000 chars
+    const pages: Page[] = [
+        { content: sharedPrefix + 'start ' + filler + sharedPrefix + 'end', id: 0 },
+        { content: sharedPrefix + 'page1', id: 1 },
+        { content: sharedPrefix + 'page2', id: 2 },
+    ];
+    const result = segmentPages(pages, { breakpoints: [''], maxPages: 0 });
+    expect(result).toHaveLength(3); // Without fix: 2 or 1
+});
+```
+
+---
