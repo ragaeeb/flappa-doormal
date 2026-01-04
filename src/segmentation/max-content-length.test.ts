@@ -143,7 +143,104 @@ describe('Max Content Length Segmentation', () => {
 
         // Seg 1 gets P1 (100) + space (1) + 49 chars of P2 = 150 total.
         expect(result[0].content.length).toBe(150);
+        expect(result[0].to).toBe(1);
+    });
+
+    it('should split based on maxPages=1 when it is the stricter constraint', () => {
+        // Scenario 1: maxPages=1 is hit first.
+        // 3 pages, each 100 chars.
+        // maxPages: 1 (allows up to 2 pages joined).
+        // maxContentLength: 1000 (loose).
+        // Should split into [Page 0+1] and [Page 2].
+
+        const pages: Page[] = [
+            { content: 'a'.repeat(100), id: 0 },
+            { content: 'b'.repeat(100), id: 1 },
+            { content: 'c'.repeat(100), id: 2 },
+        ];
+
+        const result = segmentPages(pages, {
+            breakpoints: [''], // Page boundary breakpoint
+            maxContentLength: 1000,
+            maxPages: 1,
+            prefer: 'longer', // Greedy fill
+        });
+
+        // expected: 2 segments.
+        // Seg 1: 0-1 (span 1). Length 201 (with space joiner).
+        // Seg 2: 2 (span 0). Length 100.
+        expect(result.length).toBe(2);
+
+        // Check seg 1
         expect(result[0].from).toBe(0);
         expect(result[0].to).toBe(1);
+        expect(result[0].content.length).toBeGreaterThan(200);
+
+        // Check seg 2
+        expect(result[1].from).toBe(2);
+        expect(result[1].to).toBeUndefined(); // or 2
+    });
+
+    it('should split based on maxContentLength when it is the stricter constraint (with maxPages=1)', () => {
+        // Scenario 2: maxContentLength is hit first.
+        // 1 large page (300 chars).
+        // maxPages: 1 (allows chunking this page easily since span is 0).
+        // maxContentLength: 100 (strict).
+        // Should split every 100 chars.
+
+        const content = 'x'.repeat(300);
+        const pages: Page[] = [{ content, id: 0 }];
+
+        const result = segmentPages(pages, {
+            breakpoints: ['Z'], // Force split
+            maxContentLength: 100,
+            maxPages: 1,
+            prefer: 'longer',
+        });
+
+        expect(result.length).toBe(3);
+        expect(result[0].content.length).toBe(100);
+        expect(result[1].content.length).toBe(100);
+        expect(result[2].content.length).toBe(100);
+    });
+    it('should fall back to safe split (whitespace) instead of hard split when possible', () => {
+        // "aaaaa " (6 chars) repeated 20 times = 120 chars.
+        // maxContentLength: 100.
+        // Hard split at 100 would be index 100.
+        // 100 / 6 = 16.666.
+        // 16 * 6 = 96.
+        // At index 96, we have a space.
+        // Index 97='a', 98='a', 99='a', 100='a'.
+        // Hard split at 100 cuts 'aaaaa' at 4th char.
+        // Safe split should back up to space at 96.
+
+        const word = 'aaaaa ';
+        const content = word.repeat(20); // 120 chars
+        const pages: Page[] = [{ content, id: 0 }];
+
+        const result = segmentPages(pages, {
+            breakpoints: ['Z'], // No match
+            maxContentLength: 100,
+        });
+
+        // Expect split at 96 (length 96).
+        // BUT createSegment trims trailing whitespace!
+        // So the trailing space at index 95 is removed.
+        // Result length = 95.
+        expect(result[0].content.length).toBe(95);
+        expect(result[0].content.endsWith('a')).toBe(true);
+
+        // Second segment starts after the cut.
+        // Cut was at 96.
+        // Remaining content: chars 96..120. (24 chars).
+        // 96 is 'a' (start of next word).
+        // 24 chars left.
+        expect(result[1].content.length).toBe(23);
+    });
+    it('should throw an error if maxContentLength is less than 50', () => {
+        const pages: Page[] = [{ content: 'test', id: 0 }];
+        expect(() => {
+            segmentPages(pages, { maxContentLength: 49 });
+        }).toThrow(/maxContentLength must be at least 50 characters/);
     });
 });

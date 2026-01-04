@@ -7,7 +7,7 @@
  * @module breakpoint-utils
  */
 
-import type { Breakpoint, BreakpointRule, PageRange, Segment, Logger } from './types.js';
+import type { Breakpoint, BreakpointRule, Logger, PageRange, Segment } from './types.js';
 
 const WINDOW_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15] as const;
 // For page-join normalization we need to handle cases where only the very beginning of the next page
@@ -380,12 +380,12 @@ export const findPageStartNearExpectedBoundary = (
             }
 
             logger?.debug?.('[breakpoints] findPageStartNearExpectedBoundary: Rejected match exceeding deviation', {
-                targetPageIdx,
-                expectedBoundary,
                 bestDistance,
-                maxDeviation: MAX_DEVIATION,
+                expectedBoundary,
                 matchPos: bestCandidate.pos,
+                maxDeviation: MAX_DEVIATION,
                 prefixLength: len,
+                targetPageIdx,
             });
 
             // If best match is too far, continue to try shorter prefixes or return -1
@@ -782,3 +782,51 @@ export const findBreakPosition = (
 
     return null;
 };
+
+/**
+ * Searches backward from a target position to find a "safe" split point.
+ * A safe split point is after whitespace or punctuation.
+ *
+ * @param content The text content
+ * @param targetPosition The desired split position (hard limit)
+ * @param lookbackChars How far back to search for a safe break
+ * @returns The new split position (index), or -1 if no safe break found
+ */
+export const findSafeBreakPosition = (content: string, targetPosition: number, lookbackChars = 100): number => {
+    // 1. Sanity check bounds
+    const startSearch = Math.max(0, targetPosition - lookbackChars);
+
+    // 2. Iterate backward
+    for (let i = targetPosition - 1; i >= startSearch; i--) {
+        const char = content[i];
+
+        // Check for safe delimiter: Whitespace or Punctuation
+        // Includes Arabic comma (،), semicolon (؛), full stop (.), etc.
+        if (/[\s\n.,;!?؛،۔]/.test(char)) {
+            return i + 1;
+        }
+    }
+    return -1;
+};
+
+/**
+ * Ensures the position does not split a surrogate pair.
+ * If position is between High and Low surrogate, returns position - 1.
+ */
+export const adjustForSurrogate = (content: string, position: number): number => {
+    if (position <= 0 || position >= content.length) {
+        return position;
+    }
+
+    const high = content.charCodeAt(position - 1);
+    const low = content.charCodeAt(position);
+
+    // Check if previous char is High Surrogate (0xD800–0xDBFF)
+    // AND current char is Low Surrogate (0xDC00–0xDFFF)
+    if (high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff) {
+        return position - 1;
+    }
+
+    return position;
+};
+

@@ -374,6 +374,11 @@ const convertPageBreaks = (content: string, startOffset: number, pageBreaks: num
  */
 export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
     const { rules = [], breakpoints = [], prefer = 'longer', pageJoiner = 'space', logger, maxContentLength } = options;
+
+    if (maxContentLength && maxContentLength < 50) {
+        throw new Error(`maxContentLength must be at least 50 characters.`);
+    }
+
     // Default maxPages to 0 (single page) unless maxContentLength is provided
     const maxPages = options.maxPages ?? (maxContentLength ? Number.MAX_SAFE_INTEGER : 0);
 

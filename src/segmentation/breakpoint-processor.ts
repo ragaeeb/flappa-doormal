@@ -6,6 +6,7 @@
  */
 
 import {
+    adjustForSurrogate,
     applyPageJoinerBetweenPages,
     type BreakpointContext,
     buildBoundaryPositions,
@@ -15,6 +16,7 @@ import {
     findBreakpointWindowEndPosition,
     findExclusionBreakPosition,
     findPageIndexForPosition,
+    findSafeBreakPosition,
     hasExcludedPageInRange,
     type NormalizedPage,
 } from './breakpoint-utils.js';
@@ -173,6 +175,7 @@ const findBreakOffsetForWindow = (
     cumulativeOffsets: number[],
     normalizedPages: Map<number, NormalizedPage>,
     prefer: 'longer' | 'shorter',
+    maxContentLength?: number,
 ): { breakpointIndex?: number; breakOffset: number; breakpointRule?: { pattern: string } } => {
     const windowHasExclusions = hasAnyExclusionsInRange(expandedBreakpoints, pageIds, currentFromIdx, windowEndIdx);
 
@@ -207,6 +210,18 @@ const findBreakOffsetForWindow = (
             breakpointRule: patternMatch.rule,
         };
     }
+
+    // Fallback: If hitting maxContentLength, try to find a safe break position
+    if (maxContentLength && windowEndPosition === maxContentLength) {
+        const safeOffset = findSafeBreakPosition(remainingContent, windowEndPosition);
+        if (safeOffset !== -1) {
+            return { breakOffset: safeOffset };
+        }
+        // If no safe break (whitespace) found, ensure we don't split a surrogate pair
+        const adjustedOffset = adjustForSurrogate(remainingContent, windowEndPosition);
+        return { breakOffset: adjustedOffset };
+    }
+
     return { breakOffset: windowEndPosition };
 };
 
@@ -265,8 +280,10 @@ const processOversizedSegment = (
         toIdx,
     });
 
-    const maxIterations = 10000;
-    for (let i = 0; i < maxIterations && cursorPos < fullContent.length && currentFromIdx <= toIdx; i++) {
+    let i = 0;
+    // Removed fixed maxIterations cap to support large files; relying on progress/validation
+    while (cursorPos < fullContent.length && currentFromIdx <= toIdx) {
+        i++;
         const remainingContent = fullContent.slice(cursorPos);
         if (!remainingContent.trim()) {
             break;
@@ -328,13 +345,15 @@ const processOversizedSegment = (
             cumulativeOffsets,
             normalizedPages,
             prefer,
+            maxContentLength,
         );
+        const breakOffset = found.breakOffset;
 
         if (found.breakpointIndex !== undefined && found.breakpointRule) {
             lastBreakpoint = { breakpointIndex: found.breakpointIndex, rule: found.breakpointRule };
         }
 
-        const breakPos = cursorPos + found.breakOffset;
+        const breakPos = cursorPos + breakOffset;
         const pieceContent = fullContent.slice(cursorPos, breakPos).trim();
         const { actualEndIdx, actualStartIdx } = computePiecePages(
             cursorPos,

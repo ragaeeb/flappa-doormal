@@ -117,6 +117,8 @@ src/
    - `hasExcludedPageInRange()` - Check if range contains excluded pages
    - `findNextPagePosition()` - Find next page content position
    - `findPatternBreakPosition()` - Find pattern match by preference
+   - `findSafeBreakPosition()` - Search backward for a safe linguistic split point (whitespace/punctuation)
+   - `adjustForSurrogate()` - Ensure split position doesn't corrupt Unicode surrogate pairs
 
 10. **`types.ts`** - Type definitions
    - `Logger` interface - Optional logging for debugging
@@ -259,6 +261,19 @@ segmentPages(pages, {
 - **Recursive**: If split result still exceeds `maxPages`, breakpoints runs again
 
 > **Note**: Older per-rule span limiting approaches were removed in favor of post-processing `breakpoints`.
+
+### 5. Safety-Hardened Content Splitting (NEW)
+
+When using `maxContentLength`, the segmenter prevents text corruption through several layers of fallback logic.
+
+**Algorithm:**
+1. **Windowed Pattern Match**: Attempt to find a user-provided `breakpoint` pattern within the character window.
+2. **Safe Fallback (Linguistic)**: If no pattern matches, use `findSafeBreakPosition()` to search backward (100 chars) for whitespace or punctuation `[\s\n.,;!?؛،۔]`.
+3. **Safe Fallback (Technical)**: If still no safe break found, use `adjustForSurrogate()` to ensure the split doesn't fall between a High and Low Unicode surrogate pair.
+4. **Hard Split**: Only as a final resort is a character-exact split performed.
+
+**Progress Guarantee**:
+The loop in `processOversizedSegment` has been refactored to remove fixed iteration limits (e.g., 10k). Instead, it relies on strict `cursorPos` progression and input validation (`maxContentLength >= 50`) to support processing infinitely large content streams without risk of truncation.
 
 ## Design Decisions
 
@@ -413,6 +428,14 @@ bunx biome lint .
    - `src/recovery.ts` (recovery implementation)
 
 10. **Prefer library utilities for UI tasks**: Instead of re-implementing rule merging, validation, or token mapping in client code, use `optimizeRules`, `validateRules`/`formatValidationReport`, and `applyTokenMappings`. They handle edge cases (like duplicate patterns, regex safety, or diacritic handling) that ad-hoc implementations might miss.
+
+11. **Safety Fallback (Search-back)**: When forced to split at a hard character limit, searching backward for whitespace/punctuation (`[\s\n.,;!?؛،۔]`) prevents word-chopping and improves readability significantly.
+
+12. **Unicode Surrogate Safety**: Multi-byte characters (like Emojis) can be corrupted if split in the middle of a surrogate pair. Always use a helper like `adjustForSurrogate` to ensure the split point falls on a valid character boundary.
+
+13. **Recursion/Iteration Safety**: Using a progress-based guard (comparing `cursorPos` before and after loop iteration) is safer than fixed iteration limits for supporting arbitrary-sized content without truncation risks.
+
+14. **Accidental File Overwrites**: Be extremely careful when using tools like `replace_file_content` with large ranges. Verify file integrity frequently (e.g., `git diff`) to catch accidental deletions of existing code or tests. Merging new tests into existing files is a high-risk operation for AI agents.
 
 ### Process Template (Multi-agent design review, TDD-first)
 
@@ -606,3 +629,4 @@ it('should correctly split pages with identical prefixes and duplicated content'
 ```
 
 ---
+15. **Use Synthesized AI Reviews**: For complex safety features, getting reviews from multiple models (Claude, GPT, etc.) and synthesizing them into a single action plan (see `docs/reviews/max-content-length-review-synthesis.md`) revealed critical edge cases like Arabic diacritic corruption and surrogate pair safety that a single model might miss.
