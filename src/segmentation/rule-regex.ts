@@ -106,7 +106,9 @@ export const buildLineStartsAfterRegexSource = (
     // can compute marker length. IMPORTANT: this internal group is not a "user capture", so it must
     // NOT be included in `captureNames` (otherwise it leaks into segment.meta as `content`).
     const contentCapture = capturePrefix ? `(?<${capturePrefix}__content>.*)` : '(.*)';
-    return { captureNames, regex: `^(?:${union})${contentCapture}` };
+    // Allow zero-width formatters (LRM, RLM, ALM, etc.) at line start before matching content.
+    const zeroWidthPrefix = '[\\u200E\\u200F\\u061C\\u200B\\uFEFF]*';
+    return { captureNames, regex: `^${zeroWidthPrefix}(?:${union})${contentCapture}` };
 };
 
 export const buildLineStartsWithRegexSource = (
@@ -117,7 +119,11 @@ export const buildLineStartsWithRegexSource = (
     const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
     const union = processed.map((p) => p.pattern).join('|');
     const captureNames = processed.flatMap((p) => p.captureNames);
-    return { captureNames, regex: `^(?:${union})` };
+    // Allow zero-width formatters (LRM, RLM, ALM, etc.) at line start before matching content.
+    // These invisible Unicode characters are common in Arabic text and shouldn't affect semantics.
+    // U+200E (LRM), U+200F (RLM), U+061C (ALM), U+200B (ZWSP), U+FEFF (BOM/ZWNBSP)
+    const zeroWidthPrefix = '[\\u200E\\u200F\\u061C\\u200B\\uFEFF]*';
+    return { captureNames, regex: `^${zeroWidthPrefix}(?:${union})` };
 };
 
 export const buildLineEndsWithRegexSource = (

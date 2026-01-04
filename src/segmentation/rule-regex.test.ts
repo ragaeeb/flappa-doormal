@@ -54,9 +54,10 @@ describe('rule-regex', () => {
     });
 
     describe('buildLineStartsWithRegexSource', () => {
-        it('should build ^(?:...) source', () => {
+        it('should build ^[zeroWidthPrefix](?:...) source', () => {
             const { regex } = buildLineStartsWithRegexSource(['## '], false);
-            expect(regex.startsWith('^(?:')).toBe(true);
+            // Should start with zero-width prefix followed by pattern group
+            expect(regex).toMatch(/^\^\[.*\]\*\(\?:/);
         });
     });
 
@@ -125,8 +126,8 @@ describe('rule-regex', () => {
         it('should not auto-enable fuzzy for non-fuzzy-default tokens', () => {
             // {{raqms}} is not a fuzzy-default token
             const rr = buildRuleRegex({ lineStartsWith: ['{{raqms}}'], split: 'at' } as never);
-            // Pattern should be exact Unicode range, not fuzzy-expanded
-            expect(rr.regex.source).toBe('^(?:[\\u0660-\\u0669]+)');
+            // Pattern should be exact Unicode range, not fuzzy-expanded (with zero-width prefix)
+            expect(rr.regex.source).toBe('^[\\u200E\\u200F\\u061C\\u200B\\uFEFF]*(?:[\\u0660-\\u0669]+)');
         });
     });
 });
