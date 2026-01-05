@@ -16,13 +16,10 @@ import {
     findBreakPosition,
     findBreakpointWindowEndPosition,
     findExclusionBreakPosition,
-    findNextPageStartIdx,
     findPageIndexForPosition,
     findSafeBreakPosition,
     hasExcludedPageInRange,
-    isPageExcludedForBreakpoint,
     type NormalizedPage,
-    selectBreakPosition,
 } from './breakpoint-utils.js';
 import { buildBreakpointDebugPatch, mergeDebugIntoMeta } from './debug-meta.js';
 import type { Breakpoint, Logger, Page, Segment } from './types.js';
@@ -241,6 +238,243 @@ const skipWhitespace = (content: string, startPos: number): number => {
 };
 
 /**
+ * Validates that cumulative offsets match actual content length within a tolerance.
+ * Required to detect if structural rules (like `lineStartsAfter`) have stripped content
+ * which would make offset-based calculations inaccurate.
+ */
+const checkFastPathAlignment = (
+    cumulativeOffsets: number[],
+    fullContent: string,
+    fromIdx: number,
+    toIdx: number,
+    pageCount: number,
+    logger?: Logger,
+): boolean => {
+    const expectedLength = (cumulativeOffsets[toIdx + 1] ?? fullContent.length) - (cumulativeOffsets[fromIdx] ?? 0);
+    const actualLength = fullContent.length;
+    const driftTolerance = Math.max(100, actualLength * 0.01); // 1% or 100 chars tolerance
+
+    const isAligned = Math.abs(expectedLength - actualLength) <= driftTolerance;
+
+    if (!isAligned && pageCount >= FAST_PATH_THRESHOLD) {
+        logger?.warn?.('[breakpoints] Offset drift detected in fast-path candidate, falling back to slow path', {
+            actualLength,
+            drift: Math.abs(expectedLength - actualLength),
+            expectedLength,
+            pageCount,
+        });
+    }
+    return isAligned;
+};
+
+/**
+ * Handles the special optimized case for maxPages=0 (1 page per segment).
+ * This is O(n) and safer than offset arithmetic as it uses source pages directly.
+ */
+const processTrivialFastPath = (
+    fromIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    pageCount: number,
+    logger?: Logger,
+): Segment[] => {
+    logger?.debug?.('[breakpoints] Using trivial per-page fast-path (maxPages=0)', { fromIdx, pageCount, toIdx });
+    const result: Segment[] = [];
+    for (let i = fromIdx; i <= toIdx; i++) {
+        const pageData = normalizedPages.get(pageIds[i]);
+        if (pageData?.content.trim()) {
+            const seg = createSegment(pageData.content.trim(), pageIds[i], undefined, undefined);
+            if (seg) {
+                result.push(seg);
+            }
+        }
+    }
+    return result;
+};
+
+/**
+ * Handles fast-path segmentation for maxPages > 0 using cumulative offsets.
+ * Avoids O(n²) string searching but requires accurate offsets.
+ */
+const processOffsetFastPath = (
+    fullContent: string,
+    fromIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    cumulativeOffsets: number[],
+    maxPages: number,
+    pageJoiner: 'space' | 'newline',
+    logger?: Logger,
+): Segment[] => {
+    const result: Segment[] = [];
+    const effectiveMaxPages = maxPages + 1;
+    const pageCount = toIdx - fromIdx + 1;
+
+    logger?.debug?.('[breakpoints] Using offset-based fast-path for large segment', {
+        effectiveMaxPages,
+        fromIdx,
+        maxPages,
+        pageCount,
+        toIdx,
+    });
+
+    const baseOffset = cumulativeOffsets[fromIdx] ?? 0;
+
+    for (let segStart = fromIdx; segStart <= toIdx; segStart += effectiveMaxPages) {
+        const segEnd = Math.min(segStart + effectiveMaxPages - 1, toIdx);
+
+        const startOffset = Math.max(0, (cumulativeOffsets[segStart] ?? 0) - baseOffset);
+        const endOffset =
+            segEnd < toIdx
+                ? Math.max(0, (cumulativeOffsets[segEnd + 1] ?? fullContent.length) - baseOffset)
+                : fullContent.length;
+
+        const rawContent = fullContent.slice(startOffset, endOffset).trim();
+        if (rawContent) {
+            // Normalize page joins to match slow-path behavior
+            const normalizedContent = applyPageJoinerBetweenPages(
+                rawContent,
+                segStart,
+                segEnd,
+                pageIds,
+                normalizedPages,
+                pageJoiner,
+            );
+
+            const seg: Segment = {
+                content: normalizedContent,
+                from: pageIds[segStart],
+            };
+            if (segEnd > segStart) {
+                seg.to = pageIds[segEnd];
+            }
+            result.push(seg);
+        }
+    }
+    return result;
+};
+
+/**
+ * Checks if the remaining content fits within paged/length limits.
+ * If so, pushes the final segment and returns true.
+ */
+const handleOversizedSegmentFit = (
+    remainingContent: string,
+    currentFromIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    expandedBreakpoints: Array<{ excludeSet: Set<number> }>,
+    maxPages: number,
+    maxContentLength: number | undefined,
+    isFirstPiece: boolean,
+    debugMetaKey: string | undefined,
+    originalMeta: Segment['meta'] | undefined,
+    lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null,
+    result: Segment[],
+): boolean => {
+    const remainingSpan = computeRemainingSpan(currentFromIdx, toIdx, pageIds);
+    const remainingHasExclusions = hasAnyExclusionsInRange(expandedBreakpoints, pageIds, currentFromIdx, toIdx);
+
+    const fitsInPages = remainingSpan <= maxPages;
+    const fitsInLength = !maxContentLength || remainingContent.length <= maxContentLength;
+
+    if (fitsInPages && fitsInLength && !remainingHasExclusions) {
+        const includeMeta = isFirstPiece || Boolean(debugMetaKey);
+        const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, originalMeta, lastBreakpoint);
+        const finalSeg = createFinalSegment(remainingContent, currentFromIdx, toIdx, pageIds, meta, includeMeta);
+        if (finalSeg) {
+            result.push(finalSeg);
+        }
+        return true;
+    }
+    return false;
+};
+
+/**
+ * Builds metadata for a segment piece, optionally including debug info.
+ */
+const getSegmentMetaWithDebug = (
+    isFirstPiece: boolean,
+    debugMetaKey: string | undefined,
+    originalMeta: Segment['meta'] | undefined,
+    lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null,
+): Segment['meta'] | undefined => {
+    const includeMeta = isFirstPiece || Boolean(debugMetaKey);
+    if (!includeMeta) {
+        return undefined;
+    }
+
+    if (debugMetaKey && lastBreakpoint) {
+        return mergeDebugIntoMeta(
+            isFirstPiece ? originalMeta : undefined,
+            debugMetaKey,
+            buildBreakpointDebugPatch(lastBreakpoint.breakpointIndex, lastBreakpoint.rule as any),
+        );
+    }
+    return isFirstPiece ? originalMeta : undefined;
+};
+
+/**
+ * Calculates window end position, capped by maxContentLength if present.
+ */
+const getWindowEndPosition = (
+    remainingContent: string,
+    currentFromIdx: number,
+    windowEndIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    cumulativeOffsets: number[],
+    maxContentLength: number | undefined,
+    logger?: Logger,
+): number => {
+    let windowEndPosition = findBreakpointWindowEndPosition(
+        remainingContent,
+        currentFromIdx,
+        windowEndIdx,
+        toIdx,
+        pageIds,
+        normalizedPages,
+        cumulativeOffsets,
+        logger,
+    );
+
+    if (maxContentLength && maxContentLength < windowEndPosition) {
+        windowEndPosition = maxContentLength;
+    }
+    return windowEndPosition;
+};
+
+/**
+ * Advances cursorPos and currentFromIdx for the next iteration.
+ */
+const advanceCursorAndIndex = (
+    fullContent: string,
+    breakPos: number,
+    actualEndIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+): { currentFromIdx: number; cursorPos: number } => {
+    const nextCursorPos = skipWhitespace(fullContent, breakPos);
+    const nextFromIdx = computeNextFromIdx(
+        fullContent.slice(nextCursorPos),
+        actualEndIdx,
+        toIdx,
+        pageIds,
+        normalizedPages,
+    );
+    return { currentFromIdx: nextFromIdx, cursorPos: nextCursorPos };
+};
+
+/**
+ * Applies breakpoints to oversized segments.
+ *
+ * Note: This is an internal engine used by `segmentPages()`.
+ */
+/**
  * Processes an oversized segment by iterating through the content and
  * breaking it into smaller pieces that fit within maxPages constraints.
  *
@@ -265,90 +499,31 @@ const processOversizedSegment = (
     const fullContent = segment.content;
     const pageCount = toIdx - fromIdx + 1;
 
-    // FAST PATH: For large segments (1000+ pages), use cumulative offsets directly
-    // to avoid O(n²) iterative processing. This applies to any maxPages value (0, 1, 2, etc.)
-    // when we're splitting a very large segment into many pieces.
-    // Skip if debugMetaKey is set (need proper provenance) or maxContentLength is set (need character-based splitting).
-    const effectiveMaxPages = maxPages + 1; // maxPages=0 means 1 page per segment, maxPages=1 means 2 pages, etc.
+    // FAST PATH LOGIC
+    // -------------------------------------------------------------------------
+    // For large segments (1000+ pages), use cumulative offsets directly to avoid O(n²) processing.
+    // We skip this optimization if:
+    // 1. debugMetaKey is set (we need full provenance)
+    // 2. maxContentLength is set (requires character-accurate checks)
+    // 3. Offset drift is detected (structural rules modified content length)
 
-    // Validate offset alignment before taking fast path to prevent drift from structural rules (e.g. lineStartsAfter)
-    // If structural rules stripped content, actual length will be less than expected offset difference.
-    const expectedLength = (cumulativeOffsets[toIdx + 1] ?? fullContent.length) - (cumulativeOffsets[fromIdx] ?? 0);
-    const actualLength = fullContent.length;
-    const driftTolerance = Math.max(100, actualLength * 0.01); // 1% or 100 chars tolerance
-
-    const isAligned = Math.abs(expectedLength - actualLength) <= driftTolerance;
-
-    if (!isAligned && pageCount >= FAST_PATH_THRESHOLD) {
-        logger?.warn?.('[breakpoints] Offset drift detected in fast-path candidate, falling back to slow path', {
-            actualLength,
-            drift: Math.abs(expectedLength - actualLength),
-            expectedLength,
-            pageCount,
-        });
-    }
+    const isAligned = checkFastPathAlignment(cumulativeOffsets, fullContent, fromIdx, toIdx, pageCount, logger);
 
     if (pageCount >= FAST_PATH_THRESHOLD && isAligned && !maxContentLength && !debugMetaKey) {
-        // Special case: maxPages=0 means 1 page per segment (trivial slicing)
-        // This is O(n) and safest as it uses per-page content directly, avoiding any potential joiner issues.
         if (maxPages === 0) {
-            logger?.debug?.('[breakpoints] Using trivial per-page fast-path (maxPages=0)', {
-                fromIdx,
-                pageCount,
-                toIdx,
-            });
-            for (let i = fromIdx; i <= toIdx; i++) {
-                const pageData = normalizedPages.get(pageIds[i]);
-                if (pageData?.content.trim()) {
-                    result.push(createSegment(pageData.content.trim(), pageIds[i], undefined, undefined));
-                }
-            }
-            return result;
+            return processTrivialFastPath(fromIdx, toIdx, pageIds, normalizedPages, pageCount, logger);
         }
-
-        logger?.debug?.('[breakpoints] Using offset-based fast-path for large segment', {
-            effectiveMaxPages,
+        return processOffsetFastPath(
+            fullContent,
             fromIdx,
-            maxPages,
-            pageCount,
             toIdx,
-        });
-
-        const baseOffset = cumulativeOffsets[fromIdx] ?? 0;
-
-        // Create segments in chunks of effectiveMaxPages
-        for (let segStart = fromIdx; segStart <= toIdx; segStart += effectiveMaxPages) {
-            const segEnd = Math.min(segStart + effectiveMaxPages - 1, toIdx);
-
-            const startOffset = Math.max(0, (cumulativeOffsets[segStart] ?? 0) - baseOffset);
-            const endOffset =
-                segEnd < toIdx
-                    ? Math.max(0, (cumulativeOffsets[segEnd + 1] ?? fullContent.length) - baseOffset)
-                    : fullContent.length;
-
-            const rawContent = fullContent.slice(startOffset, endOffset).trim();
-            if (rawContent) {
-                // Normalize page joins to match slow-path behavior (e.g. converting newlines to spaces)
-                const normalizedContent = applyPageJoinerBetweenPages(
-                    rawContent,
-                    segStart,
-                    segEnd,
-                    pageIds,
-                    normalizedPages,
-                    pageJoiner,
-                );
-
-                const seg: Segment = {
-                    content: normalizedContent,
-                    from: pageIds[segStart],
-                };
-                if (segEnd > segStart) {
-                    seg.to = pageIds[segEnd];
-                }
-                result.push(seg);
-            }
-        }
-        return result;
+            pageIds,
+            normalizedPages,
+            cumulativeOffsets,
+            maxPages,
+            pageJoiner,
+            logger,
+        );
     }
 
     // SLOW PATH: Iterative breakpoint processing
@@ -497,124 +672,6 @@ const processOversizedSegment = (
     return result;
 };
 
-/**
- * Checks if the remaining content fits within paged/length limits.
- * If so, pushes the final segment and returns true.
- */
-const handleOversizedSegmentFit = (
-    remainingContent: string,
-    currentFromIdx: number,
-    toIdx: number,
-    pageIds: number[],
-    expandedBreakpoints: Array<{ excludeSet: Set<number> }>,
-    maxPages: number,
-    maxContentLength: number | undefined,
-    isFirstPiece: boolean,
-    debugMetaKey: string | undefined,
-    originalMeta: Segment['meta'] | undefined,
-    lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null,
-    result: Segment[],
-): boolean => {
-    const remainingSpan = computeRemainingSpan(currentFromIdx, toIdx, pageIds);
-    const remainingHasExclusions = hasAnyExclusionsInRange(expandedBreakpoints, pageIds, currentFromIdx, toIdx);
-
-    const fitsInPages = remainingSpan <= maxPages;
-    const fitsInLength = !maxContentLength || remainingContent.length <= maxContentLength;
-
-    if (fitsInPages && fitsInLength && !remainingHasExclusions) {
-        const includeMeta = isFirstPiece || Boolean(debugMetaKey);
-        const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, originalMeta, lastBreakpoint);
-        const finalSeg = createFinalSegment(remainingContent, currentFromIdx, toIdx, pageIds, meta, includeMeta);
-        if (finalSeg) {
-            result.push(finalSeg);
-        }
-        return true;
-    }
-    return false;
-};
-
-/**
- * Builds metadata for a segment piece, optionally including debug info.
- */
-const getSegmentMetaWithDebug = (
-    isFirstPiece: boolean,
-    debugMetaKey: string | undefined,
-    originalMeta: Segment['meta'] | undefined,
-    lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null,
-): Segment['meta'] | undefined => {
-    const includeMeta = isFirstPiece || Boolean(debugMetaKey);
-    if (!includeMeta) {
-        return undefined;
-    }
-
-    if (debugMetaKey && lastBreakpoint) {
-        return mergeDebugIntoMeta(
-            isFirstPiece ? originalMeta : undefined,
-            debugMetaKey,
-            buildBreakpointDebugPatch(lastBreakpoint.breakpointIndex, lastBreakpoint.rule as any),
-        );
-    }
-    return isFirstPiece ? originalMeta : undefined;
-};
-
-/**
- * Calculates window end position, capped by maxContentLength if present.
- */
-const getWindowEndPosition = (
-    remainingContent: string,
-    currentFromIdx: number,
-    windowEndIdx: number,
-    toIdx: number,
-    pageIds: number[],
-    normalizedPages: Map<number, NormalizedPage>,
-    cumulativeOffsets: number[],
-    maxContentLength: number | undefined,
-    logger?: Logger,
-): number => {
-    let windowEndPosition = findBreakpointWindowEndPosition(
-        remainingContent,
-        currentFromIdx,
-        windowEndIdx,
-        toIdx,
-        pageIds,
-        normalizedPages,
-        cumulativeOffsets,
-        logger,
-    );
-
-    if (maxContentLength && maxContentLength < windowEndPosition) {
-        windowEndPosition = maxContentLength;
-    }
-    return windowEndPosition;
-};
-
-/**
- * Advances cursorPos and currentFromIdx for the next iteration.
- */
-const advanceCursorAndIndex = (
-    fullContent: string,
-    breakPos: number,
-    actualEndIdx: number,
-    toIdx: number,
-    pageIds: number[],
-    normalizedPages: Map<number, NormalizedPage>,
-): { currentFromIdx: number; cursorPos: number } => {
-    const nextCursorPos = skipWhitespace(fullContent, breakPos);
-    const nextFromIdx = computeNextFromIdx(
-        fullContent.slice(nextCursorPos),
-        actualEndIdx,
-        toIdx,
-        pageIds,
-        normalizedPages,
-    );
-    return { currentFromIdx: nextFromIdx, cursorPos: nextCursorPos };
-};
-
-/**
- * Applies breakpoints to oversized segments.
- *
- * Note: This is an internal engine used by `segmentPages()`.
- */
 export const applyBreakpoints = (
     segments: Segment[],
     pages: Page[],

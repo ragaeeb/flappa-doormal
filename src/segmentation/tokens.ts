@@ -233,6 +233,20 @@ const BASE_TOKENS: Record<string, string> = {
     naql: ['حدثني', 'وأخبرنا', 'حدثنا', 'سمعت', 'أنبأنا', 'وحدثنا', 'أخبرنا', 'وحدثني', 'وحدثنيه'].join('|'),
 
     /**
+     * Single ASCII digit - matches one digit (0-9).
+     *
+     * @example '{{num}}' matches '5' in '5 - '
+     */
+    num: '\\d',
+
+    /**
+     * One or more ASCII digits - matches digit sequences (0-9)+.
+     *
+     * @example '{{nums}}' matches '123' in '123 - '
+     */
+    nums: '\\d+',
+
+    /**
      * Single Arabic-Indic digit - matches one digit (٠-٩).
      *
      * Unicode range: U+0660 to U+0669 (Arabic-Indic digits).

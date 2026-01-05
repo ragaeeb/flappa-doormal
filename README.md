@@ -102,6 +102,8 @@ Replace regex with readable tokens:
 |-------|---------|------------------|
 | `{{raqms}}` | Arabic-Indic digits | `[\\u0660-\\u0669]+` |
 | `{{raqm}}` | Single Arabic digit | `[\\u0660-\\u0669]` |
+| `{{nums}}` | ASCII digits | `\\d+` |
+| `{{num}}` | Single ASCII digit | `\\d` |
 | `{{dash}}` | Dash variants | `[-–—ـ]` |
 | `{{harf}}` | Arabic letter | `[أ-ي]` |
 | `{{harfs}}` | Single-letter codes separated by spaces | `[أ-ي](?:\s+[أ-ي])*` |
@@ -776,6 +778,8 @@ Available tokens you may use in templates:
 - {{naql}}      (حدثنا/أخبرنا/... narration phrases)
 - {{raqm}}      (single Arabic-Indic digit)
 - {{raqms}}     (Arabic-Indic digits)
+- {{num}}       (single ASCII digit)
+- {{nums}}      (ASCII digits)
 - {{dash}}      (dash variants)
 - {{tarqim}}    (punctuation [. ! ? ؟ ؛])
 - {{harf}}      (Arabic letter)

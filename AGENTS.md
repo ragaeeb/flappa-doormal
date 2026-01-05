@@ -400,6 +400,8 @@ bunx biome lint .
 
 12. **Prefix matching fails with duplicated content**: When using `indexOf()` to find page boundaries by matching prefixes, false positives occur when pages have identical prefixes AND content is duplicated within pages. Solution: use cumulative byte offsets as the source of truth for expected boundaries, and only accept prefix matches within a strict deviation threshold (2000 chars). When content-based detection fails, fall back directly to the calculated offset rather than returning `remainingContent.length` (which merges all remaining pages).
 
+13. **ASCII vs Arabic-Indic Numerals**: While most classical Arabic texts use Arabic-Indic digits (`٠-٩`), modern digitizers often mix them with ASCII digits (`0-9`). Providing separate tokens (`{{raqms}}` for Arabic and `{{nums}}` for ASCII) allows better precision in rule definitions while keeping patterns readable. Always check which digit set is used in the source text before authoring rules.
+
 ### For Future AI Agents (Recovery + Repo gotchas)
 
 1. **`lineStartsAfter` vs `lineStartsWith` is not “cosmetic”**: `lineStartsAfter` changes output by stripping the matched marker via an internal `contentStartOffset` during segment construction. If a client used it by accident, you cannot reconstruct the exact stripped prefix from output alone without referencing the original pages and re-matching the marker.
@@ -469,6 +471,8 @@ If you want to repeat the “write a plan → get multiple AI critiques → synt
 | `{{kitab}}` | "كتاب" (book) | كتاب الصلاة |
 | `{{raqm}}` | Single Arabic-Indic numeral | ٥ |
 | `{{raqms}}` | Multiple Arabic-Indic numerals | ٧٥٦٣ |
+| `{{num}}` | Single ASCII numeral | 5 |
+| `{{nums}}` | Multiple ASCII numerals | 123 |
 | `{{raqms:num}}` | Numerals with named capture | `meta.num = "٧٥٦٣"` |
 | `{{dash}}` | Various dash characters | - – — ـ |
 | `{{harfs}}` | Single-letter codes separated by spaces | `د ت س ي ق` |
