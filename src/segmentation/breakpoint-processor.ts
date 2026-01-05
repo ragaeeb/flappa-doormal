@@ -277,6 +277,8 @@ const processTrivialFastPath = (
     pageIds: number[],
     normalizedPages: Map<number, NormalizedPage>,
     pageCount: number,
+    originalMeta?: Segment['meta'],
+    debugMetaKey?: string,
     logger?: Logger,
 ): Segment[] => {
     logger?.debug?.('[breakpoints] Using trivial per-page fast-path (maxPages=0)', { fromIdx, pageCount, toIdx });
@@ -284,7 +286,9 @@ const processTrivialFastPath = (
     for (let i = fromIdx; i <= toIdx; i++) {
         const pageData = normalizedPages.get(pageIds[i]);
         if (pageData?.content.trim()) {
-            const seg = createSegment(pageData.content.trim(), pageIds[i], undefined, undefined);
+            const isFirstPiece = i === fromIdx;
+            const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, originalMeta, null);
+            const seg = createSegment(pageData.content.trim(), pageIds[i], undefined, meta);
             if (seg) {
                 result.push(seg);
             }
@@ -302,10 +306,10 @@ const processOffsetFastPath = (
     fromIdx: number,
     toIdx: number,
     pageIds: number[],
-    normalizedPages: Map<number, NormalizedPage>,
     cumulativeOffsets: number[],
     maxPages: number,
-    pageJoiner: 'space' | 'newline',
+    originalMeta?: Segment['meta'],
+    debugMetaKey?: string,
     logger?: Logger,
 ): Segment[] => {
     const result: Segment[] = [];
@@ -333,22 +337,18 @@ const processOffsetFastPath = (
 
         const rawContent = fullContent.slice(startOffset, endOffset).trim();
         if (rawContent) {
-            // Normalize page joins to match slow-path behavior
-            const normalizedContent = applyPageJoinerBetweenPages(
-                rawContent,
-                segStart,
-                segEnd,
-                pageIds,
-                normalizedPages,
-                pageJoiner,
-            );
+            const isFirstPiece = segStart === fromIdx;
+            const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, originalMeta, null);
 
             const seg: Segment = {
-                content: normalizedContent,
+                content: rawContent,
                 from: pageIds[segStart],
             };
             if (segEnd > segStart) {
                 seg.to = pageIds[segEnd];
+            }
+            if (meta) {
+                seg.meta = meta;
             }
             result.push(seg);
         }
@@ -491,7 +491,6 @@ const processOversizedSegment = (
     maxPages: number,
     prefer: 'longer' | 'shorter',
     logger?: Logger,
-    pageJoiner: 'space' | 'newline' = 'space',
     debugMetaKey?: string,
     maxContentLength?: number,
 ) => {
@@ -511,17 +510,26 @@ const processOversizedSegment = (
 
     if (pageCount >= FAST_PATH_THRESHOLD && isAligned && !maxContentLength && !debugMetaKey) {
         if (maxPages === 0) {
-            return processTrivialFastPath(fromIdx, toIdx, pageIds, normalizedPages, pageCount, logger);
+            return processTrivialFastPath(
+                fromIdx,
+                toIdx,
+                pageIds,
+                normalizedPages,
+                pageCount,
+                segment.meta,
+                debugMetaKey,
+                logger,
+            );
         }
         return processOffsetFastPath(
             fullContent,
             fromIdx,
             toIdx,
             pageIds,
-            normalizedPages,
             cumulativeOffsets,
             maxPages,
-            pageJoiner,
+            segment.meta,
+            debugMetaKey,
             logger,
         );
     }
@@ -737,7 +745,6 @@ export const applyBreakpoints = (
             maxPages,
             prefer,
             logger,
-            pageJoiner,
             debugMetaKey,
             maxContentLength,
         );
