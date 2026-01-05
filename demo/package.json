@@ -1,6 +1,6 @@
 {
     "dependencies": {
-        "flappa-doormal": "2.11.2"
+        "flappa-doormal": "2.11.3"
     },
     "description": "Interactive demo for the flappa-doormal Arabic text segmentation library",
     "devDependencies": {

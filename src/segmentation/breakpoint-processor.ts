@@ -460,7 +460,7 @@ const advanceCursorAndIndex = (
 ): { currentFromIdx: number; cursorPos: number } => {
     const nextCursorPos = skipWhitespace(fullContent, breakPos);
     const nextFromIdx = computeNextFromIdx(
-        fullContent.slice(nextCursorPos),
+        fullContent.slice(nextCursorPos, nextCursorPos + 500), // Optimization: only need prefix
         actualEndIdx,
         toIdx,
         pageIds,
@@ -571,7 +571,12 @@ const processOversizedSegment = (
     const MAX_SAFE_ITERATIONS = 100_000;
     while (cursorPos < fullContent.length && currentFromIdx <= toIdx && i < MAX_SAFE_ITERATIONS) {
         i++;
-        const remainingContent = fullContent.slice(cursorPos);
+        // Optimization: slice only what's needed to avoid O(N^2) copying for large content
+        const safeSliceLen = maxContentLength ? maxContentLength + 4000 : undefined;
+        const remainingContent = safeSliceLen
+            ? fullContent.slice(cursorPos, cursorPos + safeSliceLen)
+            : fullContent.slice(cursorPos);
+
         if (!remainingContent.trim()) {
             break;
         }

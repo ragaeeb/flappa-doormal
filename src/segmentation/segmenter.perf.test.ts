@@ -138,6 +138,19 @@ perfDescribe('Performance Tests', () => {
         runPerfTest('maxPages=1', { breakpoints: [''], maxPages: 1, rules: [] }, 500);
         runPerfTest('maxPages=2', { breakpoints: [''], maxPages: 2, rules: [] }, 500);
         runPerfTest('maxPages=20', { breakpoints: [''], maxPages: 20, rules: [] }, 500);
+
+        // Regression test for slow segmentation with maxPages=0 and small maxContentLength
+        // This forces iterative processing on a large combined segment
+        runPerfTest(
+            'maxPages=0 with maxContentLength=2000 (force iterative)',
+            {
+                breakpoints: [''],
+                maxContentLength: 2000,
+                maxPages: 0,
+                rules: [],
+            },
+            5000, // Give it some time initially, but it should be faster than "lock up"
+        );
     });
 
     // ─────────────────────────────────────────────────────────────
