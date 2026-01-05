@@ -5,6 +5,7 @@
  * and allow unit testing of tricky edge cases (window sizing, next-page advancement, etc.).
  */
 
+import { FAST_PATH_THRESHOLD } from './breakpoint-constants.js';
 import {
     adjustForSurrogate,
     applyPageJoinerBetweenPages,
@@ -15,10 +16,13 @@ import {
     findBreakPosition,
     findBreakpointWindowEndPosition,
     findExclusionBreakPosition,
+    findNextPageStartIdx,
     findPageIndexForPosition,
     findSafeBreakPosition,
     hasExcludedPageInRange,
+    isPageExcludedForBreakpoint,
     type NormalizedPage,
+    selectBreakPosition,
 } from './breakpoint-utils.js';
 import { buildBreakpointDebugPatch, mergeDebugIntoMeta } from './debug-meta.js';
 import type { Breakpoint, Logger, Page, Segment } from './types.js';
@@ -264,7 +268,6 @@ const processOversizedSegment = (
     // to avoid O(n²) iterative processing. This applies to any maxPages value (0, 1, 2, etc.)
     // when we're splitting a very large segment into many pieces.
     // Skip if debugMetaKey is set (need proper provenance) or maxContentLength is set (need character-based splitting).
-    const FAST_PATH_THRESHOLD = 1000;
     const effectiveMaxPages = maxPages + 1; // maxPages=0 means 1 page per segment, maxPages=1 means 2 pages, etc.
 
     if (pageCount >= FAST_PATH_THRESHOLD && !maxContentLength && !debugMetaKey) {

@@ -1326,4 +1326,4 @@ MIT
 
 ## Inspiration
 
-The name of the project is from Asmāʾ, it seems to be some sort of gymanstic move.
+The name of the project is from Asmāʾ, it seems to be some sort of gymnastic move.

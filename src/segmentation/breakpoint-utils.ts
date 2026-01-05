@@ -7,6 +7,7 @@
  * @module breakpoint-utils
  */
 
+import { FAST_PATH_THRESHOLD } from './breakpoint-constants.js';
 import type { Breakpoint, BreakpointRule, Logger, PageRange, Segment } from './types.js';
 
 const WINDOW_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15] as const;
@@ -436,7 +437,6 @@ export const buildBoundaryPositions = (
     // The expensive string-search verification is only useful when structural rules
     // have stripped content causing offset drift. For large books with simple breakpoints,
     // the precomputed offsets are accurate and O(n) vs O(n×m) string searching.
-    const FAST_PATH_THRESHOLD = 1000;
     if (pageCount >= FAST_PATH_THRESHOLD) {
         logger?.debug?.('[breakpoints] Using fast-path for large segment in buildBoundaryPositions', {
             fromIdx,

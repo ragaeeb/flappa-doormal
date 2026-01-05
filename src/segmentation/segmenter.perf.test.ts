@@ -13,6 +13,28 @@ const CI_MULTIPLIER = process.env.CI ? 2 : 1;
 const PAGE_COUNT = 10_000;
 
 // ─────────────────────────────────────────────────────────────
+// Seeded PRNG for Deterministic Tests
+// ─────────────────────────────────────────────────────────────
+
+// Mulberry32 PRNG - deterministic random number generator
+function mulberry32(seed: number): () => number {
+    return () => {
+        let t = (seed += 0x6d2b79f5);
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+const SEED = 42;
+let rng = mulberry32(SEED);
+
+// Reset RNG before each test suite run for reproducibility
+function resetRng(): void {
+    rng = mulberry32(SEED);
+}
+
+// ─────────────────────────────────────────────────────────────
 // Synthetic Arabic Data Generation
 // ─────────────────────────────────────────────────────────────
 
@@ -45,36 +67,37 @@ const ARABIC_NUMERALS = ['١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩', '
 function generateArabicSentence(wordCount: number): string {
     const words: string[] = [];
     for (let i = 0; i < wordCount; i++) {
-        const pool = Math.random() < 0.2 ? DIACRITIC_WORDS : ARABIC_WORDS;
-        words.push(pool[Math.floor(Math.random() * pool.length)]);
+        const pool = rng() < 0.2 ? DIACRITIC_WORDS : ARABIC_WORDS;
+        words.push(pool[Math.floor(rng() * pool.length)]);
     }
-    const punct = PUNCTUATION[Math.floor(Math.random() * PUNCTUATION.length)];
+    const punct = PUNCTUATION[Math.floor(rng() * PUNCTUATION.length)];
     return words.join(' ') + punct;
 }
 
 function generateArabicPages(count: number): Page[] {
+    resetRng(); // Reset for deterministic generation
     const pages: Page[] = [];
 
     for (let i = 0; i < count; i++) {
         const lines: string[] = [];
-        const lineCount = 5 + Math.floor(Math.random() * 10);
+        const lineCount = 5 + Math.floor(rng() * 10);
 
         // Add structural marker every ~50 pages
         if (i % 50 === 0 && i > 0) {
-            const marker = STRUCTURAL_MARKERS[Math.floor(Math.random() * STRUCTURAL_MARKERS.length)];
-            const num = ARABIC_NUMERALS[Math.floor(Math.random() * ARABIC_NUMERALS.length)];
+            const marker = STRUCTURAL_MARKERS[Math.floor(rng() * STRUCTURAL_MARKERS.length)];
+            const num = ARABIC_NUMERALS[Math.floor(rng() * ARABIC_NUMERALS.length)];
             lines.push(`${marker} ${num} - ${generateArabicSentence(3)}`);
         }
 
         // Add hadith marker every ~20 pages
         if (i % 20 === 0) {
-            const marker = HADITH_MARKERS[Math.floor(Math.random() * HADITH_MARKERS.length)];
+            const marker = HADITH_MARKERS[Math.floor(rng() * HADITH_MARKERS.length)];
             lines.push(`${marker} ${generateArabicSentence(5)}`);
         }
 
         // Fill with regular content
         for (let j = 0; j < lineCount; j++) {
-            lines.push(generateArabicSentence(8 + Math.floor(Math.random() * 8)));
+            lines.push(generateArabicSentence(8 + Math.floor(rng() * 8)));
         }
 
         pages.push({
@@ -337,7 +360,7 @@ perfDescribe('Performance Tests', () => {
         runPerfTest(
             'large exclude set (5000 pages)',
             {
-                breakpoints: [{ excludes: excludePageIds, pattern: '' }],
+                breakpoints: [{ exclude: excludePageIds, pattern: '' }],
                 maxPages: 2,
                 rules: [],
             },
@@ -379,5 +402,47 @@ perfDescribe('Performance Tests', () => {
             },
             1000,
         );
+    });
+
+    // ─────────────────────────────────────────────────────────────
+    // Edge Case Stress Tests
+    // ─────────────────────────────────────────────────────────────
+
+    describe('edge case stress tests', () => {
+        it('should handle empty pages efficiently', () => {
+            const pagesWithEmpty: Page[] = Array.from({ length: 5000 }, (_, i) => ({
+                content: i % 10 === 0 ? '' : 'محتوى الصفحة',
+                id: i + 1,
+            }));
+            const start = performance.now();
+            const result = segmentPages(pagesWithEmpty, { breakpoints: [''], maxPages: 0, rules: [] });
+            const elapsed = performance.now() - start;
+            expect(elapsed).toBeLessThan(1000 * CI_MULTIPLIER);
+            expect(result.length).toBeGreaterThan(0);
+        });
+
+        it('should handle identical pages efficiently', () => {
+            const identicalPages: Page[] = Array.from({ length: 5000 }, (_, i) => ({
+                content: 'نفس المحتوى بالضبط في كل صفحة',
+                id: i + 1,
+            }));
+            const start = performance.now();
+            const result = segmentPages(identicalPages, { breakpoints: [''], maxPages: 1, rules: [] });
+            const elapsed = performance.now() - start;
+            expect(elapsed).toBeLessThan(1000 * CI_MULTIPLIER);
+            expect(result.length).toBeGreaterThan(0);
+        });
+
+        it('should handle single-character pages', () => {
+            const tinyPages: Page[] = Array.from({ length: 10000 }, (_, i) => ({
+                content: 'ا',
+                id: i + 1,
+            }));
+            const start = performance.now();
+            const result = segmentPages(tinyPages, { breakpoints: [''], maxPages: 0, rules: [] });
+            const elapsed = performance.now() - start;
+            expect(elapsed).toBeLessThan(500 * CI_MULTIPLIER);
+            expect(result.length).toBe(10000);
+        });
     });
 });
