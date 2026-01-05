@@ -155,26 +155,41 @@ Create:
 
 Structure:
 
-### Files reviewed
+### Files Reviewed
 - List each review doc path.
 
-### Collective agreement
+### Collective Agreement
 - Bullet points of the shared conclusions.
 - Include why they matter for correctness.
 
-### Key disagreements
-- What reviewers differed on.
-- What you (as the implementing engineer) decide and why.
-- Explicitly label what is overengineering vs required for MVP.
+### Key Disagreements
+- Use a table to capture conflicting feedback:
 
-### Unique points per reviewer
+| Issue | Position A | Position B | My Decision |
+|-------|------------|------------|-------------|
+| *Topic* | *One view (e.g. "Bug")* | *Opposing view (e.g. "Feature")* | *Your judge call* |
+
+### Unique Points Per Reviewer
 - One small subsection per reviewer with their best unique contribution.
 
-### Updated plan changes
-- What you’ll change in the plan (API/algorithm/tests).
+### Verdict (What We Will Do Next)
 
-### Next tests (TDD order)
-- List the exact next tests to implement, in priority order.
+#### MVP Scope (Must Fix)
+- List critical bugs and essential features.
+- Explicitly link to who suggested it (e.g., "Proposed by Claude").
+
+#### Deferred / Out-of-Scope
+- List features that are nice-to-have but not critical.
+- Explain *why* (e.g., "Overengineering", "Premature optimization").
+
+#### Concrete Next Tests (TDD Order)
+- List the exact next tests to implement, in priority order:
+  1. Small deterministic checks / Invariants
+  2. Edge cases (empty inputs, boundaries)
+  3. Heuristics / Complex logic
+
+#### Implementation Steps (Mapped to Tests)
+- Map each test to the files/functions that need changing.
 
 ---
 
@@ -237,25 +252,7 @@ This is the “last agent” step after reviews are collected. The goal is to tu
   - Public API is documented (README/AGENTS as appropriate).
   - Report/diagnostics are sufficient for users to trust results.
 
-### Suggested synthesis doc “verdict” section (copy/paste)
-Use this verbatim in `docs/<feature>-review-synthesis.md`:
 
-```markdown
-## Verdict (what we will do next)
-
-### MVP scope
-- …
-
-### Deferred / out-of-scope
-- …
-
-### Concrete next tests (in order)
-1. …
-2. …
-
-### Implementation steps (mapped to tests)
-- …
-```
 
 ## 5) “TDD-first” implementation loop checklist
 
@@ -270,11 +267,14 @@ For each incremental step:
 
 ## 6) Suggested defaults (works well for this repo)
 
-- Prefer deterministic approaches over heuristic ones.
-- When heuristics are necessary:
-  - require explicit opt-in
-  - define thresholds
-  - fail safe (return unresolved) instead of guessing
-- Keep algorithms simple unless tests demonstrate a need for more complexity.
+- **Prefer deterministic approaches** over heuristic ones.
+- **When heuristics are necessary**:
+  - require explicit opt-in (e.g. `fuzzy: true`)
+  - define strict thresholds (e.g. "max 2000 chars deviation")
+  - fail safe (return unresolved) instead of guessing silently
+- **Keep algorithms simple** unless tests demonstrate a need for more complexity (YAGNI).
+- **Complexity limits**: 
+  - Max cyclomatic complexity: 15
+  - Max function length: ~50-80 lines (extract helpers early)
 
 

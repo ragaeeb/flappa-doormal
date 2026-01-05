@@ -7,6 +7,7 @@
  * @module breakpoint-utils
  */
 
+import { FAST_PATH_THRESHOLD } from './breakpoint-constants.js';
 import type { Breakpoint, BreakpointRule, Logger, PageRange, Segment } from './types.js';
 
 const WINDOW_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15] as const;
@@ -430,6 +431,42 @@ export const buildBoundaryPositions = (
     logger?: Logger,
 ): number[] => {
     const boundaryPositions: number[] = [0];
+    const pageCount = toIdx - fromIdx + 1;
+
+    // FAST PATH: For large segments (1000+ pages), use cumulative offsets directly.
+    // The expensive string-search verification is only useful when structural rules
+    // have stripped content causing offset drift. For large books with simple breakpoints,
+    // the precomputed offsets are accurate and O(n) vs O(n×m) string searching.
+    if (pageCount >= FAST_PATH_THRESHOLD) {
+        logger?.debug?.('[breakpoints] Using fast-path for large segment in buildBoundaryPositions', {
+            fromIdx,
+            pageCount,
+            toIdx,
+        });
+
+        const baseOffset = cumulativeOffsets[fromIdx] ?? 0;
+        for (let i = fromIdx + 1; i <= toIdx; i++) {
+            const offset = cumulativeOffsets[i];
+            if (offset !== undefined) {
+                const boundary = Math.max(0, offset - baseOffset);
+                const prevBoundary = boundaryPositions[boundaryPositions.length - 1];
+                // Ensure strictly increasing boundaries
+                boundaryPositions.push(Math.max(prevBoundary + 1, Math.min(boundary, segmentContent.length)));
+            }
+        }
+        boundaryPositions.push(segmentContent.length); // sentinel
+        return boundaryPositions;
+    }
+
+    // ACCURATE PATH: For smaller segments, verify boundaries with string search
+    // This handles cases where structural rules stripped markers causing offset drift
+    // WARNING: This path is O(n×m) - if this log appears for large pageCount, investigate!
+    logger?.debug?.('[breakpoints] buildBoundaryPositions: Using accurate string-search path', {
+        contentLength: segmentContent.length,
+        fromIdx,
+        pageCount,
+        toIdx,
+    });
     const startOffsetInFromPage = estimateStartOffsetInCurrentPage(segmentContent, fromIdx, pageIds, normalizedPages);
 
     for (let i = fromIdx + 1; i <= toIdx; i++) {
@@ -466,6 +503,7 @@ export const buildBoundaryPositions = (
     }
 
     boundaryPositions.push(segmentContent.length); // sentinel
+    logger?.debug?.('[breakpoints] buildBoundaryPositions: Complete', { boundaryCount: boundaryPositions.length });
     return boundaryPositions;
 };
 
@@ -829,4 +867,3 @@ export const adjustForSurrogate = (content: string, position: number): number =>
 
     return position;
 };
-

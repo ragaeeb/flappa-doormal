@@ -400,6 +400,8 @@ bunx biome lint .
 
 12. **Prefix matching fails with duplicated content**: When using `indexOf()` to find page boundaries by matching prefixes, false positives occur when pages have identical prefixes AND content is duplicated within pages. Solution: use cumulative byte offsets as the source of truth for expected boundaries, and only accept prefix matches within a strict deviation threshold (2000 chars). When content-based detection fails, fall back directly to the calculated offset rather than returning `remainingContent.length` (which merges all remaining pages).
 
+13. **ASCII vs Arabic-Indic Numerals**: While most classical Arabic texts use Arabic-Indic digits (`٠-٩`), modern digitizers often mix them with ASCII digits (`0-9`). Providing separate tokens (`{{raqms}}` for Arabic and `{{nums}}` for ASCII) allows better precision in rule definitions while keeping patterns readable. Always check which digit set is used in the source text before authoring rules.
+
 ### For Future AI Agents (Recovery + Repo gotchas)
 
 1. **`lineStartsAfter` vs `lineStartsWith` is not “cosmetic”**: `lineStartsAfter` changes output by stripping the matched marker via an internal `contentStartOffset` during segment construction. If a client used it by accident, you cannot reconstruct the exact stripped prefix from output alone without referencing the original pages and re-matching the marker.
@@ -439,6 +441,8 @@ bunx biome lint .
 
 15. **Invisible Unicode Marks Break Regex Anchors**: Arabic text often contains invisible bidirectional formatting marks like Left-to-Right Mark (`U+200E`), Right-to-Left Mark (`U+200F`), or Arabic Letter Mark (`U+061C`). These appear at line starts after `\n` but before visible characters, breaking `^` anchored patterns. Solution: include an optional zero-width character class prefix in line-start patterns: `^[\u200E\u200F\u061C\u200B\uFEFF]*(?:pattern)`. The library now handles this automatically in `buildLineStartsWithRegexSource` and `buildLineStartsAfterRegexSource`.
 
+16. **Large Segment Performance & Debugging Strategy**: When processing large books (1000+ pages), avoid O(n²) algorithms. The library uses a fast-path threshold (1000 pages) to switch from accurate string-search boundary detection to cumulative-offset-based slicing. To diagnose performance bottlenecks: (1) Look for logs with "Using iterative path" or "Using accurate string-search path" with large `pageCount` values, (2) Check `iterations` count in completion logs, (3) Strategic logs are placed at operation boundaries (start/end) NOT inside tight loops to avoid log-induced performance regression.
+
 ### Process Template (Multi-agent design review, TDD-first)
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:
@@ -467,6 +471,8 @@ If you want to repeat the “write a plan → get multiple AI critiques → synt
 | `{{kitab}}` | "كتاب" (book) | كتاب الصلاة |
 | `{{raqm}}` | Single Arabic-Indic numeral | ٥ |
 | `{{raqms}}` | Multiple Arabic-Indic numerals | ٧٥٦٣ |
+| `{{num}}` | Single ASCII numeral | 5 |
+| `{{nums}}` | Multiple ASCII numerals | 123 |
 | `{{raqms:num}}` | Numerals with named capture | `meta.num = "٧٥٦٣"` |
 | `{{dash}}` | Various dash characters | - – — ـ |
 | `{{harfs}}` | Single-letter codes separated by spaces | `د ت س ي ق` |

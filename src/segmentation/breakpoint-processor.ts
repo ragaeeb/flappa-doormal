@@ -5,6 +5,7 @@
  * and allow unit testing of tricky edge cases (window sizing, next-page advancement, etc.).
  */
 
+import { FAST_PATH_THRESHOLD } from './breakpoint-constants.js';
 import {
     adjustForSurrogate,
     applyPageJoinerBetweenPages,
@@ -237,158 +238,121 @@ const skipWhitespace = (content: string, startPos: number): number => {
 };
 
 /**
- * Processes an oversized segment by iterating through the content and
- * breaking it into smaller pieces that fit within maxPages constraints.
- *
- * Uses precomputed boundary positions for O(log n) page attribution lookups.
+ * Validates that cumulative offsets match actual content length within a tolerance.
+ * Required to detect if structural rules (like `lineStartsAfter`) have stripped content
+ * which would make offset-based calculations inaccurate.
  */
-const processOversizedSegment = (
-    segment: Segment,
+const checkFastPathAlignment = (
+    cumulativeOffsets: number[],
+    fullContent: string,
+    fromIdx: number,
+    toIdx: number,
+    pageCount: number,
+    logger?: Logger,
+): boolean => {
+    const expectedLength = (cumulativeOffsets[toIdx + 1] ?? fullContent.length) - (cumulativeOffsets[fromIdx] ?? 0);
+    const actualLength = fullContent.length;
+    const driftTolerance = Math.max(100, actualLength * 0.01); // 1% or 100 chars tolerance
+
+    const isAligned = Math.abs(expectedLength - actualLength) <= driftTolerance;
+
+    if (!isAligned && pageCount >= FAST_PATH_THRESHOLD) {
+        logger?.warn?.('[breakpoints] Offset drift detected in fast-path candidate, falling back to slow path', {
+            actualLength,
+            drift: Math.abs(expectedLength - actualLength),
+            expectedLength,
+            pageCount,
+        });
+    }
+    return isAligned;
+};
+
+/**
+ * Handles the special optimized case for maxPages=0 (1 page per segment).
+ * This is O(n) and safer than offset arithmetic as it uses source pages directly.
+ */
+const processTrivialFastPath = (
     fromIdx: number,
     toIdx: number,
     pageIds: number[],
     normalizedPages: Map<number, NormalizedPage>,
-    cumulativeOffsets: number[],
-    expandedBreakpoints: ReturnType<typeof expandBreakpoints>,
-    maxPages: number,
-    prefer: 'longer' | 'shorter',
-    logger?: Logger,
+    pageCount: number,
+    originalMeta?: Segment['meta'],
     debugMetaKey?: string,
-    maxContentLength?: number,
-) => {
+    logger?: Logger,
+): Segment[] => {
+    logger?.debug?.('[breakpoints] Using trivial per-page fast-path (maxPages=0)', { fromIdx, pageCount, toIdx });
     const result: Segment[] = [];
-    const fullContent = segment.content;
-    let cursorPos = 0;
-    let currentFromIdx = fromIdx;
-    let isFirstPiece = true;
-    let lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null = null;
+    for (let i = fromIdx; i <= toIdx; i++) {
+        const pageData = normalizedPages.get(pageIds[i]);
+        if (pageData?.content.trim()) {
+            const isFirstPiece = i === fromIdx;
+            const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, originalMeta, null);
+            const seg = createSegment(pageData.content.trim(), pageIds[i], undefined, meta);
+            if (seg) {
+                result.push(seg);
+            }
+        }
+    }
+    return result;
+};
 
-    const boundaryPositions = buildBoundaryPositions(
-        fullContent,
-        fromIdx,
-        toIdx,
-        pageIds,
-        normalizedPages,
-        cumulativeOffsets,
-        logger,
-    );
+/**
+ * Handles fast-path segmentation for maxPages > 0 using cumulative offsets.
+ * Avoids O(n²) string searching but requires accurate offsets.
+ */
+const processOffsetFastPath = (
+    fullContent: string,
+    fromIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    cumulativeOffsets: number[],
+    maxPages: number,
+    originalMeta?: Segment['meta'],
+    debugMetaKey?: string,
+    logger?: Logger,
+): Segment[] => {
+    const result: Segment[] = [];
+    const effectiveMaxPages = maxPages + 1;
+    const pageCount = toIdx - fromIdx + 1;
 
-    logger?.debug?.('[breakpoints] boundaryPositions built', {
-        boundaryPositions,
+    logger?.debug?.('[breakpoints] Using offset-based fast-path for large segment', {
+        effectiveMaxPages,
         fromIdx,
-        fullContentLength: fullContent.length,
+        maxPages,
+        pageCount,
         toIdx,
     });
 
-    let i = 0;
-    const MAX_SAFE_ITERATIONS = 100_000;
-    while (cursorPos < fullContent.length && currentFromIdx <= toIdx && i < MAX_SAFE_ITERATIONS) {
-        i++;
-        const remainingContent = fullContent.slice(cursorPos);
-        if (!remainingContent.trim()) {
-            break;
-        }
+    const baseOffset = cumulativeOffsets[fromIdx] ?? 0;
 
-        if (
-            handleOversizedSegmentFit(
-                remainingContent,
-                currentFromIdx,
-                toIdx,
-                pageIds,
-                expandedBreakpoints,
-                maxPages,
-                maxContentLength,
-                isFirstPiece,
-                debugMetaKey,
-                segment.meta,
-                lastBreakpoint,
-                result,
-            )
-        ) {
-            break;
-        }
+    for (let segStart = fromIdx; segStart <= toIdx; segStart += effectiveMaxPages) {
+        const segEnd = Math.min(segStart + effectiveMaxPages - 1, toIdx);
 
-        const windowEndIdx = computeWindowEndIdx(currentFromIdx, toIdx, pageIds, maxPages);
-        const windowEndPosition = getWindowEndPosition(
-            remainingContent,
-            currentFromIdx,
-            windowEndIdx,
-            toIdx,
-            pageIds,
-            normalizedPages,
-            cumulativeOffsets,
-            maxContentLength,
-            logger,
-        );
+        const startOffset = Math.max(0, (cumulativeOffsets[segStart] ?? 0) - baseOffset);
+        const endOffset =
+            segEnd < toIdx
+                ? Math.max(0, (cumulativeOffsets[segEnd + 1] ?? fullContent.length) - baseOffset)
+                : fullContent.length;
 
-        logger?.debug?.(`[breakpoints] iteration=${i}`, { currentFromIdx, cursorPos, windowEndIdx, windowEndPosition });
+        const rawContent = fullContent.slice(startOffset, endOffset).trim();
+        if (rawContent) {
+            const isFirstPiece = segStart === fromIdx;
+            const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, originalMeta, null);
 
-        const found = findBreakOffsetForWindow(
-            remainingContent,
-            currentFromIdx,
-            windowEndIdx,
-            toIdx,
-            windowEndPosition,
-            pageIds,
-            expandedBreakpoints,
-            cumulativeOffsets,
-            normalizedPages,
-            prefer,
-            maxContentLength,
-        );
-
-        // Progress safeguard: Ensure we advance by at least one character to prevent infinite loops.
-        // This is critical if findBreakOffsetForWindow returns 0 (e.g. from an empty windowEndPosition).
-        let breakOffset = found.breakOffset;
-        if (breakOffset <= 0) {
-            const fallbackPos = maxContentLength ? Math.min(maxContentLength, remainingContent.length) : 1;
-            breakOffset = Math.max(1, fallbackPos);
-            logger?.warn?.('[breakpoints] No progress from findBreakOffsetForWindow; forcing forward movement', {
-                breakOffset,
-                cursorPos,
-            });
-        }
-
-        if (found.breakpointIndex !== undefined && found.breakpointRule) {
-            lastBreakpoint = { breakpointIndex: found.breakpointIndex, rule: found.breakpointRule };
-        }
-
-        const breakPos = cursorPos + breakOffset;
-        const pieceContent = fullContent.slice(cursorPos, breakPos).trim();
-
-        if (pieceContent) {
-            const { actualEndIdx, actualStartIdx } = computePiecePages(
-                cursorPos,
-                breakPos,
-                boundaryPositions,
-                fromIdx,
-                toIdx,
-            );
-            const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, segment.meta, lastBreakpoint);
-            const pieceSeg = createPieceSegment(pieceContent, actualStartIdx, actualEndIdx, pageIds, meta, true);
-            if (pieceSeg) {
-                result.push(pieceSeg);
+            const seg: Segment = {
+                content: rawContent,
+                from: pageIds[segStart],
+            };
+            if (segEnd > segStart) {
+                seg.to = pageIds[segEnd];
             }
-
-            const next = advanceCursorAndIndex(fullContent, breakPos, actualEndIdx, toIdx, pageIds, normalizedPages);
-            cursorPos = next.cursorPos;
-            currentFromIdx = next.currentFromIdx;
-        } else {
-            cursorPos = breakPos;
+            if (meta) {
+                seg.meta = meta;
+            }
+            result.push(seg);
         }
-
-        isFirstPiece = false;
     }
-
-    if (i >= MAX_SAFE_ITERATIONS) {
-        logger?.error?.('[breakpoints] Stopped processing oversized segment: reached MAX_SAFE_ITERATIONS', {
-            cursorPos,
-            fullContentLength: fullContent.length,
-            iterations: i,
-        });
-    }
-
-    logger?.debug?.('[breakpoints] done', { resultCount: result.length });
     return result;
 };
 
@@ -510,6 +474,212 @@ const advanceCursorAndIndex = (
  *
  * Note: This is an internal engine used by `segmentPages()`.
  */
+/**
+ * Processes an oversized segment by iterating through the content and
+ * breaking it into smaller pieces that fit within maxPages constraints.
+ *
+ * Uses precomputed boundary positions for O(log n) page attribution lookups.
+ */
+const processOversizedSegment = (
+    segment: Segment,
+    fromIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    cumulativeOffsets: number[],
+    expandedBreakpoints: ReturnType<typeof expandBreakpoints>,
+    maxPages: number,
+    prefer: 'longer' | 'shorter',
+    logger?: Logger,
+    debugMetaKey?: string,
+    maxContentLength?: number,
+) => {
+    const result: Segment[] = [];
+    const fullContent = segment.content;
+    const pageCount = toIdx - fromIdx + 1;
+
+    // FAST PATH LOGIC
+    // -------------------------------------------------------------------------
+    // For large segments (1000+ pages), use cumulative offsets directly to avoid O(n²) processing.
+    // We skip this optimization if:
+    // 1. debugMetaKey is set (we need full provenance)
+    // 2. maxContentLength is set (requires character-accurate checks)
+    // 3. Offset drift is detected (structural rules modified content length)
+
+    const isAligned = checkFastPathAlignment(cumulativeOffsets, fullContent, fromIdx, toIdx, pageCount, logger);
+
+    if (pageCount >= FAST_PATH_THRESHOLD && isAligned && !maxContentLength && !debugMetaKey) {
+        if (maxPages === 0) {
+            return processTrivialFastPath(
+                fromIdx,
+                toIdx,
+                pageIds,
+                normalizedPages,
+                pageCount,
+                segment.meta,
+                debugMetaKey,
+                logger,
+            );
+        }
+        return processOffsetFastPath(
+            fullContent,
+            fromIdx,
+            toIdx,
+            pageIds,
+            cumulativeOffsets,
+            maxPages,
+            segment.meta,
+            debugMetaKey,
+            logger,
+        );
+    }
+
+    // SLOW PATH: Iterative breakpoint processing
+    // WARNING: This path can be slow for large segments - if this log shows large pageCount, investigate!
+    logger?.debug?.('[breakpoints] processOversizedSegment: Using iterative path', {
+        contentLength: fullContent.length,
+        fromIdx,
+        maxContentLength,
+        maxPages,
+        pageCount,
+        toIdx,
+    });
+
+    let cursorPos = 0;
+    let currentFromIdx = fromIdx;
+    let isFirstPiece = true;
+    let lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null = null;
+
+    const boundaryPositions = buildBoundaryPositions(
+        fullContent,
+        fromIdx,
+        toIdx,
+        pageIds,
+        normalizedPages,
+        cumulativeOffsets,
+        logger,
+    );
+
+    logger?.debug?.('[breakpoints] boundaryPositions built', {
+        boundaryPositions,
+        fromIdx,
+        fullContentLength: fullContent.length,
+        toIdx,
+    });
+
+    let i = 0;
+    const MAX_SAFE_ITERATIONS = 100_000;
+    while (cursorPos < fullContent.length && currentFromIdx <= toIdx && i < MAX_SAFE_ITERATIONS) {
+        i++;
+        const remainingContent = fullContent.slice(cursorPos);
+        if (!remainingContent.trim()) {
+            break;
+        }
+
+        if (
+            handleOversizedSegmentFit(
+                remainingContent,
+                currentFromIdx,
+                toIdx,
+                pageIds,
+                expandedBreakpoints,
+                maxPages,
+                maxContentLength,
+                isFirstPiece,
+                debugMetaKey,
+                segment.meta,
+                lastBreakpoint,
+                result,
+            )
+        ) {
+            break;
+        }
+
+        const windowEndIdx = computeWindowEndIdx(currentFromIdx, toIdx, pageIds, maxPages);
+        const windowEndPosition = getWindowEndPosition(
+            remainingContent,
+            currentFromIdx,
+            windowEndIdx,
+            toIdx,
+            pageIds,
+            normalizedPages,
+            cumulativeOffsets,
+            maxContentLength,
+            logger,
+        );
+
+        // Per-iteration log at trace level to avoid spam in debug mode
+        logger?.trace?.(`[breakpoints] iteration=${i}`, { currentFromIdx, cursorPos, windowEndIdx, windowEndPosition });
+
+        const found = findBreakOffsetForWindow(
+            remainingContent,
+            currentFromIdx,
+            windowEndIdx,
+            toIdx,
+            windowEndPosition,
+            pageIds,
+            expandedBreakpoints,
+            cumulativeOffsets,
+            normalizedPages,
+            prefer,
+            maxContentLength,
+        );
+
+        // Progress safeguard: Ensure we advance by at least one character to prevent infinite loops.
+        // This is critical if findBreakOffsetForWindow returns 0 (e.g. from an empty windowEndPosition).
+        let breakOffset = found.breakOffset;
+        if (breakOffset <= 0) {
+            const fallbackPos = maxContentLength ? Math.min(maxContentLength, remainingContent.length) : 1;
+            breakOffset = Math.max(1, fallbackPos);
+            logger?.warn?.('[breakpoints] No progress from findBreakOffsetForWindow; forcing forward movement', {
+                breakOffset,
+                cursorPos,
+            });
+        }
+
+        if (found.breakpointIndex !== undefined && found.breakpointRule) {
+            lastBreakpoint = { breakpointIndex: found.breakpointIndex, rule: found.breakpointRule };
+        }
+
+        const breakPos = cursorPos + breakOffset;
+        const pieceContent = fullContent.slice(cursorPos, breakPos).trim();
+
+        if (pieceContent) {
+            const { actualEndIdx, actualStartIdx } = computePiecePages(
+                cursorPos,
+                breakPos,
+                boundaryPositions,
+                fromIdx,
+                toIdx,
+            );
+            const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, segment.meta, lastBreakpoint);
+            const pieceSeg = createPieceSegment(pieceContent, actualStartIdx, actualEndIdx, pageIds, meta, true);
+            if (pieceSeg) {
+                result.push(pieceSeg);
+            }
+
+            const next = advanceCursorAndIndex(fullContent, breakPos, actualEndIdx, toIdx, pageIds, normalizedPages);
+            cursorPos = next.cursorPos;
+            currentFromIdx = next.currentFromIdx;
+        } else {
+            cursorPos = breakPos;
+        }
+
+        isFirstPiece = false;
+    }
+
+    if (i >= MAX_SAFE_ITERATIONS) {
+        logger?.error?.('[breakpoints] Stopped processing oversized segment: reached MAX_SAFE_ITERATIONS', {
+            cursorPos,
+            fullContentLength: fullContent.length,
+            iterations: i,
+        });
+    }
+
+    logger?.debug?.('[breakpoints] processOversizedSegment: Complete', { iterations: i, resultCount: result.length });
+    return result;
+};
+
 export const applyBreakpoints = (
     segments: Segment[],
     pages: Page[],
@@ -553,6 +723,17 @@ export const applyBreakpoints = (
             continue;
         }
 
+        // Log details about why this segment needs breaking up
+        logger?.debug?.('[breakpoints] Processing oversized segment', {
+            contentLength: segment.content.length,
+            from: segment.from,
+            hasExclusions,
+            pageSpan: toIdx - fromIdx + 1,
+            reasonFitsInLength: fitsInLength,
+            reasonFitsInPages: fitsInPages,
+            to: segment.to,
+        });
+
         const broken = processOversizedSegment(
             segment,
             fromIdx,
@@ -567,6 +748,7 @@ export const applyBreakpoints = (
             debugMetaKey,
             maxContentLength,
         );
+
         // Normalize page joins for breakpoint-created pieces
         result.push(
             ...broken.map((s) => {

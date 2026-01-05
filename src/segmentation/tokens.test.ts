@@ -107,6 +107,11 @@ describe('tokens', () => {
             const result = expandTokens('باب {{raqms}}');
             expect(result).toBe('باب [\\u0660-\\u0669]+');
         });
+
+        it('should expand num and nums tokens (ASCII digits)', () => {
+            expect(expandTokens('{{num}}')).toBe('\\d');
+            expect(expandTokens('{{nums}}')).toBe('\\d+');
+        });
     });
 
     describe('expandTokensWithCaptures', () => {
@@ -215,6 +220,11 @@ describe('tokens', () => {
         it('should return correct pattern for Arabic phrase tokens', () => {
             expect(getTokenPattern('bab')).toBe('باب');
             expect(getTokenPattern('kitab')).toBe('كتاب');
+        });
+
+        it('should return correct pattern for num and nums', () => {
+            expect(getTokenPattern('num')).toBe('\\d');
+            expect(getTokenPattern('nums')).toBe('\\d+');
         });
 
         it('should return a pattern for rumuz', () => {
