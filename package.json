@@ -46,9 +46,10 @@
     },
     "scripts": {
         "build": "tsdown",
-        "perf": "bun run perf-test.ts"
+        "test": "bun test",
+        "test:perf": "RUN_PERF=true bun test src/segmentation/segmenter.perf.test.ts"
     },
     "type": "module",
     "types": "./dist/index.d.mts",
-    "version": "2.11.1"
+    "version": "2.11.2"
 }

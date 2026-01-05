@@ -1324,3 +1324,6 @@ bun run deploy
 
 MIT
 
+## Inspiration
+
+The name of the project is from Asmāʾ, it seems to be some sort of gymanstic move.

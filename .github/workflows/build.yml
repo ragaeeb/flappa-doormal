@@ -33,3 +33,8 @@ jobs:
               uses: codecov/codecov-action@v5
               with:
                   token: ${{ secrets.CODECOV_TOKEN }}
+
+            - name: Performance Tests
+              run: bun run test:perf
+              env:
+                  CI: true

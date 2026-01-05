@@ -439,6 +439,8 @@ bunx biome lint .
 
 15. **Invisible Unicode Marks Break Regex Anchors**: Arabic text often contains invisible bidirectional formatting marks like Left-to-Right Mark (`U+200E`), Right-to-Left Mark (`U+200F`), or Arabic Letter Mark (`U+061C`). These appear at line starts after `\n` but before visible characters, breaking `^` anchored patterns. Solution: include an optional zero-width character class prefix in line-start patterns: `^[\u200E\u200F\u061C\u200B\uFEFF]*(?:pattern)`. The library now handles this automatically in `buildLineStartsWithRegexSource` and `buildLineStartsAfterRegexSource`.
 
+16. **Large Segment Performance & Debugging Strategy**: When processing large books (1000+ pages), avoid O(n²) algorithms. The library uses a fast-path threshold (1000 pages) to switch from accurate string-search boundary detection to cumulative-offset-based slicing. To diagnose performance bottlenecks: (1) Look for logs with "Using iterative path" or "Using accurate string-search path" with large `pageCount` values, (2) Check `iterations` count in completion logs, (3) Strategic logs are placed at operation boundaries (start/end) NOT inside tight loops to avoid log-induced performance regression.
+
 ### Process Template (Multi-agent design review, TDD-first)
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:

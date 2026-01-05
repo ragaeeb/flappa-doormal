@@ -258,6 +258,62 @@ const processOversizedSegment = (
 ) => {
     const result: Segment[] = [];
     const fullContent = segment.content;
+    const pageCount = toIdx - fromIdx + 1;
+
+    // FAST PATH: For large segments (1000+ pages), use cumulative offsets directly
+    // to avoid O(n²) iterative processing. This applies to any maxPages value (0, 1, 2, etc.)
+    // when we're splitting a very large segment into many pieces.
+    // Skip if debugMetaKey is set (need proper provenance) or maxContentLength is set (need character-based splitting).
+    const FAST_PATH_THRESHOLD = 1000;
+    const effectiveMaxPages = maxPages + 1; // maxPages=0 means 1 page per segment, maxPages=1 means 2 pages, etc.
+
+    if (pageCount >= FAST_PATH_THRESHOLD && !maxContentLength && !debugMetaKey) {
+        logger?.debug?.('[breakpoints] Using offset-based fast-path for large segment', {
+            effectiveMaxPages,
+            fromIdx,
+            maxPages,
+            pageCount,
+            toIdx,
+        });
+
+        const baseOffset = cumulativeOffsets[fromIdx] ?? 0;
+
+        // Create segments in chunks of effectiveMaxPages
+        for (let segStart = fromIdx; segStart <= toIdx; segStart += effectiveMaxPages) {
+            const segEnd = Math.min(segStart + effectiveMaxPages - 1, toIdx);
+
+            const startOffset = Math.max(0, (cumulativeOffsets[segStart] ?? 0) - baseOffset);
+            const endOffset =
+                segEnd < toIdx
+                    ? Math.max(0, (cumulativeOffsets[segEnd + 1] ?? fullContent.length) - baseOffset)
+                    : fullContent.length;
+
+            const content = fullContent.slice(startOffset, endOffset).trim();
+            if (content) {
+                const seg: Segment = {
+                    content,
+                    from: pageIds[segStart],
+                };
+                if (segEnd > segStart) {
+                    seg.to = pageIds[segEnd];
+                }
+                result.push(seg);
+            }
+        }
+        return result;
+    }
+
+    // SLOW PATH: Iterative breakpoint processing
+    // WARNING: This path can be slow for large segments - if this log shows large pageCount, investigate!
+    logger?.debug?.('[breakpoints] processOversizedSegment: Using iterative path', {
+        contentLength: fullContent.length,
+        fromIdx,
+        maxContentLength,
+        maxPages,
+        pageCount,
+        toIdx,
+    });
+
     let cursorPos = 0;
     let currentFromIdx = fromIdx;
     let isFirstPiece = true;
@@ -321,7 +377,8 @@ const processOversizedSegment = (
             logger,
         );
 
-        logger?.debug?.(`[breakpoints] iteration=${i}`, { currentFromIdx, cursorPos, windowEndIdx, windowEndPosition });
+        // Per-iteration log at trace level to avoid spam in debug mode
+        logger?.trace?.(`[breakpoints] iteration=${i}`, { currentFromIdx, cursorPos, windowEndIdx, windowEndPosition });
 
         const found = findBreakOffsetForWindow(
             remainingContent,
@@ -388,7 +445,7 @@ const processOversizedSegment = (
         });
     }
 
-    logger?.debug?.('[breakpoints] done', { resultCount: result.length });
+    logger?.debug?.('[breakpoints] processOversizedSegment: Complete', { iterations: i, resultCount: result.length });
     return result;
 };
 
@@ -553,6 +610,17 @@ export const applyBreakpoints = (
             continue;
         }
 
+        // Log details about why this segment needs breaking up
+        logger?.debug?.('[breakpoints] Processing oversized segment', {
+            contentLength: segment.content.length,
+            from: segment.from,
+            hasExclusions,
+            pageSpan: toIdx - fromIdx + 1,
+            reasonFitsInLength: fitsInLength,
+            reasonFitsInPages: fitsInPages,
+            to: segment.to,
+        });
+
         const broken = processOversizedSegment(
             segment,
             fromIdx,
@@ -567,6 +635,7 @@ export const applyBreakpoints = (
             debugMetaKey,
             maxContentLength,
         );
+
         // Normalize page joins for breakpoint-created pieces
         result.push(
             ...broken.map((s) => {
