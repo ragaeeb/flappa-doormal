@@ -257,6 +257,7 @@ const processOversizedSegment = (
     maxPages: number,
     prefer: 'longer' | 'shorter',
     logger?: Logger,
+    pageJoiner: 'space' | 'newline' = 'space',
     debugMetaKey?: string,
     maxContentLength?: number,
 ) => {
@@ -270,7 +271,41 @@ const processOversizedSegment = (
     // Skip if debugMetaKey is set (need proper provenance) or maxContentLength is set (need character-based splitting).
     const effectiveMaxPages = maxPages + 1; // maxPages=0 means 1 page per segment, maxPages=1 means 2 pages, etc.
 
-    if (pageCount >= FAST_PATH_THRESHOLD && !maxContentLength && !debugMetaKey) {
+    // Validate offset alignment before taking fast path to prevent drift from structural rules (e.g. lineStartsAfter)
+    // If structural rules stripped content, actual length will be less than expected offset difference.
+    const expectedLength = (cumulativeOffsets[toIdx + 1] ?? fullContent.length) - (cumulativeOffsets[fromIdx] ?? 0);
+    const actualLength = fullContent.length;
+    const driftTolerance = Math.max(100, actualLength * 0.01); // 1% or 100 chars tolerance
+
+    const isAligned = Math.abs(expectedLength - actualLength) <= driftTolerance;
+
+    if (!isAligned && pageCount >= FAST_PATH_THRESHOLD) {
+        logger?.warn?.('[breakpoints] Offset drift detected in fast-path candidate, falling back to slow path', {
+            actualLength,
+            drift: Math.abs(expectedLength - actualLength),
+            expectedLength,
+            pageCount,
+        });
+    }
+
+    if (pageCount >= FAST_PATH_THRESHOLD && isAligned && !maxContentLength && !debugMetaKey) {
+        // Special case: maxPages=0 means 1 page per segment (trivial slicing)
+        // This is O(n) and safest as it uses per-page content directly, avoiding any potential joiner issues.
+        if (maxPages === 0) {
+            logger?.debug?.('[breakpoints] Using trivial per-page fast-path (maxPages=0)', {
+                fromIdx,
+                pageCount,
+                toIdx,
+            });
+            for (let i = fromIdx; i <= toIdx; i++) {
+                const pageData = normalizedPages.get(pageIds[i]);
+                if (pageData?.content.trim()) {
+                    result.push(createSegment(pageData.content.trim(), pageIds[i], undefined, undefined));
+                }
+            }
+            return result;
+        }
+
         logger?.debug?.('[breakpoints] Using offset-based fast-path for large segment', {
             effectiveMaxPages,
             fromIdx,
@@ -291,10 +326,20 @@ const processOversizedSegment = (
                     ? Math.max(0, (cumulativeOffsets[segEnd + 1] ?? fullContent.length) - baseOffset)
                     : fullContent.length;
 
-            const content = fullContent.slice(startOffset, endOffset).trim();
-            if (content) {
+            const rawContent = fullContent.slice(startOffset, endOffset).trim();
+            if (rawContent) {
+                // Normalize page joins to match slow-path behavior (e.g. converting newlines to spaces)
+                const normalizedContent = applyPageJoinerBetweenPages(
+                    rawContent,
+                    segStart,
+                    segEnd,
+                    pageIds,
+                    normalizedPages,
+                    pageJoiner,
+                );
+
                 const seg: Segment = {
-                    content,
+                    content: normalizedContent,
                     from: pageIds[segStart],
                 };
                 if (segEnd > segStart) {
@@ -635,6 +680,7 @@ export const applyBreakpoints = (
             maxPages,
             prefer,
             logger,
+            pageJoiner,
             debugMetaKey,
             maxContentLength,
         );
