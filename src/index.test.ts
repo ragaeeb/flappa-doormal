@@ -899,7 +899,7 @@ describe('index', () => {
         expect(segments).toHaveLength(2);
     });
 
-    it.only('should not split the maxContent in the middle of a word', () => {
+    it('should not split the maxContent in the middle of a word', () => {
         options = {
             breakpoints: [
                 {
@@ -922,5 +922,57 @@ describe('index', () => {
         expect(segments[1].content).toEndWith('منها .');
 
         expect(segments.every((s) => s.from === 0)).toBeTrue();
+    });
+
+    describe('should not merge the two pages when maxPages=0', () => {
+        beforeEach(() => {
+            options = {
+                breakpoints: [
+                    {
+                        pattern: '{{tarqim}}\\s*',
+                    },
+                    '',
+                ],
+                maxContentLength: 2000,
+                maxPages: 0,
+            };
+        });
+
+        it('should work when the first page is 3x the length', () => {
+            initPages([
+                `${'ف'.repeat(5227)}.`,
+                'السائل : معليش يا سيدي الشيخ هذه أشياء مهمة جدا وأنا أراها الصحيح في كل بلاد المسلمين أنه نحن أحوج ما نكون للتعلم على الأشياء الصغيرة في ديننا ... .\nالشيخ : تمام .\nالسائل : فعلا الأشياء الصغيرة في ديننا نحن نجهلها تماما حتى الناس المتعلمين منا ، نرى الشيوخ عندنا في المساجد يقف الواحد ليخطب خطبة كاملة عن مشكلة اقتصادية أو مشكلة سياسية أو مشكلة كذا ولا نرى أن أحدا منهم يعلم الناس كيف يتبرأ الإنسان من البول ، هذه الأشياء المهمة جدا بالنسبة لنا ..\nالشيخ : على كل حال يعني الأمر كما تقول مع ملاحظة شيء وهو أنه هذه في الواقع قد تكون صغيرة بمعنى هينة ولكنها عند الله كبيرة .',
+            ]);
+
+            const segments = segmentPages(pages, options);
+
+            expect(segments).toHaveLength(4);
+
+            expect(segments.slice(0, 2).every((s) => s.from === 0 && !s.to)).toBeTrue();
+
+            testSegment(segments[3], {
+                from: 1,
+            });
+        });
+
+        it('should not merge the pages when content overlaps between pages', () => {
+            initPages([
+                'الحلبي : هناك شيخنا أسئلة من بعض  لا يوجد.\nالحلبي : جزاك الله خيرا.\nالشيخ : وإياك.\nالحلبي : السؤال الثاني أشبه يعني فيه لغز قليلا',
+                'الحلبي : السؤال الثاني أشبه يعني فيه لغز قليلا أو هكذا فهمت ', // Starts with same text page 0 ends with
+                ' فينوي nالشيخ : وإياك .',
+            ]);
+
+            const segments = segmentPages(pages, options);
+
+            // With maxPages=0, no segment should span pages (no 'to' field should exist)
+            expect(segments.every((s) => s.to === undefined)).toBeTrue();
+
+            // Should have 4 segments: 2 from page 0, 1 from page 1, 1 from page 2
+            expect(segments).toHaveLength(4);
+            expect(segments[0].from).toBe(0);
+            expect(segments[1].from).toBe(0);
+            expect(segments[2].from).toBe(1);
+            expect(segments[3].from).toBe(2);
+        });
     });
 });

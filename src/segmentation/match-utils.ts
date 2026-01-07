@@ -76,21 +76,16 @@ export type MatchResult = {
  * extractNamedCaptures(undefined, ['num'])
  * // → undefined
  */
-export const extractNamedCaptures = (
-    groups: Record<string, string> | undefined,
-    captureNames: string[],
-): Record<string, string> | undefined => {
+export const extractNamedCaptures = (groups: Record<string, string> | undefined, captureNames: string[]) => {
     if (!groups || captureNames.length === 0) {
         return undefined;
     }
-
     const namedCaptures: Record<string, string> = {};
     for (const name of captureNames) {
         if (groups[name] !== undefined) {
             namedCaptures[name] = groups[name];
         }
     }
-
     return Object.keys(namedCaptures).length > 0 ? namedCaptures : undefined;
 };
 
@@ -115,11 +110,10 @@ export const extractNamedCaptures = (
  * getLastPositionalCapture(['full match'])
  * // → undefined
  */
-export const getLastPositionalCapture = (match: RegExpExecArray): string | undefined => {
+export const getLastPositionalCapture = (match: RegExpExecArray) => {
     if (match.length <= 1) {
         return undefined;
     }
-
     for (let i = match.length - 1; i >= 1; i--) {
         if (match[i] !== undefined) {
             return match[i];
@@ -152,21 +146,15 @@ export const filterByConstraints = (
     matches: MatchResult[],
     rule: Pick<SplitRule, 'min' | 'max' | 'exclude'>,
     getId: (offset: number) => number,
-): MatchResult[] => {
-    return matches.filter((m) => {
+) =>
+    matches.filter((m) => {
         const id = getId(m.start);
-        if (rule.min !== undefined && id < rule.min) {
-            return false;
-        }
-        if (rule.max !== undefined && id > rule.max) {
-            return false;
-        }
-        if (isPageExcluded(id, rule.exclude)) {
-            return false;
-        }
-        return true;
+        return (
+            (rule.min === undefined || id >= rule.min) &&
+            (rule.max === undefined || id <= rule.max) &&
+            !isPageExcluded(id, rule.exclude)
+        );
     });
-};
 
 /**
  * Filters matches based on occurrence setting (first, last, or all).
@@ -195,7 +183,7 @@ export const filterByConstraints = (
  * filterByOccurrence(matches, undefined)
  * // → [{ start: 0 }, { start: 10 }, { start: 20 }] (default: all)
  */
-export const filterByOccurrence = (matches: MatchResult[], occurrence?: 'first' | 'last' | 'all'): MatchResult[] => {
+export const filterByOccurrence = (matches: MatchResult[], occurrence?: 'first' | 'last' | 'all') => {
     if (!matches.length) {
         return [];
     }
@@ -203,7 +191,7 @@ export const filterByOccurrence = (matches: MatchResult[], occurrence?: 'first' 
         return [matches[0]];
     }
     if (occurrence === 'last') {
-        return [matches[matches.length - 1]];
+        return [matches.at(-1)!];
     }
     return matches;
 };
@@ -235,10 +223,5 @@ export const filterByOccurrence = (matches: MatchResult[], occurrence?: 'first' 
  * // Rules without constraints allow everything
  * anyRuleAllowsId([{}], 999) // → true
  */
-export const anyRuleAllowsId = (rules: Pick<SplitRule, 'min' | 'max'>[], pageId: number): boolean => {
-    return rules.some((r) => {
-        const minOk = r.min === undefined || pageId >= r.min;
-        const maxOk = r.max === undefined || pageId <= r.max;
-        return minOk && maxOk;
-    });
-};
+export const anyRuleAllowsId = (rules: Pick<SplitRule, 'min' | 'max'>[], pageId: number) =>
+    rules.some((r) => (r.min === undefined || pageId >= r.min) && (r.max === undefined || pageId <= r.max));

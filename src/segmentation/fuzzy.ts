@@ -64,106 +64,23 @@ const EQUIV_GROUPS: string[][] = [
  * escapeRegex('[test]')        // → '\\[test\\]'
  * escapeRegex('a+b*c?')        // → 'a\\+b\\*c\\?'
  */
-export const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/**
- * Returns a regex character class for all equivalents of a given character.
- *
- * If the character belongs to one of the predefined equivalence groups
- * (e.g., ا/آ/أ/إ), the returned class will match any member of that group.
- * Otherwise, the original character is simply escaped for safe regex inclusion.
- *
- * @param ch - A single character to expand into its equivalence class
- * @returns A RegExp-safe string representing the character and its equivalents
- *
- * @example
- * getEquivClass('ا') // → '[اآأإ]' (matches any alef variant)
- * getEquivClass('ب') // → 'ب' (no equivalents, just escaped)
- * getEquivClass('.') // → '\\.' (regex metachar escaped)
- *
- * @internal
- */
-const getEquivClass = (ch: string): string => {
-    for (const group of EQUIV_GROUPS) {
-        if (group.includes(ch)) {
-            // join the group's members into a character class
-            return `[${group.map((c) => escapeRegex(c)).join('')}]`;
-        }
-    }
-    // not in equivalence groups -> return escaped character
-    return escapeRegex(ch);
+const getEquivClass = (ch: string) => {
+    const group = EQUIV_GROUPS.find((g) => g.includes(ch));
+    return group ? `[${group.map(escapeRegex).join('')}]` : escapeRegex(ch);
 };
 
-/**
- * Performs light normalization on Arabic text for consistent matching.
- *
- * Normalization steps:
- * 1. NFC normalization (canonical decomposition then composition)
- * 2. Remove Zero-Width Joiner (U+200D) and Zero-Width Non-Joiner (U+200C)
- * 3. Collapse multiple whitespace characters to single space
- * 4. Trim leading and trailing whitespace
- *
- * This normalization preserves diacritics and letter forms while removing
- * invisible characters that could interfere with matching.
- *
- * @param str - Arabic text to normalize
- * @returns Normalized string
- *
- * @example
- * normalizeArabicLight('حَدَّثَنَا')           // → 'حَدَّثَنَا' (diacritics preserved)
- * normalizeArabicLight('بسم  الله')          // → 'بسم الله' (spaces collapsed)
- * normalizeArabicLight('  text  ')          // → 'text' (trimmed)
- *
- * @internal
- */
-const normalizeArabicLight = (str: string) => {
-    return str
+const normalizeArabicLight = (str: string) =>
+    str
         .normalize('NFC')
-        .replace(/[\u200C\u200D]/g, '') // remove ZWJ/ZWNJ
+        .replace(/[\u200C\u200D]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
-};
 
-/**
- * Creates a diacritic-insensitive regex pattern for Arabic text matching.
- *
- * Transforms input text into a regex pattern that matches the text regardless
- * of diacritical marks (harakat) and character variations. Each character in
- * the input is:
- * 1. Expanded to its equivalence class (if applicable)
- * 2. Followed by an optional diacritics matcher
- *
- * This allows matching:
- * - `حدثنا` with `حَدَّثَنَا` (with full diacritics)
- * - `الإيمان` with `الايمان` (alef variants)
- * - `صلاة` with `صلاه` (ta marbuta ↔ ha)
- *
- * @param text - Input Arabic text to make diacritic-insensitive
- * @returns Regex pattern string that matches the text with or without diacritics
- *
- * @example
- * const pattern = makeDiacriticInsensitive('حدثنا');
- * // Each char gets equivalence class + optional diacritics
- * // Result matches: حدثنا, حَدَّثَنَا, حَدَثَنَا, etc.
- *
- * @example
- * const pattern = makeDiacriticInsensitive('باب');
- * new RegExp(pattern, 'u').test('بَابٌ')  // → true
- * new RegExp(pattern, 'u').test('باب')   // → true
- *
- * @example
- * // Using with split rules
- * {
- *   lineStartsWith: ['باب'],
- *   split: 'at',
- *   fuzzy: true  // Applies makeDiacriticInsensitive internally
- * }
- */
 export const makeDiacriticInsensitive = (text: string) => {
     const diacriticsMatcher = `${DIACRITICS_CLASS}*`;
-    const norm = normalizeArabicLight(text);
-    // Use Array.from to iterate grapheme-safe over the string (works fine for Arabic letters)
-    return Array.from(norm)
+    return Array.from(normalizeArabicLight(text))
         .map((ch) => getEquivClass(ch) + diacriticsMatcher)
         .join('');
 };

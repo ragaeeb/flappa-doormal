@@ -443,7 +443,24 @@ bunx biome lint .
 
 16. **Large Segment Performance & Debugging Strategy**: When processing large books (1000+ pages), avoid O(n²) algorithms. The library uses a fast-path threshold (1000 pages) to switch from accurate string-search boundary detection to cumulative-offset-based slicing. To diagnose performance bottlenecks: (1) Look for logs with "Using iterative path" or "Using accurate string-search path" with large `pageCount` values, (2) Check `iterations` count in completion logs, (3) Strategic logs are placed at operation boundaries (start/end) NOT inside tight loops to avoid log-induced performance regression.
 
+17. **`maxPages=0` is a hard invariant**: When `maxPages=0`, breakpoint windows must never scan beyond the current page boundary. Relying purely on boundary detection (string search) can fail near page ends for long Arabic text + space joiners, letting the window “see” into the next page and creating multi-page segments. The safe fix is to clamp the breakpoint window to the current page’s end using `boundaryPositions` in breakpoint processing.
+
+18. **`''` breakpoint semantics depend on whether the window is page-bounded vs length-bounded**: `''` means “page boundary fallback”. In page-window mode it should swallow the remainder of the current page when no other breakpoints match (avoids accidentally merging the next page). But when the active limiter is `maxContentLength`, forcing an early page-boundary split breaks sub-page segmentation across boundaries. The breakpoint selector needs to know whether it is currently length-bounded (e.g. `windowEndPosition === maxContentLength`) to choose the correct behavior.
+
+19. **Beware `.only` in test files**: A single `it.only(...)` can mask unrelated failing fixtures for a long time. When debugging, remove `.only` as soon as you have a focused reproduction, and re-run the full suite to catch latent failures.
+
+20. **Tooling gotcha: IDE diagnostics vs actual parser**: If the editor shows parse errors but `bun test` and `bunx biome check` pass, suspect unsaved local edits or stale diagnostics rather than codebase syntax. Always validate with a direct `bunx biome check <file>` before making sweeping “syntax fix” edits.
+
+21. **Content-based page detection fails with overlapping content**: The `computeNextFromIdx` function uses prefix matching to detect page transitions. When page 0 ends with text identical to page 1's prefix, it incorrectly advances `currentFromIdx`. **Fix**: When `maxPages=0`, override content-based detection with position-based detection via `findPageIndexForPosition(cursorPos, boundaryPositions, fromIdx)`. Always trust cumulative offsets over content heuristics for strict page isolation.
+
+22. **Test edge cases with data that TRIGGERS the bug path**: Simple test data often bypasses problematic code paths. Ensure tests: (a) use `maxContentLength` to force sub-page splitting, (b) include enough content to exceed window sizes, (c) create overlapping/duplicate text at page boundaries, (d) verify that segments are actually split (not just checking no crashes).
+
+23. **Debug breakpoint processing with the logger**: Pass a `logger` object with `debug` and `trace` methods to `segmentPages()`. Key logs: `boundaryPositions built` (page boundary byte offsets), `iteration=N` (shows `currentFromIdx`, `cursorPos`, `windowEndPosition` per loop), `Complete` (final segment count).
+
+24. **Navigating `breakpoint-processor.ts`**: Key functions in processing order: `applyBreakpoints()` (entry point), `processOversizedSegment()` (main loop ~lines 510-700), `computeWindowEndIdx()`, `findBreakOffsetForWindow()`, `advanceCursorAndIndex()`, `computeNextFromIdx()` (content-based page detection - can be buggy for overlaps, see #21).
+
 ### Process Template (Multi-agent design review, TDD-first)
+
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:
 

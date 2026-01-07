@@ -17,43 +17,34 @@ export type PartitionedRules = {
     fastFuzzyRules: FastFuzzyRule[];
 };
 
-export const partitionRulesForMatching = (rules: SplitRule[]): PartitionedRules => {
+export const partitionRulesForMatching = (rules: SplitRule[]) => {
     const combinableRules: { rule: SplitRule; prefix: string; index: number }[] = [];
     const standaloneRules: SplitRule[] = [];
     const fastFuzzyRules: FastFuzzyRule[] = [];
 
-    // Separate rules into combinable, standalone, and fast-fuzzy
     rules.forEach((rule, index) => {
-        // Fast-path: fuzzy + lineStartsWith + single token pattern like {{kitab}}
-        if ((rule as { fuzzy?: boolean }).fuzzy && 'lineStartsWith' in rule) {
-            const compiled =
-                rule.lineStartsWith.length === 1 ? compileFastFuzzyTokenRule(rule.lineStartsWith[0]) : null;
-            if (compiled) {
-                fastFuzzyRules.push({ compiled, kind: 'startsWith', rule, ruleIndex: index });
-                return; // handled by fast path
+        const fuzzy = (rule as { fuzzy?: boolean }).fuzzy;
+        if (fuzzy) {
+            if ('lineStartsWith' in rule && rule.lineStartsWith.length === 1) {
+                const compiled = compileFastFuzzyTokenRule(rule.lineStartsWith[0]);
+                if (compiled) {
+                    return fastFuzzyRules.push({ compiled, kind: 'startsWith', rule, ruleIndex: index });
+                }
             }
-        }
-
-        // Fast-path: fuzzy + lineStartsAfter + single token pattern like {{naql}}
-        if ((rule as { fuzzy?: boolean }).fuzzy && 'lineStartsAfter' in rule) {
-            const compiled =
-                rule.lineStartsAfter.length === 1 ? compileFastFuzzyTokenRule(rule.lineStartsAfter[0]) : null;
-            if (compiled) {
-                fastFuzzyRules.push({ compiled, kind: 'startsAfter', rule, ruleIndex: index });
-                return; // handled by fast path
+            if ('lineStartsAfter' in rule && rule.lineStartsAfter.length === 1) {
+                const compiled = compileFastFuzzyTokenRule(rule.lineStartsAfter[0]);
+                if (compiled) {
+                    return fastFuzzyRules.push({ compiled, kind: 'startsAfter', rule, ruleIndex: index });
+                }
             }
         }
 
         let isCombinable = true;
-
-        // Raw regex rules are combinable ONLY if they don't use named captures, backreferences, or anonymous captures
         if ('regex' in rule && rule.regex) {
-            const hasNamedCaptures = extractNamedCaptureNames(rule.regex).length > 0;
-            const hasBackreferences = /\\[1-9]/.test(rule.regex);
-            const hasAnonymousCaptures = hasCapturingGroup(rule.regex);
-            if (hasNamedCaptures || hasBackreferences || hasAnonymousCaptures) {
-                isCombinable = false;
-            }
+            isCombinable =
+                extractNamedCaptureNames(rule.regex).length === 0 &&
+                !/\\[1-9]/.test(rule.regex) &&
+                !hasCapturingGroup(rule.regex);
         }
 
         if (isCombinable) {
@@ -68,14 +59,11 @@ export const partitionRulesForMatching = (rules: SplitRule[]): PartitionedRules 
 
 export type PageStartGuardChecker = (rule: SplitRule, ruleIndex: number, matchStart: number) => boolean;
 
-export const createPageStartGuardChecker = (matchContent: string, pageMap: PageMap): PageStartGuardChecker => {
-    const pageStartToBoundaryIndex = new Map<number, number>();
-    for (let i = 0; i < pageMap.boundaries.length; i++) {
-        pageStartToBoundaryIndex.set(pageMap.boundaries[i].start, i);
-    }
-
+export const createPageStartGuardChecker = (matchContent: string, pageMap: PageMap) => {
+    const pageStartToBoundaryIndex = new Map(pageMap.boundaries.map((b, i) => [b.start, i]));
     const compiledPageStartPrev = new Map<number, RegExp | null>();
-    const getPageStartPrevRegex = (rule: SplitRule, ruleIndex: number): RegExp | null => {
+
+    const getPageStartPrevRegex = (rule: SplitRule, ruleIndex: number) => {
         if (compiledPageStartPrev.has(ruleIndex)) {
             return compiledPageStartPrev.get(ruleIndex) ?? null;
         }
@@ -84,58 +72,46 @@ export const createPageStartGuardChecker = (matchContent: string, pageMap: PageM
             compiledPageStartPrev.set(ruleIndex, null);
             return null;
         }
-        const expanded = processPattern(pattern, false).pattern;
-        const re = new RegExp(`(?:${expanded})$`, 'u');
+        const re = new RegExp(`(?:${processPattern(pattern, false).pattern})$`, 'u');
         compiledPageStartPrev.set(ruleIndex, re);
         return re;
     };
 
-    const getPrevPageLastNonWsChar = (boundaryIndex: number): string => {
+    const getPrevPageLastNonWsChar = (boundaryIndex: number) => {
         if (boundaryIndex <= 0) {
             return '';
         }
         const prevBoundary = pageMap.boundaries[boundaryIndex - 1];
-        // prevBoundary.end points at the inserted page-break newline; the last content char is end-1.
         for (let i = prevBoundary.end - 1; i >= prevBoundary.start; i--) {
             const ch = matchContent[i];
-            if (!ch) {
-                continue;
+            if (ch && !/\s/u.test(ch)) {
+                return ch;
             }
-            if (/\s/u.test(ch)) {
-                continue;
-            }
-            return ch;
         }
         return '';
     };
 
-    return (rule: SplitRule, ruleIndex: number, matchStart: number): boolean => {
+    return (rule: SplitRule, ruleIndex: number, matchStart: number) => {
         const boundaryIndex = pageStartToBoundaryIndex.get(matchStart);
         if (boundaryIndex === undefined || boundaryIndex === 0) {
-            return true; // not a page start, or the very first page
+            return true;
         }
         const prevReq = getPageStartPrevRegex(rule, ruleIndex);
         if (!prevReq) {
             return true;
         }
         const lastChar = getPrevPageLastNonWsChar(boundaryIndex);
-        if (!lastChar) {
-            return false;
-        }
-        return prevReq.test(lastChar);
+        return lastChar ? prevReq.test(lastChar) : false;
     };
 };
 
 /**
  * Checks if a pageId matches the min/max/exclude constraints of a rule.
  */
-const passesRuleConstraints = (rule: SplitRule, pageId: number): boolean => {
-    return (
-        (rule.min === undefined || pageId >= rule.min) &&
-        (rule.max === undefined || pageId <= rule.max) &&
-        !isPageExcluded(pageId, rule.exclude)
-    );
-};
+const passesRuleConstraints = (rule: SplitRule, pageId: number) =>
+    (rule.min === undefined || pageId >= rule.min) &&
+    (rule.max === undefined || pageId <= rule.max) &&
+    !isPageExcluded(pageId, rule.exclude);
 
 /**
  * Records a split point for a specific rule.
@@ -144,9 +120,9 @@ const recordSplitPointAt = (splitPointsByRule: Map<number, SplitPoint[]>, ruleIn
     const arr = splitPointsByRule.get(ruleIndex);
     if (!arr) {
         splitPointsByRule.set(ruleIndex, [sp]);
-        return;
+    } else {
+        arr.push(sp);
     }
-    arr.push(sp);
 };
 
 /**
@@ -210,7 +186,7 @@ export const collectFastFuzzySplitPoints = (
         }
     };
 
-    const isPageStart = (offset: number): boolean => offset === currentBoundary?.start;
+    const isPageStart = (offset: number) => offset === currentBoundary?.start;
 
     // Line starts are offset 0 and any char after '\n'
     for (let lineStart = 0; lineStart <= matchContent.length; ) {

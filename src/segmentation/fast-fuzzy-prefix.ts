@@ -14,11 +14,9 @@
 import { getTokenPattern } from './tokens.js';
 
 // U+064B..U+0652 (tashkeel/harakat)
-const isArabicDiacriticCode = (code: number): boolean => code >= 0x064b && code <= 0x0652;
+const isArabicDiacriticCode = (code: number) => code >= 0x064b && code <= 0x0652;
 
-// Map a char to a representative equivalence class key.
-// Keep this in sync with EQUIV_GROUPS in fuzzy.ts.
-const equivKey = (ch: string): string => {
+const equivKey = (ch: string) => {
     switch (ch) {
         case '\u0622': // آ
         case '\u0623': // أ
@@ -33,87 +31,43 @@ const equivKey = (ch: string): string => {
     }
 };
 
-/**
- * Match a fuzzy literal prefix at a given offset.
- *
- * - Skips diacritics in the content
- * - Applies equivalence groups on both content and literal
- *
- * @returns endOffset (exclusive) in CONTENT if matched; otherwise null.
- */
-export const matchFuzzyLiteralPrefixAt = (content: string, offset: number, literal: string): number | null => {
+export const matchFuzzyLiteralPrefixAt = (content: string, offset: number, literal: string) => {
     let i = offset;
-    // Skip leading diacritics in content (rare but possible)
     while (i < content.length && isArabicDiacriticCode(content.charCodeAt(i))) {
         i++;
     }
 
     for (let j = 0; j < literal.length; j++) {
         const litCh = literal[j];
-
-        // In literal, we treat whitespace literally (no collapsing).
-        // (Tokens like kitab/bab/fasl/naql/basmalah do not rely on fuzzy spaces.)
-        // Skip diacritics in content before matching each char.
         while (i < content.length && isArabicDiacriticCode(content.charCodeAt(i))) {
             i++;
         }
-
-        if (i >= content.length) {
-            return null;
-        }
-
-        const cCh = content[i];
-        if (equivKey(cCh) !== equivKey(litCh)) {
+        if (i >= content.length || equivKey(content[i]) !== equivKey(litCh)) {
             return null;
         }
         i++;
     }
 
-    // Allow trailing diacritics immediately after the matched prefix.
     while (i < content.length && isArabicDiacriticCode(content.charCodeAt(i))) {
         i++;
     }
     return i;
 };
 
-const isLiteralOnly = (s: string): boolean => {
-    // Reject anything that looks like regex syntax.
-    // We allow only plain text (including Arabic, spaces) and the alternation separator `|`.
-    // This intentionally rejects tokens like `tarqim: '[.!?؟؛]'`, which are not literal.
-    return !/[\\[\]{}()^$.*+?]/.test(s);
-};
+const isLiteralOnly = (s: string) => !/[\\[\]{}()^$.*+?]/.test(s);
 
-export type CompiledLiteralAlternation = {
-    alternatives: string[];
-};
-
-export const compileLiteralAlternation = (pattern: string): CompiledLiteralAlternation | null => {
-    if (!pattern) {
-        return null;
-    }
-    if (!isLiteralOnly(pattern)) {
+export const compileLiteralAlternation = (pattern: string) => {
+    if (!pattern || !isLiteralOnly(pattern)) {
         return null;
     }
     const alternatives = pattern
         .split('|')
         .map((s) => s.trim())
         .filter(Boolean);
-    if (!alternatives.length) {
-        return null;
-    }
-    return { alternatives };
+    return alternatives.length ? { alternatives } : null;
 };
 
-export type FastFuzzyTokenRule = {
-    token: string; // token name, e.g. 'kitab'
-    alternatives: string[]; // resolved literal alternatives
-};
-
-/**
- * Attempt to compile a fast fuzzy rule from a single-token pattern like `{{kitab}}`.
- * Returns null if not eligible.
- */
-export const compileFastFuzzyTokenRule = (tokenTemplate: string): FastFuzzyTokenRule | null => {
+export const compileFastFuzzyTokenRule = (tokenTemplate: string) => {
     const m = tokenTemplate.match(/^\{\{(\w+)\}\}$/);
     if (!m) {
         return null;
@@ -124,17 +78,10 @@ export const compileFastFuzzyTokenRule = (tokenTemplate: string): FastFuzzyToken
         return null;
     }
     const compiled = compileLiteralAlternation(tokenPattern);
-    if (!compiled) {
-        return null;
-    }
-    return { alternatives: compiled.alternatives, token };
+    return compiled ? { alternatives: compiled.alternatives, token } : null;
 };
 
-/**
- * Try matching any alternative for a compiled token at a line-start offset.
- * Returns endOffset (exclusive) on match, else null.
- */
-export const matchFastFuzzyTokenAt = (content: string, offset: number, compiled: FastFuzzyTokenRule): number | null => {
+export const matchFastFuzzyTokenAt = (content: string, offset: number, compiled: FastFuzzyTokenRule) => {
     for (const alt of compiled.alternatives) {
         const end = matchFuzzyLiteralPrefixAt(content, offset, alt);
         if (end !== null) {

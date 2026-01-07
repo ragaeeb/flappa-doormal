@@ -19,6 +19,7 @@ import {
     findExclusionBreakPosition,
     findNextPagePosition,
     findPageIndexForPosition,
+    findPageStartNearExpectedBoundary,
     findPatternBreakPosition,
     findSafeBreakPosition,
     hasExcludedPageInRange,
@@ -350,6 +351,46 @@ describe('breakpoint-utils', () => {
                 cumulativeOffsets,
             );
             expect(pos).toBe(remainingContent.indexOf('EEEE'));
+        });
+    });
+
+    describe('findPageStartNearExpectedBoundary', () => {
+        it('should not ignore a close space-preceded candidate when a far newline-preceded candidate exists', () => {
+            const pageIds = [1, 2];
+            const targetPage = `TARGET_START ${'x'.repeat(300)}`;
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [1, { content: 'PAGE1', index: 0, length: 5 }],
+                [2, { content: targetPage, index: 1, length: targetPage.length }],
+            ]);
+
+            const prefix = targetPage.slice(0, 140).trim();
+
+            // Build content with two occurrences of prefix:
+            // - First at position 101 (after 100 'A's and a newline)
+            // - Second at position 101 + 140 + 3000 + 1 = 3242 (after B's and a space)
+            const remainingContent = `${'A'.repeat(100)}\n${prefix}${'B'.repeat(3000)} ${prefix}${'C'.repeat(100)}`;
+
+            const firstOccurrence = 101; // 100 A's + 1 newline
+            const secondOccurrence = 101 + prefix.length + 3000 + 1; // first prefix + B's + space
+
+            // Verify positions
+            expect(remainingContent.indexOf(prefix)).toBe(firstOccurrence);
+            expect(remainingContent.lastIndexOf(prefix)).toBe(secondOccurrence);
+
+            // Set expected boundary near the second occurrence
+            const expectedBoundary = secondOccurrence + 10;
+
+            const pos = findPageStartNearExpectedBoundary(
+                remainingContent,
+                1,
+                expectedBoundary,
+                pageIds,
+                normalizedPages,
+            );
+
+            // The far newline-preceded candidate should be rejected by deviation,
+            // but the close space-preceded candidate should still be accepted.
+            expect(pos).toBe(secondOccurrence);
         });
     });
 
