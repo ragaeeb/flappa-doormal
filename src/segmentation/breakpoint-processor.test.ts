@@ -153,6 +153,91 @@ describe('breakpoint-processor', () => {
             expect(result.length).toBeGreaterThan(1);
         });
 
+        it('should treat empty breakpoint "" as next-page-boundary fallback (page-bounded window)', () => {
+            // With maxPages=1, we are allowed a 2-page window, but when no other patterns match
+            // the empty breakpoint must swallow only the remainder of the CURRENT page (break at next page start).
+            const pages = [
+                { content: 'A'.repeat(50), id: 1 },
+                { content: 'B'.repeat(50), id: 2 },
+                { content: 'C'.repeat(50), id: 3 },
+            ];
+            const normalizedContent = pages.map((p) => p.content);
+            const joined = normalizedContent.join(' ');
+
+            const result = applyBreakpoints(
+                [{ content: joined, from: 1, to: 3 }],
+                pages,
+                normalizedContent,
+                1,
+                [''],
+                'longer',
+                patternProcessor,
+            );
+
+            // First piece should be page 1 only (no to), second piece can be pages 2-3 (fits maxPages=1).
+            expect(result).toHaveLength(2);
+            expect(result[0]).toMatchObject({ from: 1 });
+            expect(result[0].to).toBeUndefined();
+            expect(result[1]).toMatchObject({ from: 2, to: 3 });
+        });
+
+        it('should not hang and should return correct count on fast path (1000+ pages, maxPages=0, breakpoints=[""])', () => {
+            // Regression guard for the 25k-page hang class: keep this small but above the fast-path threshold.
+            const pageCount = 1005;
+            const pages = Array.from({ length: pageCount }, (_, i) => ({ content: `P${i}`, id: i }));
+            const normalizedContent = pages.map((p) => p.content);
+            const joined = normalizedContent.join(' ');
+            const segments: Segment[] = [{ content: joined, from: 0, to: pageCount - 1 }];
+
+            const result = applyBreakpoints(segments, pages, normalizedContent, 0, [''], 'longer', patternProcessor);
+
+            expect(result).toHaveLength(pageCount);
+            expect(result[0]).toMatchObject({ from: 0 });
+            expect(result.at(-1)).toMatchObject({ from: pageCount - 1 });
+            expect(result.some((s) => s.to !== undefined)).toBe(false);
+        });
+
+        it('should not advance page index based on overlapping content when maxPages=0 (position-based detection)', () => {
+            // Reproduces the class of bug from src/index.test.ts:
+            // after a sub-page split within page 0, the next piece can START with text that also
+            // happens to be page 1's prefix. Content-based heuristics must NOT advance to page 1
+            // until the actual page boundary is crossed.
+            const shared = 'SHARED_PREFIX';
+            const page0 = `${'x'.repeat(45)} ${shared} ${'y'.repeat(60)}`; // split should land before shared
+            const page1 = `${shared} page1 starts here ${'z'.repeat(20)}`;
+            const pages = [
+                { content: page0, id: 0 },
+                { content: page1, id: 1 },
+            ];
+            const normalizedContent = pages.map((p) => p.content);
+            const joined = normalizedContent.join(' ');
+
+            const result = applyBreakpoints(
+                [{ content: joined, from: 0, to: 1 }],
+                pages,
+                normalizedContent,
+                0,
+                [''],
+                'longer',
+                patternProcessor,
+                undefined,
+                'space',
+                undefined,
+                50, // maxContentLength forces sub-page split within page0
+            );
+
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+
+            const firstFrom1 = result.findIndex((s) => s.from === 1);
+            expect(firstFrom1).toBeGreaterThan(0);
+            // Everything before the first page-1 segment must be attributed to page 0.
+            expect(result.slice(0, firstFrom1).every((s) => s.from === 0)).toBe(true);
+
+            // And we should have at least one piece within page0 that starts with the shared prefix,
+            // proving we hit the dangerous "looks like next page" state while still inside page0.
+            expect(result.some((s) => s.from === 0 && s.content.startsWith(shared))).toBe(true);
+        });
+
         it('should preserve metadata from first piece only', () => {
             const pages = [
                 { content: 'Content one', id: 1 },

@@ -858,6 +858,27 @@ describe('segmenter', () => {
                 expect(result[2].to).toBeUndefined();
             });
 
+            it('should not merge pages when maxPages=0 and maxContentLength forces sub-page splits', () => {
+                const pages: Page[] = [
+                    { content: 'x'.repeat(5000), id: 0 }, // long page, no punctuation
+                    { content: 'y'.repeat(500), id: 1 }, // short page, no punctuation
+                ];
+
+                const result = segmentPages(pages, {
+                    breakpoints: [{ pattern: '{{tarqim}}\\s*' }, ''],
+                    maxContentLength: 2000,
+                    maxPages: 0,
+                    rules: [],
+                });
+
+                // maxPages=0 => segments must not span pages
+                expect(result.some((s) => s.to !== undefined)).toBe(false);
+                // page 0 should be split into 3 chunks (2000, 2000, 1000)
+                expect(result.filter((s) => s.from === 0)).toHaveLength(3);
+                // page 1 should be a single segment
+                expect(result.filter((s) => s.from === 1)).toHaveLength(1);
+            });
+
             it('should handle pageJoiner="newline" and "space" correctly without affecting boundary detection', () => {
                 // Verify that boundary detection works regardless of the joiner used.
                 // The algorithm prioritizes newlines, but should fall back to any whitespace if joiner is space.
@@ -878,6 +899,27 @@ describe('segmenter', () => {
                 expect(resultNewline).toHaveLength(2);
                 expect(resultNewline[0].content).toContain('Page 1 end.');
                 expect(resultNewline[1].content).toContain('Page 2 end.');
+            });
+
+            it('should respect pageJoiner for structural segments that span multiple pages', () => {
+                const pages: Page[] = [
+                    { content: '## Header', id: 1 },
+                    { content: 'Body Text', id: 2 },
+                ];
+
+                const rules: SplitRule[] = [{ lineStartsWith: ['## '], split: 'at' }];
+
+                const asSpace = segmentPages(pages, { rules, pageJoiner: 'space' });
+                expect(asSpace).toHaveLength(1);
+                expect(asSpace[0].from).toBe(1);
+                expect(asSpace[0].to).toBe(2);
+                expect(asSpace[0].content).toBe('## Header Body Text');
+
+                const asNewline = segmentPages(pages, { rules, pageJoiner: 'newline' });
+                expect(asNewline).toHaveLength(1);
+                expect(asNewline[0].from).toBe(1);
+                expect(asNewline[0].to).toBe(2);
+                expect(asNewline[0].content).toBe('## Header\nBody Text');
             });
 
             it('should correctly split very short pages (<100 chars) with duplicate prefixes', () => {
@@ -2448,6 +2490,641 @@ describe('segmenter', () => {
                 // For Arabic, we just verify the segment content length is reasonable
                 expect(seg.content.length).toBeLessThanOrEqual(50);
             }
+        });
+    });
+
+    describe('maxPages=0 page boundary preservation', () => {
+        it('should not merge pages when second page has no breakpoint matches', () => {
+            // Regression test: with maxPages=0, when the second page has no breakpoint matches
+            // (no punctuation in this case), the segment should stop at the page boundary.
+            // Bug: the last segment was incorrectly including content from both pages (from: 0, to: 1).
+            const pages: Page[] = [
+                { content: 'First page ends with punctuation.', id: 0 },
+                {
+                    content:
+                        'Second page has absolutely no punctuation at all just a long string of text without any periods commas or other marks',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [
+                    { pattern: '[.!?]\\s*' }, // Only matches the first page
+                    '', // Page boundary fallback
+                ],
+                maxContentLength: 2000, // Trigger breakpoint processing
+                maxPages: 0, // Each page must be its own segment
+            });
+
+            // Verify last segment is ONLY from page 1, not merged with page 0
+            const lastSegment = result.at(-1);
+            expect(lastSegment?.from).toBe(1);
+            expect(lastSegment?.to).toBeUndefined(); // Single page = no 'to'
+
+            // Also verify first segment is only from page 0
+            const firstSegment = result[0];
+            expect(firstSegment?.from).toBe(0);
+            expect(firstSegment?.to).toBeUndefined();
+        });
+    });
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // COMPREHENSIVE EDGE CASE TESTS
+    // These tests are designed to catch bugs similar to the maxPages=0 merge bug
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    describe('Edge Cases: maxPages=0 invariant enforcement', () => {
+        it('should handle maxPages=0 with non-sequential page IDs', () => {
+            // Non-sequential IDs can confuse offset calculations
+            const pages: Page[] = [
+                { content: 'Page content A. More text here.', id: 100 },
+                { content: 'Page content B. Even more text.', id: 500 },
+                { content: 'Page content C without punctuation at all', id: 999 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: '\\.\\s*' }, ''],
+                maxPages: 0,
+            });
+
+            // Every segment must have a unique 'from' and no 'to'
+            expect(result.some((s) => s.to !== undefined)).toBe(false);
+            expect(result.filter((s) => s.from === 100).length).toBeGreaterThan(0);
+            expect(result.filter((s) => s.from === 500).length).toBeGreaterThan(0);
+            expect(result.filter((s) => s.from === 999).length).toBeGreaterThan(0);
+        });
+
+        it('should handle maxPages=0 with single-character pages', () => {
+            const pages: Page[] = [
+                { content: 'A', id: 0 },
+                { content: 'B', id: 1 },
+                { content: 'C', id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+            });
+
+            expect(result).toHaveLength(3);
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+            expect(result[0].content).toBe('A');
+            expect(result[1].content).toBe('B');
+            expect(result[2].content).toBe('C');
+        });
+
+        it('should handle maxPages=0 when many pages have identical content', () => {
+            // Stress: identical content can confuse content-based boundary detection.
+            // With maxPages=0, the engine must still produce one segment per page.
+            const pages: Page[] = Array.from({ length: 50 }, (_, i) => ({ content: 'SAME_CONTENT', id: i }));
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+            });
+
+            expect(result).toHaveLength(50);
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+            for (let i = 0; i < 50; i++) {
+                expect(result[i]).toMatchObject({ from: i, content: 'SAME_CONTENT' });
+            }
+        });
+
+        it('should handle maxPages=0 with empty pages interspersed', () => {
+            const pages: Page[] = [
+                { content: 'Page one content', id: 0 },
+                { content: '', id: 1 }, // Empty
+                { content: 'Page three content', id: 2 },
+                { content: '   ', id: 3 }, // Whitespace only
+                { content: 'Page five content', id: 4 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+            });
+
+            // Should skip empty pages and not merge across them
+            expect(result.length).toBeGreaterThanOrEqual(3);
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+
+        it('should handle maxPages=0 when page content exactly equals maxContentLength', () => {
+            // Edge case: content length === maxContentLength
+            const pages: Page[] = [
+                { content: 'x'.repeat(100), id: 0 },
+                { content: 'y'.repeat(100), id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxContentLength: 100,
+                maxPages: 0,
+            });
+
+            // Each page fits exactly, should not merge
+            expect(result).toHaveLength(2);
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+
+        it('should handle maxPages=0 when maxContentLength is larger than any single page', () => {
+            const pages: Page[] = [
+                { content: 'Short page one.', id: 0 },
+                { content: 'Short page two.', id: 1 },
+                { content: 'Short page three.', id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', ''],
+                maxContentLength: 10000, // Much larger than any page
+                maxPages: 0,
+            });
+
+            // Should still keep pages separate even though they'd fit in maxContentLength
+            expect(result.length).toBeGreaterThanOrEqual(3);
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+    });
+
+    describe('Edge Cases: Unicode and special characters', () => {
+        it('should handle Arabic text with diacritics at page boundaries', () => {
+            const pages: Page[] = [
+                { content: 'الحَمْدُ لِلَّهِ رَبِّ', id: 0 }, // With diacritics
+                { content: 'الْعَالَمِينَ الرَّحْمَنِ', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+            });
+
+            expect(result).toHaveLength(2);
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+
+        it('should not split in the middle of a surrogate pair', () => {
+            // Emoji and other characters that require surrogate pairs
+            const emoji = '😀'; // U+1F600, requires surrogate pair
+            const pages: Page[] = [{ content: `Text with emoji ${emoji}${emoji}${emoji} more text`, id: 0 }];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxContentLength: 50,
+                maxPages: 0,
+            });
+
+            // Each segment should be valid UTF-16 (no broken surrogates)
+            for (const seg of result) {
+                // Check that decoding doesn't throw
+                expect(() => JSON.stringify(seg.content)).not.toThrow();
+                // Check no replacement characters (invalid surrogates become \uFFFD)
+                expect(seg.content.includes('\uFFFD')).toBe(false);
+            }
+        });
+
+        it('should handle RTL text with mixed scripts', () => {
+            const pages: Page[] = [
+                { content: 'English text followed by عربي text.', id: 0 },
+                { content: 'More עברית and English.', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', ''],
+                maxPages: 0,
+            });
+
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+    });
+
+    describe('Edge Cases: Breakpoint pattern edge cases', () => {
+        it('should handle empty string breakpoint as page boundary fallback', () => {
+            const pages: Page[] = [
+                { content: 'Page one without any breakpoint patterns', id: 0 },
+                { content: 'Page two also lacks patterns', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [
+                    '\\n\\n', // Won't match
+                    '', // Fallback to page boundary
+                ],
+                maxPages: 0,
+            });
+
+            expect(result).toHaveLength(2);
+            expect(result[0].from).toBe(0);
+            expect(result[1].from).toBe(1);
+        });
+
+        it('should handle breakpoint at the very start of a page', () => {
+            const pages: Page[] = [
+                { content: 'First page content', id: 0 },
+                { content: '.Second page starts with breakpoint', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['^\\.', ''],
+                maxPages: 0,
+            });
+
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+
+        it('should handle breakpoint at the very end of a page', () => {
+            const pages: Page[] = [
+                { content: 'First page content.', id: 0 }, // Ends with breakpoint
+                { content: 'Second page content without punctuation', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', ''],
+                maxPages: 0,
+            });
+
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+
+        it('should handle overlapping breakpoint patterns', () => {
+            // Two patterns that could match the same position
+            const pages: Page[] = [{ content: 'Text..More text...Even more text', id: 0 }];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.+', '\\.\\.\\.'], // Both match dots
+                maxContentLength: 50,
+                maxPages: 0,
+            });
+
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+    });
+
+    describe('Edge Cases: Exclusion patterns with maxPages=0', () => {
+        it('should respect page exclusions with maxPages=0', () => {
+            // Use longer content to trigger sub-page splitting
+            const pages: Page[] = [
+                { content: 'First sentence on page zero. Second sentence here. Third sentence now.', id: 0 },
+                { content: 'First sentence on page one. Second sentence here. Third sentence now.', id: 1 },
+                { content: 'First sentence on page two. Second sentence here. Third sentence now.', id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [
+                    { exclude: [1], pattern: '\\.\\s*' }, // Don't break on page 1
+                    '',
+                ],
+                maxContentLength: 50, // Force sub-page splitting
+                maxPages: 0,
+            });
+
+            // Page 0 and 2 should have multiple segments (split on dots due to maxContentLength)
+            // Page 1 should be a single segment (no splits due to exclusion - patterns don't match)
+            // BUT with maxContentLength, it may still split at safe positions
+            expect(result.filter((s) => s.from === 0).length).toBeGreaterThanOrEqual(1);
+            expect(result.filter((s) => s.from === 1).length).toBeGreaterThanOrEqual(1);
+            expect(result.filter((s) => s.from === 2).length).toBeGreaterThanOrEqual(1);
+            // No segments span pages
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+
+        it('should handle exclusion ranges with maxPages=0', () => {
+            // Use longer content that exceeds maxContentLength to force splitting
+            const pages: Page[] = [
+                { content: 'Sentence A on page zero. Sentence B also here. Sentence C as well.', id: 0 },
+                { content: 'Sentence D on page one. Sentence E also here. Sentence F as well.', id: 1 },
+                { content: 'Sentence G on page two. Sentence H also here. Sentence I as well.', id: 2 },
+                { content: 'Sentence J on page three. Sentence K also here. Sentence L as well.', id: 3 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [
+                    { exclude: [[1, 2]], pattern: '\\.\\s*' }, // Don't break on pages 1-2
+                    '',
+                ],
+                maxContentLength: 50, // Force sub-page splitting
+                maxPages: 0,
+            });
+
+            // All pages should have at least one segment
+            expect(result.filter((s) => s.from === 0).length).toBeGreaterThanOrEqual(1);
+            expect(result.filter((s) => s.from === 1).length).toBeGreaterThanOrEqual(1);
+            expect(result.filter((s) => s.from === 2).length).toBeGreaterThanOrEqual(1);
+            expect(result.filter((s) => s.from === 3).length).toBeGreaterThanOrEqual(1);
+            // No segments span pages
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+    });
+
+    describe('Edge Cases: Boundary position accuracy', () => {
+        it('should correctly identify page boundaries when pages have similar prefixes', () => {
+            // This tests the findPageStartNearExpectedBoundary function
+            const commonPrefix = 'SHARED_PREFIX_';
+            const pages: Page[] = [
+                { content: `${commonPrefix}Page 1 unique content here.`, id: 0 },
+                { content: `${commonPrefix}Page 2 different content.`, id: 1 },
+                { content: `${commonPrefix}Page 3 another variation.`, id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+            });
+
+            expect(result).toHaveLength(3);
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+            expect(result[0].content).toContain('Page 1');
+            expect(result[1].content).toContain('Page 2');
+            expect(result[2].content).toContain('Page 3');
+        });
+
+        it('should handle duplicate content across pages', () => {
+            const pages: Page[] = [
+                { content: 'Identical content', id: 0 },
+                { content: 'Identical content', id: 1 },
+                { content: 'Identical content', id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+            });
+
+            // Should still produce separate segments even with identical content
+            expect(result).toHaveLength(3);
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+
+        it('should handle pages where one is a substring of another', () => {
+            const pages: Page[] = [
+                { content: 'Short', id: 0 },
+                { content: 'Short and longer content', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+            });
+
+            expect(result).toHaveLength(2);
+            expect(result[0].content).toBe('Short');
+            expect(result[1].content).toBe('Short and longer content');
+        });
+    });
+
+    describe('Edge Cases: Large scale and performance-related', () => {
+        it('should handle many small pages with maxPages=0', () => {
+            const pages: Page[] = Array.from({ length: 50 }, (_, i) => ({
+                content: `Page ${i} content.`,
+                id: i,
+            }));
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+            });
+
+            // Should have at least 50 segments (one per page, possibly more if split on dots)
+            expect(result.length).toBeGreaterThanOrEqual(50);
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+
+        it('should handle a single very large page with many breakpoints', () => {
+            // 10000 characters with punctuation every 50 chars
+            const content = Array.from({ length: 200 }, (_, i) => `Sentence number ${i}.`).join(' ');
+            const pages: Page[] = [{ content, id: 0 }];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*'],
+                maxContentLength: 500,
+                maxPages: 0,
+            });
+
+            // Should produce multiple segments, all from page 0
+            expect(result.length).toBeGreaterThan(1);
+            expect(result.every((s) => s.from === 0 && s.to === undefined)).toBe(true);
+        });
+    });
+
+    describe('Edge Cases: Interaction between maxPages and maxContentLength', () => {
+        it('should respect both constraints when maxPages=0 and maxContentLength is set', () => {
+            // Each page > maxContentLength, should split within page
+            const pages: Page[] = [
+                { content: 'x'.repeat(300), id: 0 },
+                { content: 'y'.repeat(300), id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxContentLength: 100,
+                maxPages: 0,
+            });
+
+            // Each page should split into 3 segments (300/100)
+            expect(result.filter((s) => s.from === 0)).toHaveLength(3);
+            expect(result.filter((s) => s.from === 1)).toHaveLength(3);
+            // No segment should span pages
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+
+        it('should handle maxPages=1 with maxContentLength smaller than combined pages', () => {
+            const pages: Page[] = [
+                { content: 'Page 0 content here.', id: 0 },
+                { content: 'Page 1 content here.', id: 1 },
+                { content: 'Page 2 content here.', id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', ''],
+                maxContentLength: 50,
+                maxPages: 1, // Allows spanning up to 2 pages
+            });
+
+            // maxContentLength is stricter in this case
+            for (const seg of result) {
+                expect(seg.content.length).toBeLessThanOrEqual(50);
+            }
+        });
+
+        it('should handle maxPages=-1 (no page limit) with maxContentLength', () => {
+            const pages: Page[] = [
+                { content: 'Page 0.', id: 0 },
+                { content: 'Page 1.', id: 1 },
+                { content: 'Page 2.', id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*'],
+                maxContentLength: 100,
+                maxPages: -1, // No page limit
+            });
+
+            // Should still respect maxContentLength
+            for (const seg of result) {
+                expect(seg.content.length).toBeLessThanOrEqual(100);
+            }
+        });
+    });
+
+    describe('Edge Cases: Content overlap at page boundaries (maxPages=0 regression)', () => {
+        // These tests specifically target the bug where content-based page detection
+        // in computeNextFromIdx gets confused by shared/overlapping text at page boundaries.
+
+        it('should not merge when page 0 ends with the same text page 1 starts with', () => {
+            // This is the exact pattern that caused the original bug
+            const sharedText = 'This text appears at both boundaries';
+            const pages: Page[] = [
+                // Place the sharedText just after ~45 chars so maxContentLength=50 splits right BEFORE it,
+                // making the next piece begin with sharedText while we are still inside page 0.
+                { content: `${'x'.repeat(45)} ${sharedText} ${'y'.repeat(30)}`, id: 0 },
+                { content: `${sharedText} and continues on page 1.`, id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', ''],
+                // Force at least one sub-page split on page 0 so we can hit the dangerous case:
+                // remainingContent starts with page 1's prefix while the cursor is still in page 0.
+                maxContentLength: 50,
+                maxPages: 0,
+            });
+
+            // Should never have a segment spanning pages
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+            // Ensure we actually exercised a sub-page split on page 0 (otherwise this test can become a no-op).
+            expect(result.filter((s) => s.from === 0).length).toBeGreaterThanOrEqual(2);
+            // Verify we have segments from both pages
+            expect(result.some((s) => s.from === 0)).toBe(true);
+            expect(result.some((s) => s.from === 1)).toBe(true);
+        });
+
+        it('should not merge when multiple pages share the same prefix', () => {
+            const sharedPrefix = 'REPEATED_START_TEXT ';
+            const pages: Page[] = [
+                { content: `${sharedPrefix}Unique content A. More text.`, id: 0 },
+                { content: `${sharedPrefix}Unique content B. More text.`, id: 1 },
+                { content: `${sharedPrefix}Unique content C. More text.`, id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', ''],
+                maxContentLength: 100,
+                maxPages: 0,
+            });
+
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+            expect(result.filter((s) => s.from === 0).length).toBeGreaterThanOrEqual(1);
+            expect(result.filter((s) => s.from === 1).length).toBeGreaterThanOrEqual(1);
+            expect(result.filter((s) => s.from === 2).length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('should not merge when page content is a continuation of previous page', () => {
+            // Simulates OCR/scan artifacts where sentences are cut mid-way
+            const pages: Page[] = [
+                { content: 'First sentence ends here. Second sentence starts and', id: 0 },
+                { content: 'continues from the previous page. Third sentence.', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', ''],
+                maxContentLength: 200,
+                maxPages: 0,
+            });
+
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+
+        it('should handle Arabic text with shared phrases at boundaries', () => {
+            // Arabic text often has common phrases that might appear at boundaries
+            const sharedPhrase = 'قال الشيخ';
+            const pages: Page[] = [
+                { content: `نص عربي طويل. ${sharedPhrase}`, id: 0 },
+                { content: `${sharedPhrase} رحمه الله تعالى`, id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', ''],
+                maxContentLength: 200,
+                maxPages: 0,
+            });
+
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+            expect(result.some((s) => s.from === 0)).toBe(true);
+            expect(result.some((s) => s.from === 1)).toBe(true);
+        });
+
+        it('should handle when the entire last sentence of page 0 is duplicated at start of page 1', () => {
+            // This is common in books where the last line is repeated as a header on the next page
+            const lastSentence = 'The conclusion of this chapter.';
+            const pages: Page[] = [
+                { content: `Introduction. Middle content. ${lastSentence}`, id: 0 },
+                { content: `${lastSentence} New chapter begins here.`, id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', ''],
+                maxContentLength: 100,
+                maxPages: 0,
+            });
+
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+            // Verify both pages have segments
+            expect(result.filter((s) => s.from === 0).length).toBeGreaterThanOrEqual(1);
+            expect(result.filter((s) => s.from === 1).length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('should handle when page boundary falls in the middle of repeated content', () => {
+            // The breakpoint falls within shared content
+            const pages: Page[] = [
+                { content: 'Text before. Shared sentence continues', id: 0 },
+                { content: 'on the next page. Text after.', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', ''],
+                maxContentLength: 200,
+                maxPages: 0,
+            });
+
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+
+        it('should not merge with long overlapping content and sub-page splitting', () => {
+            // Combines overlapping content with maxContentLength forcing sub-page splits
+            const sharedText = 'This text is shared between pages and is quite long to trigger splits';
+            const pages: Page[] = [
+                { content: `Page 0 start. Some content here. ${sharedText}`, id: 0 },
+                { content: `${sharedText} and then page 1 continues with more content.`, id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', ''],
+                maxContentLength: 50, // Force sub-page splits
+                maxPages: 0,
+            });
+
+            // No segment should span pages
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+            // Should have multiple segments per page due to small maxContentLength
+            expect(result.filter((s) => s.from === 0).length).toBeGreaterThanOrEqual(1);
+            expect(result.filter((s) => s.from === 1).length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('should handle three pages with circular overlap (A ends with B prefix, B ends with C prefix)', () => {
+            const pages: Page[] = [
+                { content: 'Page A content. Start of B content', id: 0 },
+                { content: 'Start of B content here. Start of C content', id: 1 },
+                { content: 'Start of C content continues here.', id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', ''],
+                maxContentLength: 200,
+                maxPages: 0,
+            });
+
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+            expect(result.some((s) => s.from === 0)).toBe(true);
+            expect(result.some((s) => s.from === 1)).toBe(true);
+            expect(result.some((s) => s.from === 2)).toBe(true);
         });
     });
 });

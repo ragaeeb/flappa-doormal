@@ -152,7 +152,11 @@ describe('Max Content Length Segmentation', () => {
         // 3 pages, each 100 chars.
         // maxPages: 1 (allows up to 2 pages joined).
         // maxContentLength: 1000 (loose).
-        // Should split into [Page 0+1] and [Page 2].
+        // With breakpoints=[''] (page-boundary fallback), when we are forced to split an oversized span,
+        // the fallback should swallow the remainder of the CURRENT page if no other breakpoints match.
+        //
+        // After the first split, the remaining span (pages 1-2) fits within maxPages=1, so it is allowed
+        // to remain merged as a single segment.
 
         const pages: Page[] = [
             { content: 'a'.repeat(100), id: 0 },
@@ -167,19 +171,10 @@ describe('Max Content Length Segmentation', () => {
             prefer: 'longer', // Greedy fill
         });
 
-        // expected: 2 segments.
-        // Seg 1: 0-1 (span 1). Length 201 (with space joiner).
-        // Seg 2: 2 (span 0). Length 100.
-        expect(result.length).toBe(2);
-
-        // Check seg 1
-        expect(result[0].from).toBe(0);
-        expect(result[0].to).toBe(1);
-        expect(result[0].content.length).toBeGreaterThan(200);
-
-        // Check seg 2
-        expect(result[1].from).toBe(2);
-        expect(result[1].to).toBeUndefined(); // or 2
+        expect(result).toHaveLength(2);
+        expect(result[0]).toMatchObject({ from: 0 });
+        expect(result[0].to).toBeUndefined();
+        expect(result[1]).toMatchObject({ from: 1, to: 2 });
     });
 
     it('should split based on maxContentLength when it is the stricter constraint (with maxPages=1)', () => {
@@ -243,5 +238,23 @@ describe('Max Content Length Segmentation', () => {
         expect(() => {
             segmentPages(pages, { maxContentLength: 49 });
         }).toThrow(/maxContentLength must be at least 50 characters/);
+    });
+
+    it('should avoid producing segments that start with a combining mark when hard-splitting', () => {
+        // Create content with no whitespace/punctuation so we fall through to the hard-split path.
+        // Pattern: base letter + combining mark (shadda), repeated.
+        const unit = `ب\u0651`;
+        const content = unit.repeat(80); // 160 code units
+        const pages: Page[] = [{ content, id: 0 }];
+
+        const result = segmentPages(pages, {
+            breakpoints: ['Z'], // No match
+            maxContentLength: 50,
+        });
+
+        // No segment should start with a combining mark.
+        for (const seg of result) {
+            expect(seg.content[0]).not.toMatch(/\p{M}/u);
+        }
     });
 });

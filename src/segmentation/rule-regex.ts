@@ -44,10 +44,7 @@ export type RuleRegex = {
  *
  * NOTE: Named capture groups are still captures, but they're tracked via `captureNames`.
  */
-export const hasCapturingGroup = (pattern: string): boolean => {
-    // Match ( that is NOT followed by ? (excludes non-capturing and named groups)
-    return /\((?!\?)/.test(pattern);
-};
+export const hasCapturingGroup = (pattern: string) => /\((?!\?)/.test(pattern);
 
 /**
  * Extracts named capture group names from a regex pattern.
@@ -59,25 +56,18 @@ export const hasCapturingGroup = (pattern: string): boolean => {
  * extractNamedCaptureNames('^(?<a>\\d+)(?<b>\\w+)') // ['a', 'b']
  * extractNamedCaptureNames('^\\d+') // []
  */
-export const extractNamedCaptureNames = (pattern: string): string[] => {
-    const names: string[] = [];
-    // Match (?<name> where name is the capture group name
-    const namedGroupRegex = /\(\?<([^>]+)>/g;
-    for (const match of pattern.matchAll(namedGroupRegex)) {
-        names.push(match[1]);
-    }
-    return names;
-};
+export const extractNamedCaptureNames = (pattern: string) => [...pattern.matchAll(/\(\?<([^>]+)>/g)].map((m) => m[1]);
 
 /**
  * Safely compiles a regex pattern, throwing a helpful error if invalid.
  */
-export const compileRuleRegex = (pattern: string): RegExp => {
+export const compileRuleRegex = (pattern: string) => {
     try {
         return new RegExp(pattern, 'gmu');
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`Invalid regex pattern: ${pattern}\n  Cause: ${message}`);
+        throw new Error(
+            `Invalid regex pattern: ${pattern}\n  Cause: ${error instanceof Error ? error.message : String(error)}`,
+        );
     }
 };
 
@@ -86,133 +76,100 @@ export const compileRuleRegex = (pattern: string): RegExp => {
  *
  * Brackets `()[]` outside `{{tokens}}` are auto-escaped.
  */
-export const processPattern = (pattern: string, fuzzy: boolean, capturePrefix?: string): ProcessedPattern => {
-    const escaped = escapeTemplateBrackets(pattern);
-    const fuzzyTransform = fuzzy ? makeDiacriticInsensitive : undefined;
-    const { pattern: expanded, captureNames } = expandTokensWithCaptures(escaped, fuzzyTransform, capturePrefix);
+export const processPattern = (pattern: string, fuzzy: boolean, capturePrefix?: string) => {
+    const { pattern: expanded, captureNames } = expandTokensWithCaptures(
+        escapeTemplateBrackets(pattern),
+        fuzzy ? makeDiacriticInsensitive : undefined,
+        capturePrefix,
+    );
     return { captureNames, pattern: expanded };
 };
 
-export const buildLineStartsAfterRegexSource = (
-    patterns: string[],
-    fuzzy: boolean,
-    capturePrefix?: string,
-): { regex: string; captureNames: string[] } => {
+export const buildLineStartsAfterRegexSource = (patterns: string[], fuzzy: boolean, capturePrefix?: string) => {
     const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
-    const union = processed.map((p) => p.pattern).join('|');
-    const captureNames = processed.flatMap((p) => p.captureNames);
-    // For lineStartsAfter, we need to capture the content.
-    // If we have a prefix (combined-regex mode), we name the internal content capture so the caller
-    // can compute marker length. IMPORTANT: this internal group is not a "user capture", so it must
-    // NOT be included in `captureNames` (otherwise it leaks into segment.meta as `content`).
-    const contentCapture = capturePrefix ? `(?<${capturePrefix}__content>.*)` : '(.*)';
-    // Allow zero-width formatters (LRM, RLM, ALM, etc.) at line start before matching content.
-    const zeroWidthPrefix = '[\\u200E\\u200F\\u061C\\u200B\\uFEFF]*';
-    return { captureNames, regex: `^${zeroWidthPrefix}(?:${union})${contentCapture}` };
+    return {
+        captureNames: processed.flatMap((p) => p.captureNames),
+        regex: `^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:${processed.map((p) => p.pattern).join('|')})${capturePrefix ? `(?<${capturePrefix}__content>.*)` : '(.*)'}`,
+    };
 };
 
-export const buildLineStartsWithRegexSource = (
-    patterns: string[],
-    fuzzy: boolean,
-    capturePrefix?: string,
-): { regex: string; captureNames: string[] } => {
+export const buildLineStartsWithRegexSource = (patterns: string[], fuzzy: boolean, capturePrefix?: string) => {
     const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
-    const union = processed.map((p) => p.pattern).join('|');
-    const captureNames = processed.flatMap((p) => p.captureNames);
-    // Allow zero-width formatters (LRM, RLM, ALM, etc.) at line start before matching content.
-    // These invisible Unicode characters are common in Arabic text and shouldn't affect semantics.
-    // U+200E (LRM), U+200F (RLM), U+061C (ALM), U+200B (ZWSP), U+FEFF (BOM/ZWNBSP)
-    const zeroWidthPrefix = '[\\u200E\\u200F\\u061C\\u200B\\uFEFF]*';
-    return { captureNames, regex: `^${zeroWidthPrefix}(?:${union})` };
+    return {
+        captureNames: processed.flatMap((p) => p.captureNames),
+        regex: `^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:${processed.map((p) => p.pattern).join('|')})`,
+    };
 };
 
-export const buildLineEndsWithRegexSource = (
-    patterns: string[],
-    fuzzy: boolean,
-    capturePrefix?: string,
-): { regex: string; captureNames: string[] } => {
+export const buildLineEndsWithRegexSource = (patterns: string[], fuzzy: boolean, capturePrefix?: string) => {
     const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
-    const union = processed.map((p) => p.pattern).join('|');
-    const captureNames = processed.flatMap((p) => p.captureNames);
-    return { captureNames, regex: `(?:${union})$` };
+    return {
+        captureNames: processed.flatMap((p) => p.captureNames),
+        regex: `(?:${processed.map((p) => p.pattern).join('|')})$`,
+    };
 };
 
-export const buildTemplateRegexSource = (
-    template: string,
-    capturePrefix?: string,
-): { regex: string; captureNames: string[] } => {
-    const escaped = escapeTemplateBrackets(template);
-    const { pattern, captureNames } = expandTokensWithCaptures(escaped, undefined, capturePrefix);
+export const buildTemplateRegexSource = (template: string, capturePrefix?: string) => {
+    const { pattern, captureNames } = expandTokensWithCaptures(
+        escapeTemplateBrackets(template),
+        undefined,
+        capturePrefix,
+    );
     return { captureNames, regex: pattern };
 };
-
-export const determineUsesCapture = (regexSource: string, _captureNames: string[]): boolean =>
-    hasCapturingGroup(regexSource);
 
 /**
  * Builds a compiled regex and metadata from a split rule.
  *
  * Behavior mirrors the previous implementation in `segmenter.ts`.
  */
-export const buildRuleRegex = (rule: SplitRule, capturePrefix?: string): RuleRegex => {
-    const s: {
-        lineStartsWith?: string[];
-        lineStartsAfter?: string[];
-        lineEndsWith?: string[];
-        template?: string;
-        regex?: string;
-    } = { ...rule };
+export const buildRuleRegex = (rule: SplitRule, capturePrefix?: string) => {
+    const { lineStartsWith, lineStartsAfter, lineEndsWith, template, regex } = rule as any;
+    const fuzzy =
+        (rule as { fuzzy?: boolean }).fuzzy ??
+        shouldDefaultToFuzzy([...(lineStartsWith ?? []), ...(lineStartsAfter ?? []), ...(lineEndsWith ?? [])]);
 
-    // Auto-detect fuzzy for tokens like bab, kitab, etc. unless explicitly set
-    const allPatterns = [...(s.lineStartsWith ?? []), ...(s.lineStartsAfter ?? []), ...(s.lineEndsWith ?? [])];
-    const explicitFuzzy = (rule as { fuzzy?: boolean }).fuzzy;
-    const fuzzy = explicitFuzzy ?? shouldDefaultToFuzzy(allPatterns);
+    if (lineStartsAfter?.length) {
+        const { regex: lsaRegex, captureNames } = buildLineStartsAfterRegexSource(
+            lineStartsAfter,
+            fuzzy,
+            capturePrefix,
+        );
+        return { captureNames, regex: compileRuleRegex(lsaRegex), usesCapture: true, usesLineStartsAfter: true };
+    }
+
+    let finalRegex = regex;
     let allCaptureNames: string[] = [];
 
-    // lineStartsAfter: creates a capturing group to exclude the marker from content
-    if (s.lineStartsAfter?.length) {
-        const { regex, captureNames } = buildLineStartsAfterRegexSource(s.lineStartsAfter, fuzzy, capturePrefix);
-        allCaptureNames = captureNames;
-        return {
-            captureNames: allCaptureNames,
-            regex: compileRuleRegex(regex),
-            usesCapture: true,
-            usesLineStartsAfter: true,
-        };
+    if (lineStartsWith?.length) {
+        const res = buildLineStartsWithRegexSource(lineStartsWith, fuzzy, capturePrefix);
+        finalRegex = res.regex;
+        allCaptureNames = res.captureNames;
+    }
+    if (lineEndsWith?.length) {
+        const res = buildLineEndsWithRegexSource(lineEndsWith, fuzzy, capturePrefix);
+        finalRegex = res.regex;
+        allCaptureNames = res.captureNames;
+    }
+    if (template) {
+        const res = buildTemplateRegexSource(template, capturePrefix);
+        finalRegex = res.regex;
+        allCaptureNames = [...allCaptureNames, ...res.captureNames];
     }
 
-    if (s.lineStartsWith?.length) {
-        const { regex, captureNames } = buildLineStartsWithRegexSource(s.lineStartsWith, fuzzy, capturePrefix);
-        s.regex = regex;
-        allCaptureNames = captureNames;
-    }
-    if (s.lineEndsWith?.length) {
-        const { regex, captureNames } = buildLineEndsWithRegexSource(s.lineEndsWith, fuzzy, capturePrefix);
-        s.regex = regex;
-        allCaptureNames = captureNames;
-    }
-    if (s.template) {
-        const { regex, captureNames } = buildTemplateRegexSource(s.template, capturePrefix);
-        s.regex = regex;
-        allCaptureNames = [...allCaptureNames, ...captureNames];
-    }
-
-    if (!s.regex) {
+    if (!finalRegex) {
         throw new Error(
             'Rule must specify exactly one pattern type: regex, template, lineStartsWith, lineStartsAfter, or lineEndsWith',
         );
     }
-
-    // Extract named capture groups from raw regex patterns if not already populated
     if (allCaptureNames.length === 0) {
-        allCaptureNames = extractNamedCaptureNames(s.regex);
+        allCaptureNames = extractNamedCaptureNames(finalRegex);
     }
 
-    const usesCapture = determineUsesCapture(s.regex, allCaptureNames);
     return {
         captureNames: allCaptureNames,
-        regex: compileRuleRegex(s.regex),
-        usesCapture,
+        regex: compileRuleRegex(finalRegex),
+        usesCapture: hasCapturingGroup(finalRegex),
         usesLineStartsAfter: false,
     };
 };

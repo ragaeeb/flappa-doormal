@@ -9,6 +9,7 @@ import { describe, expect, it } from 'bun:test';
 import { computeNextFromIdx, computeWindowEndIdx } from './breakpoint-processor.js';
 import {
     adjustForSurrogate,
+    adjustForUnicodeBoundary,
     applyPageJoinerBetweenPages,
     buildBoundaryPositions,
     buildExcludeSet,
@@ -19,6 +20,7 @@ import {
     findExclusionBreakPosition,
     findNextPagePosition,
     findPageIndexForPosition,
+    findPageStartNearExpectedBoundary,
     findPatternBreakPosition,
     findSafeBreakPosition,
     hasExcludedPageInRange,
@@ -350,6 +352,46 @@ describe('breakpoint-utils', () => {
                 cumulativeOffsets,
             );
             expect(pos).toBe(remainingContent.indexOf('EEEE'));
+        });
+    });
+
+    describe('findPageStartNearExpectedBoundary', () => {
+        it('should not ignore a close space-preceded candidate when a far newline-preceded candidate exists', () => {
+            const pageIds = [1, 2];
+            const targetPage = `TARGET_START ${'x'.repeat(300)}`;
+            const normalizedPages = new Map<number, NormalizedPage>([
+                [1, { content: 'PAGE1', index: 0, length: 5 }],
+                [2, { content: targetPage, index: 1, length: targetPage.length }],
+            ]);
+
+            const prefix = targetPage.slice(0, 140).trim();
+
+            // Build content with two occurrences of prefix:
+            // - First at position 101 (after 100 'A's and a newline)
+            // - Second at position 101 + 140 + 3000 + 1 = 3242 (after B's and a space)
+            const remainingContent = `${'A'.repeat(100)}\n${prefix}${'B'.repeat(3000)} ${prefix}${'C'.repeat(100)}`;
+
+            const firstOccurrence = 101; // 100 A's + 1 newline
+            const secondOccurrence = 101 + prefix.length + 3000 + 1; // first prefix + B's + space
+
+            // Verify positions
+            expect(remainingContent.indexOf(prefix)).toBe(firstOccurrence);
+            expect(remainingContent.lastIndexOf(prefix)).toBe(secondOccurrence);
+
+            // Set expected boundary near the second occurrence
+            const expectedBoundary = secondOccurrence + 10;
+
+            const pos = findPageStartNearExpectedBoundary(
+                remainingContent,
+                1,
+                expectedBoundary,
+                pageIds,
+                normalizedPages,
+            );
+
+            // The far newline-preceded candidate should be rejected by deviation,
+            // but the close space-preceded candidate should still be accepted.
+            expect(pos).toBe(secondOccurrence);
         });
     });
 
@@ -751,5 +793,31 @@ describe('adjustForSurrogate', () => {
         // Boundary conditions
         expect(adjustForSurrogate(content, 0)).toBe(0);
         expect(adjustForSurrogate(content, content.length)).toBe(content.length);
+    });
+});
+
+describe('adjustForUnicodeBoundary', () => {
+    it('should avoid splitting before combining marks', () => {
+        const content = 'a\u0301b'; // a + combining acute + b
+        // Target 1 is between base and combining mark.
+        expect(adjustForUnicodeBoundary(content, 1)).toBe(0);
+        // Target 2 is after combining mark and should be safe.
+        expect(adjustForUnicodeBoundary(content, 2)).toBe(2);
+    });
+
+    it('should avoid splitting around ZWJ sequences', () => {
+        const content = 'a\u200Db'; // a + ZWJ + b
+        // Target 2 splits between ZWJ and b => back up
+        expect(adjustForUnicodeBoundary(content, 2)).toBe(0);
+        // Target 1 splits between a and ZWJ => back up
+        expect(adjustForUnicodeBoundary(content, 1)).toBe(0);
+    });
+
+    it('should avoid splitting before variation selectors', () => {
+        const content = 'A\u2708\uFE0FB'; // A ✈️ B
+        // Target 2 splits between plane and variation selector.
+        expect(adjustForUnicodeBoundary(content, 2)).toBe(1);
+        // Target 3 (after selector) should be safe.
+        expect(adjustForUnicodeBoundary(content, 3)).toBe(3);
     });
 });

@@ -4,6 +4,7 @@
  */
 
 import { isPageExcluded } from './breakpoint-utils.js';
+import { buildRuleDebugPatch, mergeDebugIntoMeta } from './debug-meta.js';
 import {
     extractNamedCaptures,
     filterByConstraints,
@@ -13,7 +14,6 @@ import {
 import { buildRuleRegex, type RuleRegex } from './rule-regex.js';
 import type { PageMap, SplitPoint } from './segmenter-types.js';
 import type { Logger, SplitRule } from './types.js';
-import { buildRuleDebugPatch, mergeDebugIntoMeta } from './debug-meta.js';
 
 // Maximum iterations before throwing to prevent infinite loops
 const MAX_REGEX_ITERATIONS = 100000;
@@ -30,7 +30,7 @@ const extractNamedCapturesForRule = (
     groups: Record<string, string> | undefined,
     captureNames: string[],
     prefix: string,
-): Record<string, string> => {
+) => {
     const result: Record<string, string> = {};
     if (!groups) {
         return result;
@@ -60,18 +60,16 @@ const buildContentOffsets = (
     return { contentStartOffset: fullMatch.length - captured.length };
 };
 
-const passesRuleConstraints = (rule: SplitRule, pageId: number): boolean =>
+const passesRuleConstraints = (rule: SplitRule, pageId: number) =>
     (rule.min === undefined || pageId >= rule.min) &&
     (rule.max === undefined || pageId <= rule.max) &&
     !isPageExcluded(pageId, rule.exclude);
 
 const createSplitPointFromMatch = (match: RegExpExecArray, rule: SplitRule, ruleInfo: RuleRegexInfo): SplitPoint => {
     const namedCaptures = extractNamedCapturesForRule(match.groups, ruleInfo.captureNames, ruleInfo.prefix);
-    const { contentStartOffset } = buildContentOffsets(match, ruleInfo);
-
     return {
         capturedContent: undefined,
-        contentStartOffset,
+        contentStartOffset: buildContentOffsets(match, ruleInfo).contentStartOffset,
         index: (rule.split ?? 'at') === 'at' ? match.index : match.index + match[0].length,
         meta: rule.meta,
         namedCaptures: Object.keys(namedCaptures).length > 0 ? namedCaptures : undefined,
@@ -86,7 +84,7 @@ export const processCombinedMatches = (
     passesPageStartGuard: (rule: SplitRule, index: number, pos: number) => boolean,
     splitPointsByRule: Map<number, SplitPoint[]>,
     logger?: Logger,
-): void => {
+) => {
     const combinedSource = ruleRegexes.map((r) => r.source).join('|');
     const combinedRegex = new RegExp(combinedSource, 'gm');
 
@@ -99,35 +97,32 @@ export const processCombinedMatches = (
     let iterations = 0;
 
     while (m !== null) {
-        iterations++;
-
-        if (iterations > MAX_REGEX_ITERATIONS) {
+        if (++iterations > MAX_REGEX_ITERATIONS) {
             throw new Error(
                 `[segmenter] Possible infinite loop: exceeded ${MAX_REGEX_ITERATIONS} iterations at position ${m.index}.`,
             );
         }
-
         if (iterations % 10000 === 0) {
             logger?.warn?.('[segmenter] high iteration count', { iterations, position: m.index });
         }
 
         const matchedIndex = combinableRules.findIndex(({ prefix }) => m?.groups?.[prefix] !== undefined);
-
         if (matchedIndex !== -1) {
             const { rule, index: originalIndex } = combinableRules[matchedIndex];
-            const ruleInfo = ruleRegexes[matchedIndex];
-            const pageId = pageMap.getId(m.index);
-
-            if (passesRuleConstraints(rule, pageId) && passesPageStartGuard(rule, originalIndex, m.index)) {
-                const sp = createSplitPointFromMatch(m, rule, ruleInfo);
-
-                if (!splitPointsByRule.has(originalIndex)) {
-                    splitPointsByRule.set(originalIndex, []);
+            if (
+                passesRuleConstraints(rule, pageMap.getId(m.index)) &&
+                passesPageStartGuard(rule, originalIndex, m.index)
+            ) {
+                const arr = splitPointsByRule.get(originalIndex);
+                if (!arr) {
+                    splitPointsByRule.set(originalIndex, [
+                        createSplitPointFromMatch(m, rule, ruleRegexes[matchedIndex]),
+                    ]);
+                } else {
+                    arr.push(createSplitPointFromMatch(m, rule, ruleRegexes[matchedIndex]));
                 }
-                splitPointsByRule.get(originalIndex)!.push(sp);
             }
         }
-
         if (m[0].length === 0) {
             combinedRegex.lastIndex++;
         }
@@ -135,7 +130,7 @@ export const processCombinedMatches = (
     }
 };
 
-export const buildRuleRegexes = (combinableRules: CombinableRule[]): RuleRegexInfo[] =>
+export const buildRuleRegexes = (combinableRules: CombinableRule[]) =>
     combinableRules.map(({ rule, prefix }) => {
         const built = buildRuleRegex(rule, prefix);
         return { ...built, prefix, source: `(?<${prefix}>${built.regex.source})` };
@@ -152,36 +147,32 @@ export const processStandaloneRule = (
     pageMap: PageMap,
     passesPageStartGuard: (rule: SplitRule, index: number, pos: number) => boolean,
     splitPointsByRule: Map<number, SplitPoint[]>,
-): void => {
+) => {
     const { regex, usesCapture, captureNames, usesLineStartsAfter } = buildRuleRegex(rule);
     const allMatches = findMatchesInContent(matchContent, regex, usesCapture, captureNames);
     const constrained = filterByConstraints(allMatches, rule, pageMap.getId);
-    const guarded = constrained.filter((m) => passesPageStartGuard(rule, ruleIndex, m.start));
+    const points = constrained
+        .filter((m) => passesPageStartGuard(rule, ruleIndex, m.start))
+        .map((m) => {
+            const isLSA = usesLineStartsAfter && m.captured !== undefined;
+            return {
+                capturedContent: isLSA ? undefined : m.captured,
+                contentStartOffset: isLSA ? m.end - m.captured!.length - m.start : undefined,
+                index: (rule.split ?? 'at') === 'at' ? m.start : m.end,
+                meta: rule.meta,
+                namedCaptures: m.namedCaptures,
+            };
+        });
 
-    const points = guarded.map((m) => {
-        const isLSA = usesLineStartsAfter && m.captured !== undefined;
-        const markerLen = isLSA ? m.end - m.captured!.length - m.start : 0;
-        return {
-            capturedContent: isLSA ? undefined : m.captured,
-            contentStartOffset: isLSA ? markerLen : undefined,
-            index: (rule.split ?? 'at') === 'at' ? m.start : m.end,
-            meta: rule.meta,
-            namedCaptures: m.namedCaptures,
-        };
-    });
-
-    if (!splitPointsByRule.has(ruleIndex)) {
-        splitPointsByRule.set(ruleIndex, []);
+    const arr = splitPointsByRule.get(ruleIndex);
+    if (!arr) {
+        splitPointsByRule.set(ruleIndex, points);
+    } else {
+        arr.push(...points);
     }
-    splitPointsByRule.get(ruleIndex)!.push(...points);
 };
 
-const findMatchesInContent = (
-    content: string,
-    regex: RegExp,
-    usesCapture: boolean,
-    captureNames: string[],
-): MatchResult[] => {
+const findMatchesInContent = (content: string, regex: RegExp, usesCapture: boolean, captureNames: string[]) => {
     const matches: MatchResult[] = [];
     let m = regex.exec(content);
 
@@ -209,7 +200,7 @@ export const applyOccurrenceFilter = (
     rules: SplitRule[],
     splitPointsByRule: Map<number, SplitPoint[]>,
     debugMetaKey?: string,
-): SplitPoint[] => {
+) => {
     const result: SplitPoint[] = [];
 
     rules.forEach((rule, index) => {
@@ -220,21 +211,15 @@ export const applyOccurrenceFilter = (
 
         const filtered =
             rule.occurrence === 'first' ? [points[0]] : rule.occurrence === 'last' ? [points.at(-1)!] : points;
+        const debugPatch = debugMetaKey ? buildRuleDebugPatch(index, rule) : null;
 
-        if (!debugMetaKey) {
-            result.push(...filtered.map((p) => ({ ...p, ruleIndex: index })));
-            return;
-        }
-
-        const debugPatch = buildRuleDebugPatch(index, rule);
         result.push(
             ...filtered.map((p) => ({
                 ...p,
-                meta: mergeDebugIntoMeta(p.meta, debugMetaKey, debugPatch),
+                meta: debugMetaKey ? mergeDebugIntoMeta(p.meta, debugMetaKey, debugPatch!) : p.meta,
                 ruleIndex: index,
             })),
         );
     });
-
     return result;
 };

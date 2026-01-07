@@ -49,24 +49,10 @@ export const normalizeBreakpoint = (bp: Breakpoint): BreakpointRule => (typeof b
  * isPageExcluded(5, [[10, 20]])
  * // → false
  */
-export const isPageExcluded = (pageId: number, excludeList: PageRange[] | undefined): boolean => {
-    if (!excludeList || excludeList.length === 0) {
-        return false;
-    }
-    for (const item of excludeList) {
-        if (typeof item === 'number') {
-            if (pageId === item) {
-                return true;
-            }
-        } else {
-            const [from, to] = item;
-            if (pageId >= from && pageId <= to) {
-                return true;
-            }
-        }
-    }
-    return false;
-};
+export const isPageExcluded = (pageId: number, excludeList: PageRange[] | undefined) =>
+    excludeList?.some((item) =>
+        typeof item === 'number' ? pageId === item : pageId >= item[0] && pageId <= item[1],
+    ) ?? false;
 
 /**
  * Checks if a page ID is within a breakpoint's min/max range and not excluded.
@@ -82,14 +68,11 @@ export const isPageExcluded = (pageId: number, excludeList: PageRange[] | undefi
  * isInBreakpointRange(5, { pattern: '\\n', min: 10 })
  * // → false (below min)
  */
-export const isInBreakpointRange = (pageId: number, rule: BreakpointRule): boolean => {
-    if (rule.min !== undefined && pageId < rule.min) {
-        return false;
-    }
-    if (rule.max !== undefined && pageId > rule.max) {
-        return false;
-    }
-    return !isPageExcluded(pageId, rule.exclude);
+export const isInBreakpointRange = (pageId: number, rule: BreakpointRule) => {
+    const { min, max, exclude } = rule;
+    return (
+        (min === undefined || pageId >= min) && (max === undefined || pageId <= max) && !isPageExcluded(pageId, exclude)
+    );
 };
 
 /**
@@ -108,7 +91,7 @@ export const isInBreakpointRange = (pageId: number, rule: BreakpointRule): boole
  * buildExcludeSet([1, 5, [10, 12]])
  * // → Set { 1, 5, 10, 11, 12 }
  */
-export const buildExcludeSet = (excludeList: PageRange[] | undefined): Set<number> => {
+export const buildExcludeSet = (excludeList: PageRange[] | undefined) => {
     const excludeSet = new Set<number>();
     for (const item of excludeList || []) {
         if (typeof item === 'number') {
@@ -144,11 +127,12 @@ export const createSegment = (
     fromPageId: number,
     toPageId: number | undefined,
     meta: Record<string, unknown> | undefined,
-): Segment | null => {
+) => {
     const trimmed = content.trim();
     if (!trimmed) {
         return null;
     }
+
     const seg: Segment = { content: trimmed, from: fromPageId };
     if (toPageId !== undefined && toPageId !== fromPageId) {
         seg.to = toPageId;
@@ -230,7 +214,7 @@ export const applyPageJoinerBetweenPages = (
     pageIds: number[],
     normalizedPages: Map<number, NormalizedPage>,
     joiner: 'space' | 'newline',
-): string => {
+) => {
     if (joiner === 'newline' || fromIdx >= toIdx || !content.includes('\n')) {
         return content;
     }
@@ -259,7 +243,7 @@ export const applyPageJoinerBetweenPages = (
 /**
  * Finds the position of a page prefix in content, trying multiple prefix lengths.
  */
-const findPrefixPositionInContent = (content: string, trimmedPageContent: string, searchFrom: number): number => {
+const findPrefixPositionInContent = (content: string, trimmedPageContent: string, searchFrom: number) => {
     for (const len of JOINER_PREFIX_LENGTHS) {
         const prefix = trimmedPageContent.slice(0, Math.min(len, trimmedPageContent.length)).trim();
         if (!prefix) {
@@ -286,7 +270,7 @@ export const estimateStartOffsetInCurrentPage = (
     currentFromIdx: number,
     pageIds: number[],
     normalizedPages: Map<number, NormalizedPage>,
-): number => {
+) => {
     const currentPageData = normalizedPages.get(pageIds[currentFromIdx]);
     if (!currentPageData) {
         return 0;
@@ -311,13 +295,12 @@ export const estimateStartOffsetInCurrentPage = (
  */
 export const findPageStartNearExpectedBoundary = (
     remainingContent: string,
-    _currentFromIdx: number, // unused but kept for API compatibility
     targetPageIdx: number,
     expectedBoundary: number,
     pageIds: number[],
     normalizedPages: Map<number, NormalizedPage>,
     logger?: Logger,
-): number => {
+) => {
     const targetPageData = normalizedPages.get(pageIds[targetPageIdx]);
     if (!targetPageData) {
         return -1;
@@ -328,8 +311,6 @@ export const findPageStartNearExpectedBoundary = (
     const searchStart = Math.max(0, approx - 10_000);
     const searchEnd = Math.min(remainingContent.length, approx + 2_000);
 
-    // The target page content might be truncated in the current segment due to structural split points
-    // early in that page (e.g. headings). Use progressively shorter prefixes.
     const targetTrimmed = targetPageData.content.trimStart();
     for (const len of WINDOW_PREFIX_LENGTHS) {
         const prefix = targetTrimmed.slice(0, Math.min(len, targetTrimmed.length)).trim();
@@ -337,63 +318,68 @@ export const findPageStartNearExpectedBoundary = (
             continue;
         }
 
-        // Collect all candidate positions within the search range
-        const candidates: { pos: number; isNewline: boolean }[] = [];
-        let pos = remainingContent.indexOf(prefix, searchStart);
-        while (pos !== -1 && pos <= searchEnd) {
-            if (pos > 0) {
-                const charBefore = remainingContent[pos - 1];
-                if (charBefore === '\n') {
-                    // Page boundaries are marked by newlines - this is the strongest signal
-                    candidates.push({ isNewline: true, pos });
-                } else if (/\s/.test(charBefore)) {
-                    // Other whitespace is acceptable but less preferred
-                    candidates.push({ isNewline: false, pos });
-                }
-            }
-            pos = remainingContent.indexOf(prefix, pos + 1);
+        const candidates = findAnchorCandidates(remainingContent, prefix, searchStart, searchEnd);
+        if (candidates.length === 0) {
+            continue;
         }
 
-        if (candidates.length > 0) {
-            // Prioritize: 1) newline-preceded matches, 2) closest to expected boundary
-            const newlineCandidates = candidates.filter((c) => c.isNewline);
-            const pool = newlineCandidates.length > 0 ? newlineCandidates : candidates;
-
-            // Select the candidate closest to the expected boundary
-            let bestCandidate = pool[0];
-            let bestDistance = Math.abs(pool[0].pos - expectedBoundary);
-            for (let i = 1; i < pool.length; i++) {
-                const dist = Math.abs(pool[i].pos - expectedBoundary);
-                if (dist < bestDistance) {
-                    bestDistance = dist;
-                    bestCandidate = pool[i];
-                }
-            }
-
-            // Only accept the match if it's within MAX_DEVIATION of the expected boundary.
-            // This prevents false positives when content is duplicated within pages.
-            // MAX_DEVIATION of 2000 chars allows ~50-100% variance for typical
-            // Arabic book pages (1000-3000 chars) while rejecting false positives
-            // from duplicated content appearing mid-page.
-            const MAX_DEVIATION = 2000;
-            if (bestDistance <= MAX_DEVIATION) {
-                return bestCandidate.pos;
-            }
-
-            logger?.debug?.('[breakpoints] findPageStartNearExpectedBoundary: Rejected match exceeding deviation', {
-                bestDistance,
-                expectedBoundary,
-                matchPos: bestCandidate.pos,
-                maxDeviation: MAX_DEVIATION,
-                prefixLength: len,
-                targetPageIdx,
-            });
-
-            // If best match is too far, continue to try shorter prefixes or return -1
+        // Only accept matches within MAX_DEVIATION of the expected boundary.
+        // Prefer newline-preceded candidates *among valid matches*, otherwise choose the closest.
+        const MAX_DEVIATION = 2000;
+        const inRange = candidates.filter((c) => Math.abs(c.pos - expectedBoundary) <= MAX_DEVIATION);
+        if (inRange.length > 0) {
+            const best = selectBestAnchor(inRange, expectedBoundary);
+            return best.pos;
         }
+
+        const bestOverall = selectBestAnchor(candidates, expectedBoundary);
+        logger?.debug?.('[breakpoints] findPageStartNearExpectedBoundary: Rejected match exceeding deviation', {
+            bestDistance: Math.abs(bestOverall.pos - expectedBoundary),
+            expectedBoundary,
+            matchPos: bestOverall.pos,
+            maxDeviation: MAX_DEVIATION,
+            prefixLength: len,
+            targetPageIdx,
+        });
     }
 
     return -1;
+};
+
+/** Internal candidate for page start anchoring */
+interface AnchorCandidate {
+    pos: number;
+    isNewline: boolean;
+}
+
+/** Finds all whitespace-preceded occurrences of a prefix within a search range */
+const findAnchorCandidates = (content: string, prefix: string, start: number, end: number) => {
+    const candidates: AnchorCandidate[] = [];
+    let pos = content.indexOf(prefix, start);
+
+    while (pos !== -1 && pos <= end) {
+        if (pos > 0) {
+            const charBefore = content[pos - 1];
+            if (charBefore === '\n') {
+                candidates.push({ isNewline: true, pos });
+            } else if (/\s/.test(charBefore)) {
+                candidates.push({ isNewline: false, pos });
+            }
+        }
+        pos = content.indexOf(prefix, pos + 1);
+    }
+
+    return candidates;
+};
+
+/** Selects the best anchor candidate, prioritizing newlines then proximity to boundary */
+const selectBestAnchor = (candidates: AnchorCandidate[], expectedBoundary: number) => {
+    const newlines = candidates.filter((c) => c.isNewline);
+    const pool = newlines.length > 0 ? newlines : candidates;
+
+    return pool.reduce((best, curr) =>
+        Math.abs(curr.pos - expectedBoundary) < Math.abs(best.pos - expectedBoundary) ? curr : best,
+    );
 };
 
 /**
@@ -429,7 +415,7 @@ export const buildBoundaryPositions = (
     normalizedPages: Map<number, NormalizedPage>,
     cumulativeOffsets: number[],
     logger?: Logger,
-): number[] => {
+) => {
     const boundaryPositions: number[] = [0];
     const pageCount = toIdx - fromIdx + 1;
 
@@ -477,7 +463,6 @@ export const buildBoundaryPositions = (
 
         const pos = findPageStartNearExpectedBoundary(
             segmentContent,
-            fromIdx,
             i,
             expectedBoundary,
             pageIds,
@@ -522,7 +507,7 @@ export const buildBoundaryPositions = (
  * findPageIndexForPosition(25, boundaries, 0) // → 1 (second page)
  * findPageIndexForPosition(40, boundaries, 0) // → 2 (exactly on boundary = that page)
  */
-export const findPageIndexForPosition = (position: number, boundaryPositions: number[], fromIdx: number): number => {
+export const findPageIndexForPosition = (position: number, boundaryPositions: number[], fromIdx: number) => {
     // Handle edge cases
     if (boundaryPositions.length <= 1) {
         return fromIdx;
@@ -559,7 +544,7 @@ export const findBreakpointWindowEndPosition = (
     normalizedPages: Map<number, NormalizedPage>,
     cumulativeOffsets: number[],
     logger?: Logger,
-): number => {
+) => {
     // If the window already reaches the end of the segment, the window is the remaining content.
     if (windowEndIdx >= toIdx) {
         return remainingContent.length;
@@ -594,7 +579,6 @@ export const findBreakpointWindowEndPosition = (
 
         const pos = findPageStartNearExpectedBoundary(
             remainingContent,
-            currentFromIdx,
             nextIdx,
             expectedBoundary,
             pageIds,
@@ -625,7 +609,7 @@ export const findExclusionBreakPosition = (
     pageIds: number[],
     expandedBreakpoints: Array<{ excludeSet: Set<number> }>,
     cumulativeOffsets: number[],
-): number => {
+) => {
     const startingPageId = pageIds[currentFromIdx];
     const startingPageExcluded = expandedBreakpoints.some((bp) => bp.excludeSet.has(startingPageId));
     if (startingPageExcluded && currentFromIdx < toIdx) {
@@ -661,12 +645,7 @@ export type BreakpointContext = {
  * @param toIdx - End index (inclusive)
  * @returns True if any page in range is excluded
  */
-export const hasExcludedPageInRange = (
-    excludeSet: Set<number>,
-    pageIds: number[],
-    fromIdx: number,
-    toIdx: number,
-): boolean => {
+export const hasExcludedPageInRange = (excludeSet: Set<number>, pageIds: number[], fromIdx: number, toIdx: number) => {
     if (excludeSet.size === 0) {
         return false;
     }
@@ -686,7 +665,7 @@ export const hasExcludedPageInRange = (
  * @param nextPageData - Normalized data for the next page
  * @returns Position of next page content, or -1 if not found
  */
-export const findNextPagePosition = (remainingContent: string, nextPageData: NormalizedPage): number => {
+export const findNextPagePosition = (remainingContent: string, nextPageData: NormalizedPage) => {
     const searchPrefix = nextPageData.content.trim().slice(0, Math.min(30, nextPageData.length));
     if (searchPrefix.length === 0) {
         return -1;
@@ -703,11 +682,7 @@ export const findNextPagePosition = (remainingContent: string, nextPageData: Nor
  * @param prefer - 'longer' for last match, 'shorter' for first match
  * @returns Break position after the selected match, or -1 if no matches
  */
-export const findPatternBreakPosition = (
-    windowContent: string,
-    regex: RegExp,
-    prefer: 'longer' | 'shorter',
-): number => {
+export const findPatternBreakPosition = (windowContent: string, regex: RegExp, prefer: 'longer' | 'shorter') => {
     // OPTIMIZATION: Stream matches instead of collecting all into an array.
     // Only track first and last match to avoid allocating large arrays for dense patterns.
     let first: { index: number; length: number } | undefined;
@@ -732,21 +707,49 @@ export const findPatternBreakPosition = (
  */
 const handlePageBoundaryBreak = (
     remainingContent: string,
+    currentFromIdx: number,
     windowEndIdx: number,
     windowEndPosition: number,
+    maxContentLength: number | undefined,
     toIdx: number,
     pageIds: number[],
     normalizedPages: Map<number, NormalizedPage>,
-): number => {
-    // Fall back to windowEndPosition but try to break at whitespace to avoid mid-word splits
+) => {
+    // Page-boundary breakpoint (empty pattern '').
+    //
+    // Semantics: when no other breakpoint patterns match, break at the NEXT PAGE boundary
+    // (i.e. swallow the remainder of the current page), not at the end of the maxPages window.
+    //
+    // This ensures that with maxPages=0 each page stays isolated, and with maxPages>0
+    // we don't accidentally swallow the next page when no pattern matches.
     const targetPos = Math.min(windowEndPosition, remainingContent.length);
+
+    // If the window is currently bounded by maxContentLength, do NOT force an early break at a page boundary.
+    // In length-bounded mode, we want the best possible split *near* the length limit (using safe-break fallbacks),
+    // even if that spans a page boundary.
+    const isLengthBounded = maxContentLength !== undefined && windowEndPosition === maxContentLength;
+
+    if (!isLengthBounded) {
+        const nextPageIdx = currentFromIdx + 1;
+        if (nextPageIdx <= toIdx && nextPageIdx <= windowEndIdx + 1) {
+            const nextPageData = normalizedPages.get(pageIds[nextPageIdx]);
+            if (nextPageData) {
+                const boundaryPos = findNextPagePosition(remainingContent, nextPageData);
+                if (boundaryPos > 0 && boundaryPos <= targetPos) {
+                    return boundaryPos;
+                }
+            }
+        }
+    }
+
+    // If we couldn't reliably detect the boundary (or we're at the end), fall back to a safe split
+    // within the window to avoid mid-word / surrogate corruption.
     if (targetPos < remainingContent.length) {
         const safePos = findSafeBreakPosition(remainingContent, targetPos);
         if (safePos !== -1) {
             return safePos;
         }
-        // Final fallback: ensure we don't split a surrogate pair
-        return adjustForSurrogate(remainingContent, targetPos);
+        return adjustForUnicodeBoundary(remainingContent, targetPos);
     }
     return targetPos;
 };
@@ -769,7 +772,8 @@ export const findBreakPosition = (
     windowEndIdx: number,
     windowEndPosition: number,
     ctx: BreakpointContext,
-): { breakpointIndex: number; breakPos: number; rule: BreakpointRule } | null => {
+    maxContentLength?: number,
+) => {
     const { pageIds, normalizedPages, expandedBreakpoints, prefer } = ctx;
 
     for (let i = 0; i < expandedBreakpoints.length; i++) {
@@ -794,8 +798,10 @@ export const findBreakPosition = (
             return {
                 breakPos: handlePageBoundaryBreak(
                     remainingContent,
+                    currentFromIdx,
                     windowEndIdx,
                     windowEndPosition,
+                    maxContentLength,
                     toIdx,
                     pageIds,
                     normalizedPages,
@@ -825,7 +831,7 @@ export const findBreakPosition = (
  * @param lookbackChars How far back to search for a safe break
  * @returns The new split position (index), or -1 if no safe break found
  */
-export const findSafeBreakPosition = (content: string, targetPosition: number, lookbackChars = 100): number => {
+export const findSafeBreakPosition = (content: string, targetPosition: number, lookbackChars = 100) => {
     // 1. Sanity check bounds
     const startSearch = Math.max(0, targetPosition - lookbackChars);
 
@@ -846,7 +852,7 @@ export const findSafeBreakPosition = (content: string, targetPosition: number, l
  * Ensures the position does not split a surrogate pair.
  * If position is between High and Low surrogate, returns position - 1.
  */
-export const adjustForSurrogate = (content: string, position: number): number => {
+export const adjustForSurrogate = (content: string, position: number) => {
     if (position <= 0 || position >= content.length) {
         return position;
     }
@@ -861,4 +867,39 @@ export const adjustForSurrogate = (content: string, position: number): number =>
     }
 
     return position;
+};
+
+const isCombiningMarkOrSelector = (char: string | undefined) => {
+    if (!char) {
+        return false;
+    }
+    // \p{M} = Unicode combining mark category (includes Arabic harakat)
+    // FE0E/FE0F = variation selectors
+    return /\p{M}/u.test(char) || char === '\uFE0E' || char === '\uFE0F';
+};
+
+const isJoiner = (char: string | undefined) => char === '\u200C' || char === '\u200D';
+
+/**
+ * Ensures the position does not split a grapheme cluster (surrogate pairs,
+ * combining marks, or zero-width joiners / variation selectors).
+ *
+ * This is only used as a last-resort fallback when we are forced to split
+ * near a hard limit (e.g. maxContentLength with no safe whitespace/punctuation).
+ */
+export const adjustForUnicodeBoundary = (content: string, position: number) => {
+    let adjusted = adjustForSurrogate(content, position);
+    while (adjusted > 0) {
+        const nextChar = content[adjusted];
+        const prevChar = content[adjusted - 1];
+        // If we'd start the next segment with a combining mark / selector / joiner, back up.
+        // For joiners, also avoid ending the previous segment with a joiner.
+        // (Splitting AFTER combining marks / selectors is safe; splitting before them is not.)
+        if (isCombiningMarkOrSelector(nextChar) || isJoiner(nextChar) || isJoiner(prevChar)) {
+            adjusted -= 1;
+            continue;
+        }
+        break;
+    }
+    return adjusted;
 };

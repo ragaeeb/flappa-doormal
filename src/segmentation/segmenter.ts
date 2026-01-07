@@ -48,9 +48,9 @@ import type { Logger, Page, Segment, SegmentationOptions, SplitRule } from './ty
  * // pageMap.getId(0) = 1
  * // pageMap.getId(12) = 2
  */
-const buildPageMap = (pages: Page[]): { content: string; normalizedPages: string[]; pageMap: PageMap } => {
+const buildPageMap = (pages: Page[]) => {
     const boundaries: PageBoundary[] = [];
-    const pageBreaks: number[] = []; // Sorted array for binary search
+    const pageBreaks: number[] = [];
     let offset = 0;
     const parts: string[] = [];
 
@@ -59,26 +59,18 @@ const buildPageMap = (pages: Page[]): { content: string; normalizedPages: string
         boundaries.push({ end: offset + normalized.length, id: pages[i].id, start: offset });
         parts.push(normalized);
         if (i < pages.length - 1) {
-            pageBreaks.push(offset + normalized.length); // Already in sorted order
+            pageBreaks.push(offset + normalized.length);
             offset += normalized.length + 1;
         } else {
             offset += normalized.length;
         }
     }
 
-    /**
-     * Finds the page boundary containing the given offset using binary search.
-     * O(log n) complexity for efficient lookup with many pages.
-     *
-     * @param off - Character offset to look up
-     * @returns Page boundary or the last boundary as fallback
-     */
-    const findBoundary = (off: number): PageBoundary | undefined => {
-        let lo = 0;
-        let hi = boundaries.length - 1;
-
+    const findBoundary = (off: number) => {
+        let lo = 0,
+            hi = boundaries.length - 1;
         while (lo <= hi) {
-            const mid = (lo + hi) >>> 1; // Unsigned right shift for floor division
+            const mid = (lo + hi) >>> 1;
             const b = boundaries[mid];
             if (off < b.start) {
                 hi = mid - 1;
@@ -88,13 +80,12 @@ const buildPageMap = (pages: Page[]): { content: string; normalizedPages: string
                 return b;
             }
         }
-        // Fallback to last boundary if not found
-        return boundaries[boundaries.length - 1];
+        return boundaries.at(-1);
     };
 
     return {
         content: parts.join('\n'),
-        normalizedPages: parts, // OPTIMIZATION: Return already-normalized content for reuse
+        normalizedPages: parts,
         pageMap: {
             boundaries,
             getId: (off: number) => findBoundary(off)?.id ?? 0,
@@ -115,20 +106,15 @@ export const dedupeSplitPoints = (splitPoints: SplitPoint[]) => {
     const byIndex = new Map<number, SplitPoint>();
     for (const p of splitPoints) {
         const existing = byIndex.get(p.index);
-        if (!existing) {
-            byIndex.set(p.index, p);
-            continue;
-        }
         const hasMoreInfo =
+            !existing ||
             (p.contentStartOffset !== undefined && existing.contentStartOffset === undefined) ||
             (p.meta !== undefined && existing.meta === undefined);
         if (hasMoreInfo) {
             byIndex.set(p.index, p);
         }
     }
-    const unique = [...byIndex.values()];
-    unique.sort((a, b) => a.index - b.index);
-    return unique;
+    return [...byIndex.values()].sort((a, b) => a.index - b.index);
 };
 
 /**
@@ -144,13 +130,14 @@ export const ensureFallbackSegment = (
     if (segments.length > 0 || pages.length === 0) {
         return segments;
     }
+
     const firstPage = pages[0];
     const lastPage = pages.at(-1)!;
-    const joinChar = pageJoiner === 'newline' ? '\n' : ' ';
-    const allContent = normalizedContent.join(joinChar).trim();
+    const allContent = normalizedContent.join(pageJoiner === 'newline' ? '\n' : ' ').trim();
     if (!allContent) {
         return segments;
     }
+
     const initialSeg: Segment = { content: allContent, from: firstPage.id };
     if (lastPage.id !== firstPage.id) {
         initialSeg.to = lastPage.id;
@@ -179,16 +166,13 @@ const collectSplitPointsFromRules = (
         standaloneCount: standaloneRules.length,
     });
 
-    // Start with fast-fuzzy matches
     const splitPointsByRule = collectFastFuzzySplitPoints(matchContent, pageMap, fastFuzzyRules, passesPageStartGuard);
 
-    // Process combinable rules in a single pass
     if (combinableRules.length > 0) {
-        const ruleRegexes = buildRuleRegexes(combinableRules);
         processCombinedMatches(
             matchContent,
             combinableRules,
-            ruleRegexes,
+            buildRuleRegexes(combinableRules),
             pageMap,
             passesPageStartGuard,
             splitPointsByRule,
@@ -196,13 +180,17 @@ const collectSplitPointsFromRules = (
         );
     }
 
-    // Process standalone rules
     for (const rule of standaloneRules) {
-        const originalIndex = rules.indexOf(rule);
-        processStandaloneRule(rule, originalIndex, matchContent, pageMap, passesPageStartGuard, splitPointsByRule);
+        processStandaloneRule(
+            rule,
+            rules.indexOf(rule),
+            matchContent,
+            pageMap,
+            passesPageStartGuard,
+            splitPointsByRule,
+        );
     }
 
-    // Apply occurrence filtering and flatten
     return applyOccurrenceFilter(rules, splitPointsByRule, debugMetaKey);
 };
 
@@ -220,9 +208,8 @@ const findBreaksInRange = (startOffset: number, endOffset: number, sortedBreaks:
         return [];
     }
 
-    // Binary search for first break >= startOffset
-    let lo = 0;
-    let hi = sortedBreaks.length;
+    let lo = 0,
+        hi = sortedBreaks.length;
     while (lo < hi) {
         const mid = (lo + hi) >>> 1;
         if (sortedBreaks[mid] < startOffset) {
@@ -232,7 +219,6 @@ const findBreaksInRange = (startOffset: number, endOffset: number, sortedBreaks:
         }
     }
 
-    // Collect breaks until we exceed endOffset
     const result: number[] = [];
     for (let i = lo; i < sortedBreaks.length && sortedBreaks[i] < endOffset; i++) {
         result.push(sortedBreaks[i] - startOffset);
@@ -252,26 +238,29 @@ const findBreaksInRange = (startOffset: number, endOffset: number, sortedBreaks:
  * @param content - Segment content string
  * @param startOffset - Starting offset of this content in concatenated string
  * @param pageBreaks - Sorted array of page break offsets
- * @returns Content with page-break newlines converted to spaces
+ * @param pageJoiner - How to represent page boundaries in output (`space` vs `newline`)
+ * @returns Content with page-break newlines converted to spaces (or left as-is for `newline`)
  */
-const convertPageBreaks = (content: string, startOffset: number, pageBreaks: number[]) => {
-    // OPTIMIZATION: Fast-path for empty or no-newline content (common cases)
+const convertPageBreaks = (
+    content: string,
+    startOffset: number,
+    pageBreaks: number[],
+    pageJoiner: 'space' | 'newline',
+) => {
     if (!content || !content.includes('\n')) {
         return content;
     }
 
-    const endOffset = startOffset + content.length;
-    const breaksInRange = findBreaksInRange(startOffset, endOffset, pageBreaks);
+    // If the caller wants newlines preserved between pages, no conversion is needed.
+    if (pageJoiner === 'newline') {
+        return content;
+    }
 
-    // No page breaks in this segment - return as-is (most common case)
+    const breaksInRange = findBreaksInRange(startOffset, startOffset + content.length, pageBreaks);
     if (breaksInRange.length === 0) {
         return content;
     }
 
-    // Convert ONLY page-break newlines (the ones inserted during concatenation) to spaces.
-    //
-    // NOTE: Offsets from findBreaksInRange are string indices (code units). Using Array.from()
-    // would index by Unicode code points and can desync indices if surrogate pairs appear.
     const breakSet = new Set(breaksInRange);
     return content.replace(/\n/g, (match, offset: number) => (breakSet.has(offset) ? ' ' : match));
 };
@@ -325,9 +314,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
         throw new Error(`maxContentLength must be at least 50 characters.`);
     }
 
-    // Default maxPages to 0 (single page) unless maxContentLength is provided
     const maxPages = options.maxPages ?? (maxContentLength ? Number.MAX_SAFE_INTEGER : 0);
-
     const debug = resolveDebugConfig((options as any).debug);
     const debugMetaKey = debug?.includeRule ? debug.metaKey : undefined;
 
@@ -343,10 +330,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
     const processedPages = options.replace ? applyReplacements(pages, options.replace) : pages;
     const { content: matchContent, normalizedPages: normalizedContent, pageMap } = buildPageMap(processedPages);
 
-    logger?.debug?.('[segmenter] content built', {
-        pageIds: pageMap.pageIds,
-        totalContentLength: matchContent.length,
-    });
+    logger?.debug?.('[segmenter] content built', { pageIds: pageMap.pageIds, totalContentLength: matchContent.length });
 
     const splitPoints = collectSplitPointsFromRules(rules, matchContent, pageMap, debugMetaKey, logger);
     const unique = dedupeSplitPoints(splitPoints);
@@ -356,20 +340,13 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
         uniqueSplitPoints: unique.length,
     });
 
-    // Build initial segments from structural rules
-    let segments = buildSegments(unique, matchContent, pageMap, rules);
-
-    logger?.debug?.('[segmenter] structural segments built', {
-        segmentCount: segments.length,
-        segments: segments.map((s) => ({ contentLength: s.content.length, from: s.from, to: s.to })),
-    });
+    let segments = buildSegments(unique, matchContent, pageMap, rules, pageJoiner);
+    logger?.debug?.('[segmenter] structural segments built', { segmentCount: segments.length });
 
     segments = ensureFallbackSegment(segments, processedPages, normalizedContent, pageJoiner);
 
-    // Apply breakpoints post-processing for oversized segments
     if ((maxPages >= 0 || (maxContentLength && maxContentLength > 0)) && breakpoints.length) {
         logger?.debug?.('[segmenter] applying breakpoints to oversized segments');
-        const patternProcessor = (p: string) => processPattern(p, false).pattern;
         const result = applyBreakpoints(
             segments,
             processedPages,
@@ -377,20 +354,16 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
             maxPages,
             breakpoints,
             prefer,
-            patternProcessor,
+            (p: string) => processPattern(p, false).pattern,
             logger,
             pageJoiner,
             debug?.includeBreakpoint ? debug.metaKey : undefined,
             maxContentLength,
         );
-        logger?.info?.('[segmenter] segmentation complete (with breakpoints)', {
-            finalSegmentCount: result.length,
-        });
+        logger?.info?.('[segmenter] segmentation complete (with breakpoints)', { finalSegmentCount: result.length });
         return result;
     }
-    logger?.info?.('[segmenter] segmentation complete (structural only)', {
-        finalSegmentCount: segments.length,
-    });
+    logger?.info?.('[segmenter] segmentation complete (structural only)', { finalSegmentCount: segments.length });
     return segments;
 };
 
@@ -409,7 +382,13 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
  * @param rules - Original rules (for constraint checking on first segment)
  * @returns Array of segment objects
  */
-const buildSegments = (splitPoints: SplitPoint[], content: string, pageMap: PageMap, rules: SplitRule[]) => {
+const buildSegments = (
+    splitPoints: SplitPoint[],
+    content: string,
+    pageMap: PageMap,
+    rules: SplitRule[],
+    pageJoiner: 'space' | 'newline',
+) => {
     /**
      * Creates a single segment from a content range.
      */
@@ -420,18 +399,16 @@ const buildSegments = (splitPoints: SplitPoint[], content: string, pageMap: Page
         capturedContent?: string,
         namedCaptures?: Record<string, string>,
         contentStartOffset?: number,
-    ): Segment | null => {
-        // For lineStartsAfter, skip the marker by using contentStartOffset
+    ) => {
         const actualStart = start + (contentStartOffset ?? 0);
-        // For lineStartsAfter (contentStartOffset set), trim leading whitespace after marker
-        // For other rules, only trim trailing whitespace to preserve intentional leading spaces
         const sliced = content.slice(actualStart, end);
         let text = capturedContent?.trim() ?? (contentStartOffset ? sliced.trim() : sliced.replace(/[\s\n]+$/, ''));
         if (!text) {
             return null;
         }
+
         if (!capturedContent) {
-            text = convertPageBreaks(text, actualStart, pageMap.pageBreaks);
+            text = convertPageBreaks(text, actualStart, pageMap.pageBreaks, pageJoiner);
         }
         const from = pageMap.getId(actualStart);
         const to = capturedContent ? pageMap.getId(end - 1) : pageMap.getId(actualStart + text.length - 1);
@@ -448,7 +425,7 @@ const buildSegments = (splitPoints: SplitPoint[], content: string, pageMap: Page
     /**
      * Creates segments from an array of split points.
      */
-    const createSegmentsFromSplitPoints = (): Segment[] => {
+    const createSegmentsFromSplitPoints = () => {
         const result: Segment[] = [];
         for (let i = 0; i < splitPoints.length; i++) {
             const sp = splitPoints[i];

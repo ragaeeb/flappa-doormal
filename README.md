@@ -324,6 +324,8 @@ When a segment exceeds `maxPages` or `maxContentLength`, breakpoints split it at
 }
 ```
 
+**Security note (ReDoS)**: Breakpoints (and raw `regex` rules) compile user-provided regular expressions. **Do not accept untrusted patterns** (e.g. from end users) without validation/sandboxing; some regexes can trigger catastrophic backtracking and hang the process.
+
 ### 12. Occurrence Filtering
 
 Control which matches to use:

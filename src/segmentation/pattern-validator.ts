@@ -45,80 +45,61 @@ const TOKEN_INSIDE_BRACES = /\{\{(\w+)(?::\w+)?\}\}/g;
 
 // Regex to find potential token names NOT inside {{}}
 // Matches word boundaries around known token names
-const buildBareTokenRegex = (): RegExp => {
-    // Sort by length descending to match longer tokens first
+const buildBareTokenRegex = () => {
     const tokens = [...KNOWN_TOKENS].sort((a, b) => b.length - a.length);
-    // Match token name followed by optional :name, but NOT inside {{}}
-    // Use negative lookbehind for {{ and negative lookahead for }}
     return new RegExp(`(?<!\\{\\{)(${tokens.join('|')})(?::\\w+)?(?!\\}\\})`, 'g');
 };
 
 /**
  * Validates a single pattern for common issues.
  */
-const validatePattern = (pattern: string, seenPatterns: Set<string>): ValidationIssue | undefined => {
+const validatePattern = (pattern: string, seenPatterns: Set<string>) => {
     if (!pattern.trim()) {
-        return { message: 'Empty pattern is not allowed', type: 'empty_pattern' };
+        return { message: 'Empty pattern is not allowed', type: 'empty_pattern' } as const;
     }
-    // Check for duplicates
     if (seenPatterns.has(pattern)) {
-        return {
-            message: `Duplicate pattern: "${pattern}"`,
-            pattern,
-            type: 'duplicate',
-        };
+        return { message: `Duplicate pattern: "${pattern}"`, pattern, type: 'duplicate' } as const;
     }
     seenPatterns.add(pattern);
 
-    // Check for unknown tokens inside {{}}
-    const tokensInBraces = [...pattern.matchAll(TOKEN_INSIDE_BRACES)];
-    for (const match of tokensInBraces) {
-        const tokenName = match[1];
-        if (!KNOWN_TOKENS.has(tokenName)) {
+    // TOKEN_INSIDE_BRACES is a global /g regex. Ensure lastIndex does not leak between calls.
+    TOKEN_INSIDE_BRACES.lastIndex = 0;
+    for (const match of pattern.matchAll(TOKEN_INSIDE_BRACES)) {
+        const name = match[1];
+        if (!KNOWN_TOKENS.has(name)) {
             return {
-                message: `Unknown token: {{${tokenName}}}. Available tokens: ${[...KNOWN_TOKENS].slice(0, 5).join(', ')}...`,
-                suggestion: `Check spelling or use a known token`,
-                token: tokenName,
+                message: `Unknown token: {{${name}}}. Available tokens: ${[...KNOWN_TOKENS].slice(0, 5).join(', ')}...`,
+                suggestion: 'Check spelling or use a known token',
+                token: name,
                 type: 'unknown_token',
-            };
+            } as const;
         }
     }
 
-    // Check for bare token names not inside {{}}
-    const bareTokenRegex = buildBareTokenRegex();
-    const bareMatches = [...pattern.matchAll(bareTokenRegex)];
-    for (const match of bareMatches) {
-        const tokenName = match[1];
-        const fullMatch = match[0];
-        // Make sure this isn't inside {{}} by checking the original pattern
-        const matchIndex = match.index!;
-        const before = pattern.slice(Math.max(0, matchIndex - 2), matchIndex);
-        const after = pattern.slice(matchIndex + fullMatch.length, matchIndex + fullMatch.length + 2);
-        if (before !== '{{' && after !== '}}') {
+    for (const match of pattern.matchAll(buildBareTokenRegex())) {
+        const [full, name] = match;
+        const idx = match.index!;
+        if (
+            pattern.slice(Math.max(0, idx - 2), idx) !== '{{' ||
+            pattern.slice(idx + full.length, idx + full.length + 2) !== '}}'
+        ) {
             return {
-                message: `Token "${tokenName}" appears to be missing {{}}. Did you mean "{{${fullMatch}}}"?`,
-                suggestion: `{{${fullMatch}}}`,
-                token: tokenName,
+                message: `Token "${name}" appears to be missing {{}}. Did you mean "{{${full}}}"?`,
+                suggestion: `{{${full}}}`,
+                token: name,
                 type: 'missing_braces',
-            };
+            } as const;
         }
     }
-
-    return undefined;
 };
 
 /**
  * Validates an array of patterns, returning parallel array of issues.
  */
-const validatePatternArray = (patterns: string[]): (ValidationIssue | undefined)[] | undefined => {
-    const seenPatterns = new Set<string>();
-    const issues = patterns.map((p) => validatePattern(p, seenPatterns));
-
-    // If all undefined, return undefined for the whole array
-    if (issues.every((i) => i === undefined)) {
-        return undefined;
-    }
-    return issues;
+const validatePatternArray = (patterns: string[]) => {
+    const seen = new Set<string>();
+    const issues = patterns.map((p) => validatePattern(p, seen));
+    return issues.some(Boolean) ? issues : undefined;
 };
 
 /**
@@ -140,49 +121,31 @@ const validatePatternArray = (patterns: string[]): (ValidationIssue | undefined)
  * // issues[0]?.lineStartsAfter?.[0]?.type === 'missing_braces'
  * // issues[1]?.lineStartsWith?.[0]?.type === 'unknown_token'
  */
-export const validateRules = (rules: SplitRule[]): (RuleValidationResult | undefined)[] => {
-    return rules.map((rule) => {
+export const validateRules = (rules: SplitRule[]) =>
+    rules.map((rule) => {
         const result: RuleValidationResult = {};
         let hasIssues = false;
 
-        if ('lineStartsWith' in rule && rule.lineStartsWith) {
-            const issues = validatePatternArray(rule.lineStartsWith);
-            if (issues) {
-                result.lineStartsWith = issues;
-                hasIssues = true;
-            }
-        }
-
-        if ('lineStartsAfter' in rule && rule.lineStartsAfter) {
-            const issues = validatePatternArray(rule.lineStartsAfter);
-            if (issues) {
-                result.lineStartsAfter = issues;
-                hasIssues = true;
-            }
-        }
-
-        if ('lineEndsWith' in rule && rule.lineEndsWith) {
-            const issues = validatePatternArray(rule.lineEndsWith);
-            if (issues) {
-                result.lineEndsWith = issues;
-                hasIssues = true;
+        for (const key of ['lineStartsWith', 'lineStartsAfter', 'lineEndsWith'] as const) {
+            if (key in rule && (rule as any)[key]) {
+                const issues = validatePatternArray((rule as any)[key]);
+                if (issues) {
+                    result[key] = issues;
+                    hasIssues = true;
+                }
             }
         }
 
         if ('template' in rule && rule.template !== undefined) {
-            const seenPatterns = new Set<string>();
-            const issue = validatePattern(rule.template, seenPatterns);
+            const issue = validatePattern(rule.template, new Set());
             if (issue) {
                 result.template = issue;
                 hasIssues = true;
             }
         }
 
-        // Note: We don't validate `regex` patterns as they are raw regex, not templates
-
         return hasIssues ? result : undefined;
     });
-};
 /**
  * Formats a validation result array into a list of human-readable error messages.
  *
@@ -196,45 +159,29 @@ export const validateRules = (rules: SplitRule[]): (RuleValidationResult | undef
  * const errors = formatValidationReport(issues);
  * // ["Rule 1, lineStartsWith: Missing {{}} around token..."]
  */
-export const formatValidationReport = (results: (RuleValidationResult | undefined)[]): string[] => {
-    const errors: string[] = [];
-
-    results.forEach((result, ruleIndex) => {
+export const formatValidationReport = (results: (RuleValidationResult | undefined)[]) =>
+    results.flatMap((result, i) => {
         if (!result) {
-            return;
+            return [];
         }
-
-        // Helper to format a single issue
-        // eslint-disable-next-line
-        const formatIssue = (issue: any, location: string) => {
-            if (!issue) {
-                return;
-            }
-            const type = issue.type as ValidationIssueType;
-
-            if (type === 'missing_braces' && issue.token) {
-                errors.push(`${location}: Missing {{}} around token "${issue.token}"`);
-            } else if (type === 'unknown_token' && issue.token) {
-                errors.push(`${location}: Unknown token "{{${issue.token}}}"`);
-            } else if (type === 'duplicate' && issue.pattern) {
-                errors.push(`${location}: Duplicate pattern "${issue.pattern}"`);
-            } else if (issue.message) {
-                errors.push(`${location}: ${issue.message}`);
-            } else {
-                errors.push(`${location}: ${type}`);
-            }
-        };
-
-        // Each result is a Record with pattern types as keys
-        for (const [patternType, issues] of Object.entries(result)) {
-            const list = Array.isArray(issues) ? issues : [issues];
-            for (const issue of list) {
-                if (issue) {
-                    formatIssue(issue, `Rule ${ruleIndex + 1}, ${patternType}`);
-                }
-            }
-        }
+        return Object.entries(result)
+            .flatMap(([type, issues]) =>
+                (Array.isArray(issues) ? issues : [issues]).map((issue) => {
+                    if (!issue) {
+                        return null;
+                    }
+                    const loc = `Rule ${i + 1}, ${type}`;
+                    if (issue.type === 'missing_braces') {
+                        return `${loc}: Missing {{}} around token "${issue.token}"`;
+                    }
+                    if (issue.type === 'unknown_token') {
+                        return `${loc}: Unknown token "{{${issue.token}}}"`;
+                    }
+                    if (issue.type === 'duplicate') {
+                        return `${loc}: Duplicate pattern "${issue.pattern}"`;
+                    }
+                    return `${loc}: ${issue.message || issue.type}`;
+                }),
+            )
+            .filter((msg): msg is string => msg !== null);
     });
-
-    return errors;
-};
