@@ -433,19 +433,33 @@ bunx biome lint .
 
 11. **Safety Fallback (Search-back)**: When forced to split at a hard character limit, searching backward for whitespace/punctuation (`[\s\n.,;!?؛،۔]`) prevents word-chopping and improves readability significantly.
 
-12. **Unicode Surrogate Safety**: Multi-byte characters (like Emojis) can be corrupted if split in the middle of a surrogate pair. Always use a helper like `adjustForSurrogate` to ensure the split point falls on a valid character boundary.
+12. **Unicode Boundary Safety (Surrogates + Graphemes)**: Multi-byte characters (like emojis) can be corrupted if split in the middle of a surrogate pair. Similarly, Arabic diacritics (combining marks), ZWJ/ZWNJ, and variation selectors can be orphaned if a hard split lands in the middle of a grapheme cluster. Use `adjustForUnicodeBoundary` (built on `adjustForSurrogate`) when forced to hard-split near a limit.
 
 13. **Recursion/Iteration Safety**: Using a progress-based guard (comparing `cursorPos` before and after loop iteration) is safer than fixed iteration limits for supporting arbitrary-sized content without truncation risks.
 
 14. **Accidental File Overwrites**: Be extremely careful when using tools like `replace_file_content` with large ranges. Verify file integrity frequently (e.g., `git diff`) to catch accidental deletions of existing code or tests. Merging new tests into existing files is a high-risk operation for AI agents.
 
-15. **Invisible Unicode Marks Break Regex Anchors**: Arabic text often contains invisible bidirectional formatting marks like Left-to-Right Mark (`U+200E`), Right-to-Left Mark (`U+200F`), or Arabic Letter Mark (`U+061C`). These appear at line starts after `\n` but before visible characters, breaking `^` anchored patterns. Solution: include an optional zero-width character class prefix in line-start patterns: `^[\u200E\u200F\u061C\u200B\uFEFF]*(?:pattern)`. The library now handles this automatically in `buildLineStartsWithRegexSource` and `buildLineStartsAfterRegexSource`.
+15. **Invisible Unicode Marks Break Regex Anchors**: Arabic text often contains invisible formatting marks like Left-to-Right Mark (`U+200E`), Right-to-Left Mark (`U+200F`), Arabic Letter Mark (`U+061C`), Zero-Width Space (`U+200B`), Zero-Width Non-Joiner (`U+200C`), Zero-Width Joiner (`U+200D`), or BOM (`U+FEFF`). These can appear at line starts after `\n` but before visible characters, breaking `^` anchored patterns. Solution: include an optional zero-width character class prefix in line-start patterns: `^[\u200E\u200F\u061C\u200B\u200C\u200D\uFEFF]*(?:pattern)`. The library now handles this automatically in `buildLineStartsWithRegexSource` and `buildLineStartsAfterRegexSource`.
 
-16. **Large Segment Performance & Debugging Strategy**: When processing large books (1000+ pages), avoid O(n²) algorithms. The library uses a fast-path threshold (1000 pages) to switch from accurate string-search boundary detection to cumulative-offset-based slicing. To diagnose performance bottlenecks: (1) Look for logs with "Using iterative path" or "Using accurate string-search path" with large `pageCount` values, (2) Check `iterations` count in completion logs, (3) Strategic logs are placed at operation boundaries (start/end) NOT inside tight loops to avoid log-induced performance regression.
+16. **Large Segment Performance & Debugging Strategy**: When processing large books (1000+ pages), avoid O(n²) algorithms. The library uses a fast-path threshold (1000 pages) to switch from accurate string-search boundary detection to cumulative-offset-based slicing. Even on the iterative path (e.g. debug mode), we **slice only the active window (+padding)** per iteration (never `fullContent.slice(cursorPos)`), to avoid quadratic allocation/GC churn. To diagnose performance bottlenecks: (1) Look for logs with "Using iterative path" or "Using accurate string-search path" with large `pageCount` values, (2) Check `iterations` count in completion logs, (3) Strategic logs are placed at operation boundaries (start/end) NOT inside tight loops to avoid log-induced performance regression.
 
 17. **`maxPages=0` is a hard invariant**: When `maxPages=0`, breakpoint windows must never scan beyond the current page boundary. Relying purely on boundary detection (string search) can fail near page ends for long Arabic text + space joiners, letting the window “see” into the next page and creating multi-page segments. The safe fix is to clamp the breakpoint window to the current page’s end using `boundaryPositions` in breakpoint processing.
 
-18. **`''` breakpoint semantics depend on whether the window is page-bounded vs length-bounded**: `''` means “page boundary fallback”. In page-window mode it should swallow the remainder of the current page when no other breakpoints match (avoids accidentally merging the next page). But when the active limiter is `maxContentLength`, forcing an early page-boundary split breaks sub-page segmentation across boundaries. The breakpoint selector needs to know whether it is currently length-bounded (e.g. `windowEndPosition === maxContentLength`) to choose the correct behavior.
+18. **`''` breakpoint semantics depend on whether the window is page-bounded vs length-bounded**: `''` means “page boundary fallback”, but it’s intentionally **mode-dependent**:
+
+   - **Page-bounded window (maxPages-driven)**: `''` should “swallow the remainder of the current page” (i.e. break at the **next page boundary**, not at an arbitrary character limit). This prevents accidentally consuming part of the next page when no other breakpoint patterns match.
+   - **Length-bounded window (maxContentLength-driven)**: `''` should **not** force an early page-boundary break. In this mode we want the best split *near the length limit* (safe-break fallback → Unicode-safe hard split) even if that means a piece can cross a page boundary.
+
+   Concrete branching (simplified):
+
+   ```ts
+   if (breakpoint.pattern === '') {
+     if (!isLengthBounded /* i.e. maxContentLength is not the active limiter */) {
+       return nextPageBoundaryWithinWindow ?? windowEndPosition; // end-of-page semantics
+     }
+     return safeBreakNear(windowEndPosition) ?? unicodeSafeHardSplit(windowEndPosition);
+   }
+   ```
 
 19. **Beware `.only` in test files**: A single `it.only(...)` can mask unrelated failing fixtures for a long time. When debugging, remove `.only` as soon as you have a focused reproduction, and re-run the full suite to catch latent failures.
 
@@ -457,7 +471,17 @@ bunx biome lint .
 
 23. **Debug breakpoint processing with the logger**: Pass a `logger` object with `debug` and `trace` methods to `segmentPages()`. Key logs: `boundaryPositions built` (page boundary byte offsets), `iteration=N` (shows `currentFromIdx`, `cursorPos`, `windowEndPosition` per loop), `Complete` (final segment count).
 
-24. **Navigating `breakpoint-processor.ts`**: Key functions in processing order: `applyBreakpoints()` (entry point), `processOversizedSegment()` (main loop ~lines 510-700), `computeWindowEndIdx()`, `findBreakOffsetForWindow()`, `advanceCursorAndIndex()`, `computeNextFromIdx()` (content-based page detection - can be buggy for overlaps, see #21).
+24. **Navigating `breakpoint-processor.ts`**: Key functions in (approximate) execution order:
+
+   - `applyBreakpoints()` (entry point)
+   - `processOversizedSegment()` (main loop)
+     - `buildBoundaryPositions()` (precompute page boundary positions)
+     - loop iteration:
+       - `computeWindowEndIdx()` (page-window end by `maxPages`)
+       - `getWindowEndPosition()` / maxPages=0 clamp (compute window end in content-space)
+       - `findBreakOffsetForWindow()` → `findBreakPosition()` → `handlePageBoundaryBreak()` / `findPatternBreakPosition()` (select split point)
+       - `advanceCursorAndIndex()` (progress)
+       - `computeNextFromIdx()` (heuristic) **or** position-based override when `maxPages=0` (see #21)
 
 ### Process Template (Multi-agent design review, TDD-first)
 

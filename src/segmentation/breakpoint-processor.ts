@@ -8,6 +8,7 @@
 import { FAST_PATH_THRESHOLD } from './breakpoint-constants.js';
 import {
     adjustForSurrogate,
+    adjustForUnicodeBoundary,
     applyPageJoinerBetweenPages,
     type BreakpointContext,
     buildBoundaryPositions,
@@ -214,7 +215,7 @@ const findBreakOffsetForWindow = (
             return { breakOffset: safeOffset };
         }
         // If no safe break (whitespace) found, ensure we don't split a surrogate pair
-        const adjustedOffset = adjustForSurrogate(remainingContent, windowEndPosition);
+        const adjustedOffset = adjustForUnicodeBoundary(remainingContent, windowEndPosition);
         return { breakOffset: adjustedOffset };
     }
 
@@ -560,11 +561,19 @@ const processOversizedSegment = (
     const MAX_SAFE_ITERATIONS = 100_000;
     while (cursorPos < fullContent.length && currentFromIdx <= toIdx && i < MAX_SAFE_ITERATIONS) {
         i++;
-        // Optimization: slice only what's needed to avoid O(N^2) copying for large content
-        const safeSliceLen = maxContentLength ? maxContentLength + 4000 : undefined;
-        const remainingContent = safeSliceLen
-            ? fullContent.slice(cursorPos, cursorPos + safeSliceLen)
-            : fullContent.slice(cursorPos);
+        const windowEndIdx = computeWindowEndIdx(currentFromIdx, toIdx, pageIds, maxPages);
+
+        // Optimization: slice only the active "window" plus a small padding.
+        // This avoids O(N^2) copying when maxContentLength is unset (e.g. debug mode forces iterative path).
+        const windowEndBoundaryIdx = windowEndIdx - fromIdx + 1; // boundaryPositions[0] is fromIdx start
+        const windowEndAbsPos = boundaryPositions[windowEndBoundaryIdx] ?? fullContent.length;
+        const sliceEndByPages = Math.min(fullContent.length, windowEndAbsPos + 4000);
+        const sliceEndByLength = maxContentLength
+            ? Math.min(fullContent.length, cursorPos + maxContentLength + 4000)
+            : fullContent.length;
+        const sliceEnd = Math.max(cursorPos + 1, Math.min(sliceEndByPages, sliceEndByLength));
+
+        const remainingContent = fullContent.slice(cursorPos, sliceEnd);
 
         if (!remainingContent.trim()) {
             break;
@@ -589,7 +598,6 @@ const processOversizedSegment = (
             break;
         }
 
-        const windowEndIdx = computeWindowEndIdx(currentFromIdx, toIdx, pageIds, maxPages);
         // When maxPages=0, the window MUST NOT extend beyond the current page boundary.
         // Otherwise, breakpoint matching can "see" into the next page and create segments spanning pages,
         // even though maxPages=0 semantically means each segment must stay within a single page.

@@ -62,6 +62,8 @@ const validatePattern = (pattern: string, seenPatterns: Set<string>) => {
     }
     seenPatterns.add(pattern);
 
+    // TOKEN_INSIDE_BRACES is a global /g regex. Ensure lastIndex does not leak between calls.
+    TOKEN_INSIDE_BRACES.lastIndex = 0;
     for (const match of pattern.matchAll(TOKEN_INSIDE_BRACES)) {
         const name = match[1];
         if (!KNOWN_TOKENS.has(name)) {

@@ -239,4 +239,22 @@ describe('Max Content Length Segmentation', () => {
             segmentPages(pages, { maxContentLength: 49 });
         }).toThrow(/maxContentLength must be at least 50 characters/);
     });
+
+    it('should avoid producing segments that start with a combining mark when hard-splitting', () => {
+        // Create content with no whitespace/punctuation so we fall through to the hard-split path.
+        // Pattern: base letter + combining mark (shadda), repeated.
+        const unit = `ب\u0651`;
+        const content = unit.repeat(80); // 160 code units
+        const pages: Page[] = [{ content, id: 0 }];
+
+        const result = segmentPages(pages, {
+            breakpoints: ['Z'], // No match
+            maxContentLength: 50,
+        });
+
+        // No segment should start with a combining mark.
+        for (const seg of result) {
+            expect(seg.content[0]).not.toMatch(/\p{M}/u);
+        }
+    });
 });

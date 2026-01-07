@@ -9,6 +9,7 @@ import { describe, expect, it } from 'bun:test';
 import { computeNextFromIdx, computeWindowEndIdx } from './breakpoint-processor.js';
 import {
     adjustForSurrogate,
+    adjustForUnicodeBoundary,
     applyPageJoinerBetweenPages,
     buildBoundaryPositions,
     buildExcludeSet,
@@ -792,5 +793,31 @@ describe('adjustForSurrogate', () => {
         // Boundary conditions
         expect(adjustForSurrogate(content, 0)).toBe(0);
         expect(adjustForSurrogate(content, content.length)).toBe(content.length);
+    });
+});
+
+describe('adjustForUnicodeBoundary', () => {
+    it('should avoid splitting before combining marks', () => {
+        const content = 'a\u0301b'; // a + combining acute + b
+        // Target 1 is between base and combining mark.
+        expect(adjustForUnicodeBoundary(content, 1)).toBe(0);
+        // Target 2 is after combining mark and should be safe.
+        expect(adjustForUnicodeBoundary(content, 2)).toBe(2);
+    });
+
+    it('should avoid splitting around ZWJ sequences', () => {
+        const content = 'a\u200Db'; // a + ZWJ + b
+        // Target 2 splits between ZWJ and b => back up
+        expect(adjustForUnicodeBoundary(content, 2)).toBe(0);
+        // Target 1 splits between a and ZWJ => back up
+        expect(adjustForUnicodeBoundary(content, 1)).toBe(0);
+    });
+
+    it('should avoid splitting before variation selectors', () => {
+        const content = 'A\u2708\uFE0FB'; // A ✈️ B
+        // Target 2 splits between plane and variation selector.
+        expect(adjustForUnicodeBoundary(content, 2)).toBe(1);
+        // Target 3 (after selector) should be safe.
+        expect(adjustForUnicodeBoundary(content, 3)).toBe(3);
     });
 });

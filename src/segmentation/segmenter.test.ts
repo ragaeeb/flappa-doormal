@@ -901,6 +901,27 @@ describe('segmenter', () => {
                 expect(resultNewline[1].content).toContain('Page 2 end.');
             });
 
+            it('should respect pageJoiner for structural segments that span multiple pages', () => {
+                const pages: Page[] = [
+                    { content: '## Header', id: 1 },
+                    { content: 'Body Text', id: 2 },
+                ];
+
+                const rules: SplitRule[] = [{ lineStartsWith: ['## '], split: 'at' }];
+
+                const asSpace = segmentPages(pages, { rules, pageJoiner: 'space' });
+                expect(asSpace).toHaveLength(1);
+                expect(asSpace[0].from).toBe(1);
+                expect(asSpace[0].to).toBe(2);
+                expect(asSpace[0].content).toBe('## Header Body Text');
+
+                const asNewline = segmentPages(pages, { rules, pageJoiner: 'newline' });
+                expect(asNewline).toHaveLength(1);
+                expect(asNewline[0].from).toBe(1);
+                expect(asNewline[0].to).toBe(2);
+                expect(asNewline[0].content).toBe('## Header\nBody Text');
+            });
+
             it('should correctly split very short pages (<100 chars) with duplicate prefixes', () => {
                 // Edge case: Short pages where MAX_DEVIATION (2000) covers the whole page.
                 // The deviation check is loose, but bestDistance logic should still pick the correct boundary.
@@ -2550,6 +2571,23 @@ describe('segmenter', () => {
             expect(result[0].content).toBe('A');
             expect(result[1].content).toBe('B');
             expect(result[2].content).toBe('C');
+        });
+
+        it('should handle maxPages=0 when many pages have identical content', () => {
+            // Stress: identical content can confuse content-based boundary detection.
+            // With maxPages=0, the engine must still produce one segment per page.
+            const pages: Page[] = Array.from({ length: 50 }, (_, i) => ({ content: 'SAME_CONTENT', id: i }));
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+            });
+
+            expect(result).toHaveLength(50);
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+            for (let i = 0; i < 50; i++) {
+                expect(result[i]).toMatchObject({ from: i, content: 'SAME_CONTENT' });
+            }
         });
 
         it('should handle maxPages=0 with empty pages interspersed', () => {

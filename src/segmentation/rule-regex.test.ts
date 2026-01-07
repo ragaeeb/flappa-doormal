@@ -119,7 +119,31 @@ describe('rule-regex', () => {
             // {{raqms}} is not a fuzzy-default token
             const rr = buildRuleRegex({ lineStartsWith: ['{{raqms}}'], split: 'at' } as never);
             // Pattern should be exact Unicode range, not fuzzy-expanded (with zero-width prefix)
-            expect(rr.regex.source).toBe('^[\\u200E\\u200F\\u061C\\u200B\\uFEFF]*(?:[\\u0660-\\u0669]+)');
+            expect(rr.regex.source).toBe('^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:[\\u0660-\\u0669]+)');
+        });
+    });
+
+    describe('zero-width prefix matching (ZWJ/ZWNJ)', () => {
+        it('should match lineStartsWith when the line begins with ZWNJ/ZWJ', () => {
+            const rr = buildRuleRegex({ lineStartsWith: ['## '], split: 'at' } as never);
+
+            const zwnj = '\u200C';
+            const zwj = '\u200D';
+            rr.regex.lastIndex = 0;
+            expect(rr.regex.test(`${zwnj}## Title`)).toBe(true);
+            rr.regex.lastIndex = 0;
+            expect(rr.regex.test(`${zwj}## Title`)).toBe(true);
+        });
+
+        it('should match lineStartsAfter when the line begins with ZWNJ/ZWJ', () => {
+            const rr = buildRuleRegex({ lineStartsAfter: ['## '], split: 'at' } as never);
+
+            const zwnj = '\u200C';
+            const zwj = '\u200D';
+            rr.regex.lastIndex = 0;
+            expect(rr.regex.test(`${zwnj}## Title`)).toBe(true);
+            rr.regex.lastIndex = 0;
+            expect(rr.regex.test(`${zwj}## Title`)).toBe(true);
         });
     });
 });

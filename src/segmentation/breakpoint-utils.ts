@@ -749,7 +749,7 @@ const handlePageBoundaryBreak = (
         if (safePos !== -1) {
             return safePos;
         }
-        return adjustForSurrogate(remainingContent, targetPos);
+        return adjustForUnicodeBoundary(remainingContent, targetPos);
     }
     return targetPos;
 };
@@ -867,4 +867,39 @@ export const adjustForSurrogate = (content: string, position: number) => {
     }
 
     return position;
+};
+
+const isCombiningMarkOrSelector = (char: string | undefined) => {
+    if (!char) {
+        return false;
+    }
+    // \p{M} = Unicode combining mark category (includes Arabic harakat)
+    // FE0E/FE0F = variation selectors
+    return /\p{M}/u.test(char) || char === '\uFE0E' || char === '\uFE0F';
+};
+
+const isJoiner = (char: string | undefined) => char === '\u200C' || char === '\u200D';
+
+/**
+ * Ensures the position does not split a grapheme cluster (surrogate pairs,
+ * combining marks, or zero-width joiners / variation selectors).
+ *
+ * This is only used as a last-resort fallback when we are forced to split
+ * near a hard limit (e.g. maxContentLength with no safe whitespace/punctuation).
+ */
+export const adjustForUnicodeBoundary = (content: string, position: number) => {
+    let adjusted = adjustForSurrogate(content, position);
+    while (adjusted > 0) {
+        const nextChar = content[adjusted];
+        const prevChar = content[adjusted - 1];
+        // If we'd start the next segment with a combining mark / selector / joiner, back up.
+        // For joiners, also avoid ending the previous segment with a joiner.
+        // (Splitting AFTER combining marks / selectors is safe; splitting before them is not.)
+        if (isCombiningMarkOrSelector(nextChar) || isJoiner(nextChar) || isJoiner(prevChar)) {
+            adjusted -= 1;
+            continue;
+        }
+        break;
+    }
+    return adjusted;
 };

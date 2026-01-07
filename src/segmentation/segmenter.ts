@@ -238,10 +238,21 @@ const findBreaksInRange = (startOffset: number, endOffset: number, sortedBreaks:
  * @param content - Segment content string
  * @param startOffset - Starting offset of this content in concatenated string
  * @param pageBreaks - Sorted array of page break offsets
- * @returns Content with page-break newlines converted to spaces
+ * @param pageJoiner - How to represent page boundaries in output (`space` vs `newline`)
+ * @returns Content with page-break newlines converted to spaces (or left as-is for `newline`)
  */
-const convertPageBreaks = (content: string, startOffset: number, pageBreaks: number[]) => {
+const convertPageBreaks = (
+    content: string,
+    startOffset: number,
+    pageBreaks: number[],
+    pageJoiner: 'space' | 'newline',
+) => {
     if (!content || !content.includes('\n')) {
+        return content;
+    }
+
+    // If the caller wants newlines preserved between pages, no conversion is needed.
+    if (pageJoiner === 'newline') {
         return content;
     }
 
@@ -329,7 +340,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
         uniqueSplitPoints: unique.length,
     });
 
-    let segments = buildSegments(unique, matchContent, pageMap, rules);
+    let segments = buildSegments(unique, matchContent, pageMap, rules, pageJoiner);
     logger?.debug?.('[segmenter] structural segments built', { segmentCount: segments.length });
 
     segments = ensureFallbackSegment(segments, processedPages, normalizedContent, pageJoiner);
@@ -371,7 +382,13 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
  * @param rules - Original rules (for constraint checking on first segment)
  * @returns Array of segment objects
  */
-const buildSegments = (splitPoints: SplitPoint[], content: string, pageMap: PageMap, rules: SplitRule[]) => {
+const buildSegments = (
+    splitPoints: SplitPoint[],
+    content: string,
+    pageMap: PageMap,
+    rules: SplitRule[],
+    pageJoiner: 'space' | 'newline',
+) => {
     /**
      * Creates a single segment from a content range.
      */
@@ -391,7 +408,7 @@ const buildSegments = (splitPoints: SplitPoint[], content: string, pageMap: Page
         }
 
         if (!capturedContent) {
-            text = convertPageBreaks(text, actualStart, pageMap.pageBreaks);
+            text = convertPageBreaks(text, actualStart, pageMap.pageBreaks, pageJoiner);
         }
         const from = pageMap.getId(actualStart);
         const to = capturedContent ? pageMap.getId(end - 1) : pageMap.getId(actualStart + text.length - 1);

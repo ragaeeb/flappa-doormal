@@ -89,7 +89,7 @@ export const buildLineStartsAfterRegexSource = (patterns: string[], fuzzy: boole
     const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
     return {
         captureNames: processed.flatMap((p) => p.captureNames),
-        regex: `^[\\u200E\\u200F\\u061C\\u200B\\uFEFF]*(?:${processed.map((p) => p.pattern).join('|')})${capturePrefix ? `(?<${capturePrefix}__content>.*)` : '(.*)'}`,
+        regex: `^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:${processed.map((p) => p.pattern).join('|')})${capturePrefix ? `(?<${capturePrefix}__content>.*)` : '(.*)'}`,
     };
 };
 
@@ -97,7 +97,7 @@ export const buildLineStartsWithRegexSource = (patterns: string[], fuzzy: boolea
     const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
     return {
         captureNames: processed.flatMap((p) => p.captureNames),
-        regex: `^[\\u200E\\u200F\\u061C\\u200B\\uFEFF]*(?:${processed.map((p) => p.pattern).join('|')})`,
+        regex: `^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:${processed.map((p) => p.pattern).join('|')})`,
     };
 };
 
