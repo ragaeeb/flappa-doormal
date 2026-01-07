@@ -121,15 +121,15 @@ describe('Max Content Length Segmentation', () => {
         expect(result[1].content.length).toBe(250);
     });
 
-    it('should handle character constraints across multiple pages', () => {
+    it('should handle character constraints across multiple pages (with safe breaks)', () => {
         // Page 1: 100 chars
-        // Page 2: 100 chars
+        // Page 2: 100 chars (with spaces)
         // Max length: 150.
-        // Should merge P1 + half P2.
-        // This confirms we are looking at cumulative length.
+        // Should merge P1 + part of P2, breaking at a space.
 
         const p1 = 'a'.repeat(100);
-        const p2 = 'b'.repeat(100);
+        // "dddd dddd..." to allow safe breaks
+        const p2 = Array(20).fill('dddd').join(' ');
         const pages: Page[] = [
             { content: p1, id: 0 },
             { content: p2, id: 1 },
@@ -138,11 +138,12 @@ describe('Max Content Length Segmentation', () => {
         const result = segmentPages(pages, {
             breakpoints: [''],
             maxContentLength: 150,
-            pageJoiner: 'space', // p1 + " " + p2 = 201 chars
+            pageJoiner: 'space',
         });
 
-        // Seg 1 gets P1 (100) + space (1) + 49 chars of P2 = 150 total.
-        expect(result[0].content.length).toBe(150);
+        // Should break near 150 but at a space
+        expect(result[0].content.length).toBeLessThanOrEqual(150);
+        expect(result[0].content.length).toBeGreaterThan(140);
         expect(result[0].to).toBe(1);
     });
 

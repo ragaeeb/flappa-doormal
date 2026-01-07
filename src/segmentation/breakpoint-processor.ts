@@ -212,8 +212,8 @@ const findBreakOffsetForWindow = (
         };
     }
 
-    // Fallback: If hitting maxContentLength, try to find a safe break position
-    if (maxContentLength && windowEndPosition === maxContentLength) {
+    // Fallback: Always try to find a safe break position (avoid mid-word splits)
+    if (windowEndPosition < remainingContent.length) {
         const safeOffset = findSafeBreakPosition(remainingContent, windowEndPosition);
         if (safeOffset !== -1) {
             return { breakOffset: safeOffset };

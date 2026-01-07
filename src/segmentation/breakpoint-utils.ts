@@ -738,22 +738,17 @@ const handlePageBoundaryBreak = (
     pageIds: number[],
     normalizedPages: Map<number, NormalizedPage>,
 ): number => {
-    const nextPageIdx = windowEndIdx + 1;
-    if (nextPageIdx <= toIdx) {
-        const nextPageData = normalizedPages.get(pageIds[nextPageIdx]);
-        if (nextPageData) {
-            const pos = findNextPagePosition(remainingContent, nextPageData);
-            // Only trust findNextPagePosition if the result is reasonably close to windowEndPosition.
-            // This prevents incorrect breaks when content is duplicated within pages.
-            // Use a generous tolerance (2000 chars or 50% of windowEndPosition, whichever is larger).
-            const tolerance = Math.max(2000, windowEndPosition * 0.5);
-            if (pos > 0 && Math.abs(pos - windowEndPosition) <= tolerance) {
-                return Math.min(pos, windowEndPosition, remainingContent.length);
-            }
+    // Fall back to windowEndPosition but try to break at whitespace to avoid mid-word splits
+    const targetPos = Math.min(windowEndPosition, remainingContent.length);
+    if (targetPos < remainingContent.length) {
+        const safePos = findSafeBreakPosition(remainingContent, targetPos);
+        if (safePos !== -1) {
+            return safePos;
         }
+        // Final fallback: ensure we don't split a surrogate pair
+        return adjustForSurrogate(remainingContent, targetPos);
     }
-    // Fall back to windowEndPosition which is computed from cumulative offsets
-    return Math.min(windowEndPosition, remainingContent.length);
+    return targetPos;
 };
 
 /**
