@@ -118,7 +118,7 @@ src/
    - `findNextPagePosition()` - Find next page content position
    - `findPatternBreakPosition()` - Find pattern match by preference
    - `findSafeBreakPosition()` - Search backward for a safe linguistic split point (whitespace/punctuation)
-   - `adjustForSurrogate()` - Ensure split position doesn't corrupt Unicode surrogate pairs
+   - `adjustForUnicodeBoundary()` - Ensure split position doesn't corrupt surrogate pairs, combining marks, ZWJ/ZWNJ, or variation selectors
 
 10. **`types.ts`** - Type definitions
    - `Logger` interface - Optional logging for debugging
@@ -269,7 +269,7 @@ When using `maxContentLength`, the segmenter prevents text corruption through se
 **Algorithm:**
 1. **Windowed Pattern Match**: Attempt to find a user-provided `breakpoint` pattern within the character window.
 2. **Safe Fallback (Linguistic)**: If no pattern matches, use `findSafeBreakPosition()` to search backward (100 chars) for whitespace or punctuation `[\s\n.,;!?؛،۔]`.
-3. **Safe Fallback (Technical)**: If still no safe break found, use `adjustForSurrogate()` to ensure the split doesn't fall between a High and Low Unicode surrogate pair.
+3. **Safe Fallback (Technical)**: If still no safe break found, use `adjustForUnicodeBoundary()` to ensure the split doesn't corrupt surrogate pairs, combining marks, ZWJ/ZWNJ, or variation selectors.
 4. **Hard Split**: Only as a final resort is a character-exact split performed.
 
 **Progress Guarantee**:
@@ -333,6 +333,7 @@ The original `segmentPages` had complexity 37 (max: 15). Extraction:
 - **Unit tests**: Each utility function has dedicated tests
 - **Integration tests**: Full pipeline tests in `segmenter.test.ts`
 - **Real-world tests**: `segmenter.bukhari.test.ts` uses actual hadith data
+- **Style convention**: Prefer `it('should ...', () => { ... })` (Bun) for consistency across the suite
 - Run: `bun test`
 
 ## Code Quality Standards
@@ -433,7 +434,7 @@ bunx biome lint .
 
 11. **Safety Fallback (Search-back)**: When forced to split at a hard character limit, searching backward for whitespace/punctuation (`[\s\n.,;!?؛،۔]`) prevents word-chopping and improves readability significantly.
 
-12. **Unicode Boundary Safety (Surrogates + Graphemes)**: Multi-byte characters (like emojis) can be corrupted if split in the middle of a surrogate pair. Similarly, Arabic diacritics (combining marks), ZWJ/ZWNJ, and variation selectors can be orphaned if a hard split lands in the middle of a grapheme cluster. Use `adjustForUnicodeBoundary` (built on `adjustForSurrogate`) when forced to hard-split near a limit.
+12. **Unicode Boundary Safety (Surrogates + Graphemes)**: Multi-byte characters (like emojis) can be corrupted if split in the middle of a surrogate pair. Similarly, Arabic diacritics (combining marks), ZWJ/ZWNJ, and variation selectors can be orphaned if a hard split lands in the middle of a grapheme cluster. Use `adjustForUnicodeBoundary` when forced to hard-split near a limit.
 
 13. **Recursion/Iteration Safety**: Using a progress-based guard (comparing `cursorPos` before and after loop iteration) is safer than fixed iteration limits for supporting arbitrary-sized content without truncation risks.
 
@@ -483,7 +484,16 @@ bunx biome lint .
        - `advanceCursorAndIndex()` (progress)
        - `computeNextFromIdx()` (heuristic) **or** position-based override when `maxPages=0` (see #21)
 
+25. **Page attribution can drift in large-document breakpoint processing**: For ≥`FAST_PATH_THRESHOLD` segments, boundary positions may be derived from cumulative offsets (fast path). If upstream content is modified (e.g. marker stripping or accidental leading-trim), binary-search attribution can classify a piece as starting **before** `currentFromIdx`, inflating `(to - from)` and violating `maxPages`. **Fix**: clamp `actualStartIdx >= currentFromIdx` and re-apply the `maxPages` window using the same ID-span logic as `computeWindowEndIdx(...)` before creating the piece segment.
+
+26. **Offset fast path must respect page-ID span semantics**: `maxPages` in this library is enforced as an **ID span** invariant (`(to ?? from) - from <= maxPages`). For large segments, the offset-based fast path must choose `segEnd` using the same ID-window logic as `computeWindowEndIdx(...)` (not “N pages by index”), otherwise gaps (e.g. `2216 → 2218`) produce illegal spans.
+
+27. **Never `trimStart()` huge fallback content**: `ensureFallbackSegment()` constructs “all pages as one segment” when there are no structural split rules. If this giant content is `trimStart()`’d, cumulative offsets and derived boundary positions become inconsistent, which can lead to incorrect `from/to` attribution and `maxPages` violations that only appear on very large books.
+
+28. **Always test both sides of the fast-path threshold**: Several breakpoint bugs only reproduce at or above `FAST_PATH_THRESHOLD` (1000). Add regressions at `threshold-1` and `threshold` to avoid “works in small unit tests, fails on full books” surprises.
+
 ### Process Template (Multi-agent design review, TDD-first)
+
 
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:

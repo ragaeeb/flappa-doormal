@@ -197,6 +197,24 @@ describe('breakpoint-processor', () => {
             expect(result.some((s) => s.to !== undefined)).toBe(false);
         });
 
+        it('should respect maxPages by page ID span in offset fast path even when page IDs have gaps', () => {
+            const pageCount = 1005;
+            // Gapped page IDs: every next page is +2, so no pair fits maxPages=1 by ID span.
+            const pages = Array.from({ length: pageCount }, (_, i) => ({ content: `P${i}`, id: i * 2 }));
+            const normalizedContent = pages.map((p) => p.content);
+            const joined = normalizedContent.join(' ');
+            const segments: Segment[] = [{ content: joined, from: 0, to: (pageCount - 1) * 2 }];
+
+            const result = applyBreakpoints(segments, pages, normalizedContent, 1, [''], 'longer', patternProcessor);
+
+            expect(result).toHaveLength(pageCount);
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+            expect(result[0].from).toBe(0);
+            expect(result[1].from).toBe(2);
+            expect(result[2].from).toBe(4);
+            expect(result.at(-1)?.from).toBe((pageCount - 1) * 2);
+        });
+
         it('should not advance page index based on overlapping content when maxPages=0 (position-based detection)', () => {
             // Reproduces the class of bug from src/index.test.ts:
             // after a sub-page split within page 0, the next piece can START with text that also
