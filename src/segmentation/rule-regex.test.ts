@@ -7,7 +7,6 @@ import {
     buildRuleRegex,
     buildTemplateRegexSource,
     compileRuleRegex,
-    determineUsesCapture,
     hasCapturingGroup,
     processPattern,
 } from './rule-regex.js';
@@ -74,13 +73,6 @@ describe('rule-regex', () => {
             const r = compileRuleRegex(regex);
             r.lastIndex = 0;
             expect(r.test('(١) x')).toBe(true);
-        });
-    });
-
-    describe('determineUsesCapture', () => {
-        it('should return false when only named captures exist (named captures are for metadata only)', () => {
-            const { regex, captureNames } = buildTemplateRegexSource('^{{raqms:num}} {{dash}} ');
-            expect(determineUsesCapture(regex, captureNames)).toBe(false);
         });
     });
 

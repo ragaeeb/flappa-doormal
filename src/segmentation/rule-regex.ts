@@ -118,8 +118,6 @@ export const buildTemplateRegexSource = (template: string, capturePrefix?: strin
     return { captureNames, regex: pattern };
 };
 
-export const determineUsesCapture = (regexSource: string, _captureNames: string[]) => hasCapturingGroup(regexSource);
-
 /**
  * Builds a compiled regex and metadata from a split rule.
  *
