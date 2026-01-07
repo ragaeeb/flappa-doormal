@@ -307,11 +307,9 @@ const processOffsetFastPath = (
     logger?: Logger,
 ) => {
     const result: Segment[] = [];
-    const effectiveMaxPages = maxPages + 1;
     const pageCount = toIdx - fromIdx + 1;
 
     logger?.debug?.('[breakpoints] Using offset-based fast-path for large segment', {
-        effectiveMaxPages,
         fromIdx,
         maxPages,
         pageCount,
@@ -320,8 +318,16 @@ const processOffsetFastPath = (
 
     const baseOffset = cumulativeOffsets[fromIdx] ?? 0;
 
-    for (let segStart = fromIdx; segStart <= toIdx; segStart += effectiveMaxPages) {
-        const segEnd = Math.min(segStart + effectiveMaxPages - 1, toIdx);
+    // IMPORTANT: maxPages is interpreted by PAGE ID span (not array index span).
+    // This fast path must therefore choose segEnd using the same logic as computeWindowEndIdx,
+    // otherwise gaps in page IDs (e.g. 2216 -> 2218) can create segments that violate maxPages.
+    let segStart = fromIdx;
+    while (segStart <= toIdx) {
+        let segEnd = segStart;
+        const maxWindowPageId = pageIds[segStart] + maxPages;
+        while (segEnd + 1 <= toIdx && pageIds[segEnd + 1] <= maxWindowPageId) {
+            segEnd++;
+        }
 
         const startOffset = Math.max(0, (cumulativeOffsets[segStart] ?? 0) - baseOffset);
         const endOffset =
@@ -346,6 +352,7 @@ const processOffsetFastPath = (
             }
             result.push(seg);
         }
+        segStart = segEnd + 1;
     }
     return result;
 };
@@ -672,12 +679,27 @@ const processOversizedSegment = (
                 toIdx,
             );
 
+            // Safety: boundaryPositions can be slightly misaligned in rare cases for very large segments
+            // (e.g. if upstream content was trimmed/normalized). Never allow a piece to "start" before
+            // the current page cursor, as that can violate maxPages constraints by inflating from/to span.
+            if (actualStartIdx < currentFromIdx) {
+                logger?.warn?.('[breakpoints] Page attribution drift detected; clamping actualStartIdx', {
+                    actualStartIdx,
+                    currentFromIdx,
+                });
+                actualStartIdx = currentFromIdx;
+            }
+
             // When maxPages=0, enforce that the piece cannot span beyond the current page.
             // This is necessary because boundaryPositions-based page detection can be confused
             // when pages have duplicate/overlapping content at boundaries.
             if (maxPages === 0) {
                 actualEndIdx = Math.min(actualEndIdx, currentFromIdx);
                 actualStartIdx = Math.min(actualStartIdx, currentFromIdx);
+            } else if (maxPages > 0) {
+                // Enforce ID-span-based maxPages for page attribution too (handles drift).
+                const maxAllowedEndIdx = computeWindowEndIdx(actualStartIdx, toIdx, pageIds, maxPages);
+                actualEndIdx = Math.min(actualEndIdx, maxAllowedEndIdx);
             }
 
             const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, segment.meta, lastBreakpoint);

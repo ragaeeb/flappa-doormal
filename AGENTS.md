@@ -483,7 +483,16 @@ bunx biome lint .
        - `advanceCursorAndIndex()` (progress)
        - `computeNextFromIdx()` (heuristic) **or** position-based override when `maxPages=0` (see #21)
 
+25. **Page attribution can drift in large-document breakpoint processing**: For ≥`FAST_PATH_THRESHOLD` segments, boundary positions may be derived from cumulative offsets (fast path). If upstream content is modified (e.g. marker stripping or accidental leading-trim), binary-search attribution can classify a piece as starting **before** `currentFromIdx`, inflating `(to - from)` and violating `maxPages`. **Fix**: clamp `actualStartIdx >= currentFromIdx` and re-apply the `maxPages` window using the same ID-span logic as `computeWindowEndIdx(...)` before creating the piece segment.
+
+26. **Offset fast path must respect page-ID span semantics**: `maxPages` in this library is enforced as an **ID span** invariant (`(to ?? from) - from <= maxPages`). For large segments, the offset-based fast path must choose `segEnd` using the same ID-window logic as `computeWindowEndIdx(...)` (not “N pages by index”), otherwise gaps (e.g. `2216 → 2218`) produce illegal spans.
+
+27. **Never `trimStart()` huge fallback content**: `ensureFallbackSegment()` constructs “all pages as one segment” when there are no structural split rules. If this giant content is `trimStart()`’d, cumulative offsets and derived boundary positions become inconsistent, which can lead to incorrect `from/to` attribution and `maxPages` violations that only appear on very large books.
+
+28. **Always test both sides of the fast-path threshold**: Several breakpoint bugs only reproduce at or above `FAST_PATH_THRESHOLD` (1000). Add regressions at `threshold-1` and `threshold` to avoid “works in small unit tests, fails on full books” surprises.
+
 ### Process Template (Multi-agent design review, TDD-first)
+
 
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:

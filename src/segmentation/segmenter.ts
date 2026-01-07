@@ -133,8 +133,13 @@ export const ensureFallbackSegment = (
 
     const firstPage = pages[0];
     const lastPage = pages.at(-1)!;
-    const allContent = normalizedContent.join(pageJoiner === 'newline' ? '\n' : ' ').trim();
-    if (!allContent) {
+    const joiner = pageJoiner === 'newline' ? '\n' : ' ';
+    const joined = normalizedContent.join(joiner);
+    // Important: do NOT trimStart here.
+    // Trimming the leading content can desync cumulative offsets/boundary positions in breakpoint processing
+    // for very large fallback segments, causing incorrect page attribution and maxPages violations.
+    const allContent = joined.replace(/\s+$/u, '');
+    if (!allContent.trim()) {
         return segments;
     }
 
