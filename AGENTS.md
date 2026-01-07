@@ -118,7 +118,7 @@ src/
    - `findNextPagePosition()` - Find next page content position
    - `findPatternBreakPosition()` - Find pattern match by preference
    - `findSafeBreakPosition()` - Search backward for a safe linguistic split point (whitespace/punctuation)
-   - `adjustForSurrogate()` - Ensure split position doesn't corrupt Unicode surrogate pairs
+   - `adjustForUnicodeBoundary()` - Ensure split position doesn't corrupt surrogate pairs, combining marks, ZWJ/ZWNJ, or variation selectors
 
 10. **`types.ts`** - Type definitions
    - `Logger` interface - Optional logging for debugging
@@ -269,7 +269,7 @@ When using `maxContentLength`, the segmenter prevents text corruption through se
 **Algorithm:**
 1. **Windowed Pattern Match**: Attempt to find a user-provided `breakpoint` pattern within the character window.
 2. **Safe Fallback (Linguistic)**: If no pattern matches, use `findSafeBreakPosition()` to search backward (100 chars) for whitespace or punctuation `[\s\n.,;!?؛،۔]`.
-3. **Safe Fallback (Technical)**: If still no safe break found, use `adjustForSurrogate()` to ensure the split doesn't fall between a High and Low Unicode surrogate pair.
+3. **Safe Fallback (Technical)**: If still no safe break found, use `adjustForUnicodeBoundary()` to ensure the split doesn't corrupt surrogate pairs, combining marks, ZWJ/ZWNJ, or variation selectors.
 4. **Hard Split**: Only as a final resort is a character-exact split performed.
 
 **Progress Guarantee**:
@@ -333,6 +333,7 @@ The original `segmentPages` had complexity 37 (max: 15). Extraction:
 - **Unit tests**: Each utility function has dedicated tests
 - **Integration tests**: Full pipeline tests in `segmenter.test.ts`
 - **Real-world tests**: `segmenter.bukhari.test.ts` uses actual hadith data
+- **Style convention**: Prefer `it('should ...', () => { ... })` (Bun) for consistency across the suite
 - Run: `bun test`
 
 ## Code Quality Standards
@@ -433,7 +434,7 @@ bunx biome lint .
 
 11. **Safety Fallback (Search-back)**: When forced to split at a hard character limit, searching backward for whitespace/punctuation (`[\s\n.,;!?؛،۔]`) prevents word-chopping and improves readability significantly.
 
-12. **Unicode Boundary Safety (Surrogates + Graphemes)**: Multi-byte characters (like emojis) can be corrupted if split in the middle of a surrogate pair. Similarly, Arabic diacritics (combining marks), ZWJ/ZWNJ, and variation selectors can be orphaned if a hard split lands in the middle of a grapheme cluster. Use `adjustForUnicodeBoundary` (built on `adjustForSurrogate`) when forced to hard-split near a limit.
+12. **Unicode Boundary Safety (Surrogates + Graphemes)**: Multi-byte characters (like emojis) can be corrupted if split in the middle of a surrogate pair. Similarly, Arabic diacritics (combining marks), ZWJ/ZWNJ, and variation selectors can be orphaned if a hard split lands in the middle of a grapheme cluster. Use `adjustForUnicodeBoundary` when forced to hard-split near a limit.
 
 13. **Recursion/Iteration Safety**: Using a progress-based guard (comparing `cursorPos` before and after loop iteration) is safer than fixed iteration limits for supporting arbitrary-sized content without truncation risks.
 

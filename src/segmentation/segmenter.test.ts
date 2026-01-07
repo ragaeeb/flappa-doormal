@@ -910,13 +910,13 @@ describe('segmenter', () => {
 
                 const rules: SplitRule[] = [{ lineStartsWith: ['## '], split: 'at' }];
 
-                const asSpace = segmentPages(pages, { rules, pageJoiner: 'space' });
+                const asSpace = segmentPages(pages, { pageJoiner: 'space', rules });
                 expect(asSpace).toHaveLength(1);
                 expect(asSpace[0].from).toBe(1);
                 expect(asSpace[0].to).toBe(2);
                 expect(asSpace[0].content).toBe('## Header Body Text');
 
-                const asNewline = segmentPages(pages, { rules, pageJoiner: 'newline' });
+                const asNewline = segmentPages(pages, { pageJoiner: 'newline', rules });
                 expect(asNewline).toHaveLength(1);
                 expect(asNewline[0].from).toBe(1);
                 expect(asNewline[0].to).toBe(2);
@@ -1597,6 +1597,26 @@ describe('segmenter', () => {
             });
 
             describe('regressions: maxPages enforcement on large books', () => {
+                it('should preserve maxPages=0 at the fast-path threshold with pageJoiner="newline"', () => {
+                    const pageCount = FAST_PATH_THRESHOLD;
+                    const pages: Page[] = Array.from({ length: pageCount }, (_, i) => ({
+                        content: `P${i}.`,
+                        id: i,
+                    }));
+
+                    const result = segmentPages(pages, {
+                        breakpoints: [''],
+                        maxPages: 0,
+                        pageJoiner: 'newline',
+                        rules: [],
+                    });
+
+                    expect(result).toHaveLength(pageCount);
+                    expect(result.every((s) => s.to === undefined)).toBe(true);
+                    expect(result[0].from).toBe(0);
+                    expect(result.at(-1)?.from).toBe(pageCount - 1);
+                });
+
                 it('should behave consistently just below and at the fast-path threshold (ID gaps)', () => {
                     // This guards the threshold boundary, which is where many "only in the full book" bugs live.
                     // The >= FAST_PATH_THRESHOLD path exercises offset-based slicing and boundary fast paths.
@@ -1720,12 +1740,12 @@ describe('segmenter', () => {
                     ];
 
                     const result = segmentPages(pages, {
-                        rules: [{ lineStartsAfter: ['STRIP '], split: 'at' }],
                         breakpoints: ['\\.\\s*', ''],
-                        maxPages: 1,
                         // Forces the iterative breakpoint path even for 1000+ pages.
                         maxContentLength: 10_000_000,
+                        maxPages: 1,
                         prefer: 'longer',
+                        rules: [{ lineStartsAfter: ['STRIP '], split: 'at' }],
                     });
 
                     const violations = result.filter((s) => s.to !== undefined && s.to - s.from > 1);
@@ -2683,6 +2703,46 @@ describe('segmenter', () => {
     // ═══════════════════════════════════════════════════════════════════════════
 
     describe('Edge Cases: maxPages=0 invariant enforcement', () => {
+        it('should not span gapped page IDs when maxContentLength forces intra-page splits', () => {
+            const pages: Page[] = [
+                { content: 'Alpha. '.repeat(8), id: 1 },
+                { content: 'Beta. '.repeat(8), id: 2 },
+                { content: 'Gamma. '.repeat(8), id: 4 },
+                { content: 'Delta. '.repeat(8), id: 5 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', ''],
+                maxContentLength: 50,
+                maxPages: 1,
+            });
+
+            const violations = result.filter((s) => (s.to ?? s.from) - s.from > 1);
+            expect(violations).toHaveLength(0);
+            expect(result.some((s) => s.from === 1)).toBe(true);
+            expect(result.some((s) => s.from === 2)).toBe(true);
+            expect(result.some((s) => s.from === 4)).toBe(true);
+            expect(result.some((s) => s.from === 5)).toBe(true);
+        });
+
+        it('should enforce maxPages=1 with gapped page IDs when only page-boundary breakpoints apply', () => {
+            const pages: Page[] = [
+                { content: 'No breaks here', id: 1 },
+                { content: 'Still no breaks', id: 2 },
+                { content: 'Gap page', id: 4 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 1,
+                rules: [],
+            });
+
+            expect(result).toHaveLength(3);
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+            expect(result.map((s) => s.from)).toEqual([1, 2, 4]);
+        });
+
         it('should handle maxPages=0 with non-sequential page IDs', () => {
             // Non-sequential IDs can confuse offset calculations
             const pages: Page[] = [
@@ -2735,7 +2795,7 @@ describe('segmenter', () => {
             expect(result).toHaveLength(50);
             expect(result.every((s) => s.to === undefined)).toBe(true);
             for (let i = 0; i < 50; i++) {
-                expect(result[i]).toMatchObject({ from: i, content: 'SAME_CONTENT' });
+                expect(result[i]).toMatchObject({ content: 'SAME_CONTENT', from: i });
             }
         });
 

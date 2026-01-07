@@ -714,6 +714,7 @@ const handlePageBoundaryBreak = (
     toIdx: number,
     pageIds: number[],
     normalizedPages: Map<number, NormalizedPage>,
+    prefer: 'longer' | 'shorter',
 ) => {
     // Page-boundary breakpoint (empty pattern '').
     //
@@ -730,13 +731,20 @@ const handlePageBoundaryBreak = (
     const isLengthBounded = maxContentLength !== undefined && windowEndPosition === maxContentLength;
 
     if (!isLengthBounded) {
-        const nextPageIdx = currentFromIdx + 1;
-        if (nextPageIdx <= toIdx && nextPageIdx <= windowEndIdx + 1) {
-            const nextPageData = normalizedPages.get(pageIds[nextPageIdx]);
-            if (nextPageData) {
-                const boundaryPos = findNextPagePosition(remainingContent, nextPageData);
-                if (boundaryPos > 0 && boundaryPos <= targetPos) {
-                    return boundaryPos;
+        // Page-bounded window semantics: swallow the remainder of the CURRENT page.
+        // Even if the maxPages window could include additional pages, an empty breakpoint ('')
+        // must not consume into the next page when no real breakpoint patterns matched.
+        const targetNextPageIdx = currentFromIdx + 1;
+
+        // Progressively try to find the boundary if detection fails (conservative fallback).
+        for (let nextIdx = targetNextPageIdx; nextIdx > currentFromIdx; nextIdx--) {
+            if (nextIdx <= toIdx) {
+                const nextPageData = normalizedPages.get(pageIds[nextIdx]);
+                if (nextPageData) {
+                    const boundaryPos = findNextPagePosition(remainingContent, nextPageData);
+                    if (boundaryPos > 0 && boundaryPos <= targetPos) {
+                        return boundaryPos;
+                    }
                 }
             }
         }
@@ -805,6 +813,7 @@ export const findBreakPosition = (
                     toIdx,
                     pageIds,
                     normalizedPages,
+                    prefer,
                 ),
                 breakpointIndex: i,
                 rule,
@@ -888,11 +897,20 @@ const isJoiner = (char: string | undefined) => char === '\u200C' || char === '\u
  * near a hard limit (e.g. maxContentLength with no safe whitespace/punctuation).
  */
 export const adjustForUnicodeBoundary = (content: string, position: number) => {
-    let adjusted = adjustForSurrogate(content, position);
+    let adjusted = position;
     while (adjusted > 0) {
+        // 1. Ensure we don't split a surrogate pair
+        // (High surrogate at adjusted-1, Low surrogate at adjusted)
+        const high = content.charCodeAt(adjusted - 1);
+        const low = content.charCodeAt(adjusted);
+        if (high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff) {
+            adjusted -= 1;
+            continue;
+        }
+
         const nextChar = content[adjusted];
         const prevChar = content[adjusted - 1];
-        // If we'd start the next segment with a combining mark / selector / joiner, back up.
+        // 2. If we'd start the next segment with a combining mark / selector / joiner, back up.
         // For joiners, also avoid ending the previous segment with a joiner.
         // (Splitting AFTER combining marks / selectors is safe; splitting before them is not.)
         if (isCombiningMarkOrSelector(nextChar) || isJoiner(nextChar) || isJoiner(prevChar)) {
