@@ -710,8 +710,7 @@ export const findPatternBreakPosition = (
     prefer: 'longer' | 'shorter',
     splitAt = false,
 ) => {
-    // Track first and last valid matches
-    let first: { index: number; length: number } | undefined;
+    // Track last valid match for 'longer' preference
     let last: { index: number; length: number } | undefined;
 
     for (const m of windowContent.matchAll(regex)) {
@@ -731,12 +730,7 @@ export const findPatternBreakPosition = (
             continue;
         }
 
-        // Track first/last valid match
-        const match = { index: idx, length: len };
-        if (!first) {
-            first = match;
-        }
-        last = match;
+        last = { index: idx, length: len };
 
         // Early return for 'shorter' (first valid match)
         if (prefer === 'shorter') {
@@ -759,13 +753,11 @@ export const findPatternBreakPosition = (
 const handlePageBoundaryBreak = (
     remainingContent: string,
     currentFromIdx: number,
-    windowEndIdx: number,
     windowEndPosition: number,
     maxContentLength: number | undefined,
     toIdx: number,
     pageIds: number[],
     normalizedPages: Map<number, NormalizedPage>,
-    prefer: 'longer' | 'shorter',
 ) => {
     // Page-boundary breakpoint (empty pattern '').
     //
@@ -858,13 +850,11 @@ export const findBreakPosition = (
                 breakPos: handlePageBoundaryBreak(
                     remainingContent,
                     currentFromIdx,
-                    windowEndIdx,
                     windowEndPosition,
                     maxContentLength,
                     toIdx,
                     pageIds,
                     normalizedPages,
-                    prefer,
                 ),
                 breakpointIndex: i,
                 rule,

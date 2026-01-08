@@ -1,280 +1,253 @@
-## Multi-agent TDD design review template (copy/paste)
+# Multi-Agent TDD Design Review Template
 
-This repo uses a repeatable workflow:
-- write an implementation plan
-- get several AI agents to critique it using a **strict prompt + response structure**
-- synthesize the feedback (agreement/differences/unique points + senior-engineer scope judgment)
-- update the plan
-- implement **TDD-first**
-
-This document is a reusable template for that workflow.
+Repeatable workflow: plan → multi-agent critique → synthesize → update → implement TDD-first.
 
 ---
 
-## 0) Inputs you should gather before starting
+## 0) Inputs (gather before starting)
 
-Fill these in (keep them short and concrete):
-
-- **Feature name**:
-- **One-line goal**:
-- **User-facing API change?** (yes/no; describe)
-- **Files likely involved** (guesses are ok):
-- **Constraints**:
-  - performance/memory:
-  - backwards compatibility:
-  - security:
-  - lint/complexity constraints (Biome):
-- **Non-goals**:
-- **Example input/output** (small, representative):
+| Field | Value |
+|-------|-------|
+| Feature name | |
+| One-line goal | |
+| API change? | yes/no; describe |
+| Files involved | |
+| Constraints | perf, BC, security, lint |
+| Non-goals | |
+| Example I/O | |
 
 ---
 
-## 1) Implementation plan template (markdown)
+## 1) Plan Template (`docs/<feature>-plan.md`)
 
-Create a plan doc in `docs/`:
-- `docs/<feature>-plan.md`
+### Problem Statement
+- What problem? What failure mode?
+- Inputs → Outputs
 
-Use this structure (copy/paste and fill in):
+### Project Context
+- Relevant invariants and behaviors
+- Key source files (paths)
+- Known gotchas
 
-### Problem statement
-- What problem are we solving?
-- What’s the exact failure mode / desired behavior?
-- What inputs do we have and what outputs do we need?
+### Proposed API
+```typescript
+// Public signatures, types, defaults
+```
 
-### Project context (repo-specific)
-- Summarize relevant library behaviors and invariants that must be preserved.
-- Link the most relevant source files (paths).
-- Include any known gotchas from prior work.
+### Algorithm
+- Pseudocode outline
+- Note repo invariants (preprocessing, tokens, fuzzy, joiners, breakpoints)
+- Thresholds, tie-break rules
 
-### Proposed API (public + internal)
-- Public function signatures (TypeScript).
-- Types/interfaces.
-- Configuration options and defaults.
-- Validation behavior and error reporting.
-
-### Algorithm (step-by-step)
-- Outline the core algorithm with pseudocode.
-- Call out where repo invariants matter (e.g., preprocessing parity, token expansion, fuzzy defaults, joiner behavior, breakpoints, etc.).
-- Specify matching/alignment/selection logic precisely (thresholds, tie-break rules).
-
-### Caveats / pitfalls / failure modes
-- List realistic failure modes and how we handle them.
-- Explicitly distinguish:
-  - “fail safely and report unresolved”
-  - “hard error”
-  - “best-effort”
+### Failure Modes
+| Mode | Behavior |
+|------|----------|
+| Invalid input | fail safely + report |
+| Ambiguous match | best-effort / threshold |
 
 ### Assumptions
-- Make assumptions explicit (inputs were produced by same options, ordering preserved, etc.).
+- Explicit list
 
-### Security considerations
-- ReDoS / untrusted pattern risks
-- resource limits / timeouts / safeguards
+### Security
+- ReDoS risks, mitigations
 
-### Performance considerations
-- Big-O and where it matters in practice for this repo
-- caching opportunities
-- thresholds for switching strategies
+### Performance
+- Big-O, caching, thresholds
 
-### TDD plan (tests first)
-- List the next tests we will write, in order, with:
-  - test name
-  - setup (pages/options/etc.)
-  - expected result
-- Include at least:
-  - happy-path
-  - edge-case
-  - “fail gracefully”
-  - regression test(s)
+### TDD Plan
+| # | Test Name | Setup | Expected |
+|---|-----------|-------|----------|
+| 1 | happy path | ... | ... |
+| 2 | edge case | ... | ... |
+| 3 | fail gracefully | ... | ... |
 
-### Implementation steps (incremental)
-- Ordered list of changes, each small enough to validate with tests.
-- Mention files to modify/add.
-- Call out when to refactor to satisfy Biome complexity constraints.
+### Implementation Steps
+1. Step → test → files
 
 ### Deliverables
-- code artifacts
-- docs updates
-- exported API changes
+- code, docs, API exports
 
 ---
 
-## 2) Critique prompt template (plain text for other AI agents)
+## 2) Critique Prompt (send to each AI model)
 
-Copy/paste the prompt below, fill placeholders, then send to each AI agent/model.
+**IMPORTANT**: Ask reviewers to include this header in their response:
+```
+# <Model Name> <Version> Review
+Date: <YYYY-MM-DD>
+```
+
+### Prompt Template
 
 ```text
-You are reviewing an implementation plan for a TypeScript library feature in the repo “flappa-doormal”.
-This repo is a declarative Arabic text segmentation library. We implement changes TDD-first.
+You are reviewing an implementation plan for a TypeScript library feature in "flappa-doormal" (Arabic text segmentation). Changes are TDD-first.
 
-You are given:
-- Feature plan doc: docs/<feature>-plan.md
-- Relevant repo files (mentioned in the plan)
+Given:
+- Feature plan: docs/<feature>-plan.md
+- Relevant source files (paths in plan)
 
-Context you must assume:
-- segmentPages(pages, options) segments Arabic text pages using declarative rules.
-- The codebase uses Bun tests and Biome linting (low function complexity is enforced).
+Context:
+- segmentPages(pages, options) segments Arabic text using declarative rules
+- Bun tests, Biome linting (max complexity 15)
 
-Your tasks:
-1) Critique the plan for correctness against the repo’s behavior and invariants.
-2) Identify missing edge cases, ambiguous scenarios, and failure modes.
-3) Propose concrete algorithm improvements (data structures, scoring functions, thresholds, tie-break rules).
-4) Propose a TDD test matrix: specific tests (inputs/expected outputs) that catch subtle bugs.
-5) Call out API design issues: required vs optional inputs, validation, report schema, and how to avoid accidental behavior changes.
-6) Analyze performance: Big-O + practical costs; recommend caching and thresholds.
-7) Security: regex/ReDoS/untrusted config concerns; mitigations or documentation requirements.
+Tasks:
+1. Correctness: Does the plan match repo behavior/invariants?
+2. Edge cases: Missing scenarios, ambiguous behavior?
+3. Algorithm: Improvements (data structures, thresholds, tie-breaks)?
+4. Tests: Propose 12+ specific test cases with inputs/expected outputs
+5. API: Required vs optional, validation, error reporting?
+6. Performance: Big-O, caching recommendations?
+7. Security: ReDoS, untrusted config risks?
 
-Important repo-specific constraints to keep in mind:
-- <list repo-specific constraints here, e.g. preprocessing parity, fuzzy defaults, breakpoints, joiner semantics, etc.>
+Repo constraints:
+- <list here: preprocessing parity, fuzzy defaults, joiner behavior, etc.>
 
-Please respond with:
-- A bullet list of the top 10 most important issues/improvements (prioritized).
-- For each, a specific recommendation with enough detail to implement (pseudo-code welcome).
-- A proposed revised outline for the plan doc (section headings) if restructuring would help.
-- A table of at least 12 concrete test cases (brief but specific), including:
-  - at least 3 “should fail gracefully” cases
-  - at least 3 “edge cases” specific to this repo
-  - at least 3 cases involving post-processing/normalization/boundary behavior (if relevant)
+Response format (REQUIRED):
+1. Start with: `# <Your Model Name> <Version> Review` and `Date: YYYY-MM-DD`
+2. Top 10 issues (prioritized, actionable)
+3. For each: specific recommendation (pseudo-code ok)
+4. Test matrix table (12+ cases):
+   | # | Test | Input | Expected | Category |
+   |---|------|-------|----------|----------|
+   Include: 3 fail-gracefully, 3 edge-cases, 3 boundary/normalization
+5. Revised plan outline (if restructuring helps)
+
+Keep response concise. Avoid excessive markdown formatting. Focus on actionable items.
 ```
 
 ---
 
-## 3) Review collection template
+## 3) Review Collection
 
-Create one file per model in `docs/`:
-- `docs/<model>-<feature>-review.md`
+Save as: `docs/reviews/<model-name>.md`
 
-Ask reviewers to keep their response in the structure required by the prompt above.
+Expected format:
+```markdown
+# <Model Name> <Version> Review
+Date: YYYY-MM-DD
 
----
+## Top 10 Issues
+1. **Issue**: Description
+   **Fix**: Recommendation
 
-## 4) Synthesis template (markdown)
+## Test Matrix
+| # | Test | Input | Expected | Category |
+|---|------|-------|----------|----------|
 
-Create:
-- `docs/<feature>-review-synthesis.md`
-
-Structure:
-
-### Files Reviewed
-- List each review doc path.
-
-### Collective Agreement
-- Bullet points of the shared conclusions.
-- Include why they matter for correctness.
-
-### Key Disagreements
-- Use a table to capture conflicting feedback:
-
-| Issue | Position A | Position B | My Decision |
-|-------|------------|------------|-------------|
-| *Topic* | *One view (e.g. "Bug")* | *Opposing view (e.g. "Feature")* | *Your judge call* |
-
-### Unique Points Per Reviewer
-- One small subsection per reviewer with their best unique contribution.
-
-### Verdict (What We Will Do Next)
-
-#### MVP Scope (Must Fix)
-- List critical bugs and essential features.
-- Explicitly link to who suggested it (e.g., "Proposed by Claude").
-
-#### Deferred / Out-of-Scope
-- List features that are nice-to-have but not critical.
-- Explain *why* (e.g., "Overengineering", "Premature optimization").
-
-#### Concrete Next Tests (TDD Order)
-- List the exact next tests to implement, in priority order:
-  1. Small deterministic checks / Invariants
-  2. Edge cases (empty inputs, boundaries)
-  3. Heuristics / Complex logic
-
-#### Implementation Steps (Mapped to Tests)
-- Map each test to the files/functions that need changing.
+## Revised Plan Outline (optional)
+```
 
 ---
 
-## 4.1) Final synthesizer agent: responsibilities + next steps
+## 4) Synthesis Template (`docs/<feature>-review-synthesis.md`)
 
-This is the “last agent” step after reviews are collected. The goal is to turn critiques into a **decision record** and a **TDD-ready execution plan**.
+```markdown
+# <Feature> Review Synthesis
+
+## Reviews Analyzed
+| Model | Date | File |
+|-------|------|------|
+
+## Consensus (all/most agree)
+| # | Item | Action |
+|---|------|--------|
+
+## Disagreements
+| Issue | Position A | Position B | Decision | Rationale |
+|-------|------------|------------|----------|-----------|
+
+## Unique Points
+### <Model A>
+- Best contribution
+
+### <Model B>
+- Best contribution
+
+## Action Items
+
+### Must Fix (MVP)
+| # | Item | Source | Status |
+|---|------|--------|--------|
+
+### Deferred
+| # | Item | Reason |
+|---|------|--------|
+
+### Test Order (TDD)
+| # | Test | Files |
+|---|------|-------|
+
+### Implementation Steps
+| # | Step | Test | Files |
+|---|------|------|-------|
+```
+
+---
+
+## 4.1) Synthesizer Agent Responsibilities
 
 ### Inputs
-- The original plan doc: `docs/<feature>-plan.md`
-- All review docs: `docs/<model>-<feature>-review.md`
-- Any repo constraints discovered during review (lint rules, performance limits, invariants)
+- Original plan: `docs/<feature>-plan.md`
+- Reviews: `docs/reviews/*.md`
 
-### Outputs (artifacts to produce)
-1) **Synthesis doc**: `docs/<feature>-review-synthesis.md`
-2) **Updated plan doc**: `docs/<feature>-plan-v2.md` (or overwrite the original if you prefer)
-3) **TDD next-steps checklist** inside the updated plan (tests in exact order)
+### Outputs
+1. Synthesis doc: `docs/<feature>-review-synthesis.md`
+2. Updated plan: `docs/<feature>-plan-v2.md`
+3. TDD checklist in updated plan
 
-### How to synthesize (recommended process)
-- **Step A — Extract claims**:
-  - For each review, extract:
-    - must-fix correctness issues
-    - suggested algorithm/API changes
-    - new test cases
-    - performance/security notes
-- **Step B — Cluster feedback**:
-  - Group claims into buckets:
-    - correctness/invariants
-    - API design
-    - alignment/matching heuristics + thresholds
-    - performance/caching
-    - security
-    - reporting/diagnostics
-    - tests
-- **Step C — Decide scope (senior engineer judgment)**:
-  - For each bucket, decide:
-    - **MVP-required** (must implement now)
-    - **nice-to-have** (only if cheap + high ROI)
-    - **out of scope** (belongs to clients or a separate tool)
-  - Explicitly call out **overengineering** candidates:
-    - heavy dependencies
-    - complex inference without reliable inputs
-    - algorithms that are hard to validate with tests
-- **Step D — Update the plan**:
-  - Update API + algorithm + report schema in the plan.
-  - Add/adjust assumptions and failure modes.
-  - Add hard thresholds and “fail safe” behavior where needed.
-
-### How to translate synthesis into TDD execution
-- **Step 1 — Rewrite the TDD test order**:
-  - Start with the smallest deterministic behavior (baseline failing test).
-  - Add tests that lock in invariants and prevent regressions.
-  - Add edge cases and “fail gracefully” tests next.
-  - Only then add heuristics/best-effort behaviors.
-- **Step 2 — Create an implementation sequence aligned to tests**:
-  - Each step should be “add test → implement → refactor to satisfy Biome complexity”.
-  - Prefer extracting helpers early to keep functions under complexity limits.
-- **Step 3 — Define exit criteria**:
-  - All new tests pass.
-  - No new lints.
-  - Public API is documented (README/AGENTS as appropriate).
-  - Report/diagnostics are sufficient for users to trust results.
-
-
-
-## 5) “TDD-first” implementation loop checklist
-
-For each incremental step:
-- Write a failing test first.
-- Implement the minimum code to pass.
-- Refactor to satisfy Biome complexity constraints (extract helpers early).
-- Add report/diagnostics for ambiguous/unresolved cases (don’t guess silently).
-- Update docs only after behavior is validated by tests.
+### Process
+1. **Extract**: must-fix, algorithm changes, tests, perf/security notes
+2. **Cluster**: correctness, API, heuristics, performance, security, tests
+3. **Scope** (senior judgment):
+   - MVP-required
+   - Nice-to-have (cheap + high ROI)
+   - Out of scope / overengineering
+4. **Update plan**: API, algorithm, thresholds, failure modes
+5. **Verify claims**: When reviewers flag "critical" issues, check the actual codebase before implementing. Some claims are based on incorrect assumptions.
 
 ---
 
-## 6) Suggested defaults (works well for this repo)
+## 5) TDD Loop Checklist
 
-- **Prefer deterministic approaches** over heuristic ones.
-- **When heuristics are necessary**:
-  - require explicit opt-in (e.g. `fuzzy: true`)
-  - define strict thresholds (e.g. "max 2000 chars deviation")
-  - fail safe (return unresolved) instead of guessing silently
-- **Keep algorithms simple** unless tests demonstrate a need for more complexity (YAGNI).
-- **Complexity limits**: 
-  - Max cyclomatic complexity: 15
-  - Max function length: ~50-80 lines (extract helpers early)
+For each step:
+- [ ] Write failing test
+- [ ] Implement minimum to pass
+- [ ] Refactor (Biome complexity)
+- [ ] Add diagnostics for ambiguous cases
+- [ ] Update docs after tests pass
 
+---
 
+## 6) Defaults (this repo)
+
+| Setting | Value |
+|---------|-------|
+| Prefer | Deterministic over heuristic |
+| Heuristics | Require opt-in, strict thresholds, fail-safe |
+| Max complexity | 15 |
+| Max function lines | 50-80 |
+| Approach | YAGNI - add complexity only when tests demand it |
+
+---
+
+## 7) Lessons Learned
+
+### For Reviewers (what helps synthesis)
+1. **Include model name + version + date** in header
+2. **Use tables** for test matrices (easier to parse)
+3. **Prioritize issues** (numbered list, most important first)
+4. **Be specific**: pseudo-code > vague descriptions
+5. **Avoid redundant markdown** (no excessive headers, blank lines)
+6. **State assumptions explicitly** when making claims about codebase
+
+### For Synthesizer
+1. **Verify "critical" claims** against actual code before acting
+2. **Disagreements are valuable** - they reveal edge cases
+3. **Unique points per reviewer** often catch issues others miss
+4. **Fast path / optimization code** is often misunderstood - verify interactions
+5. **Test both sides of thresholds** (e.g., 999 vs 1000 pages)
+
+### Common False Positives
+- "Unicode safety needed" - often the user's pattern defines boundaries
+- "Fast path doesn't handle X" - often the fast path doesn't apply to X
+- "Breaking change" - often an edge case that was never officially supported

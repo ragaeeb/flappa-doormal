@@ -117,6 +117,29 @@ Replace regex with readable tokens:
 | `{{bab}}` | "باب" (chapter) | `باب` |
 | `{{basmalah}}` | "بسم الله" | `بسم الله` |
 
+#### Token Constants (TypeScript)
+
+For better IDE support, use the `Token` constants instead of raw strings:
+
+```typescript
+import { Token, withCapture } from 'flappa-doormal';
+
+// Instead of:
+{ lineStartsWith: ['{{kitab}}', '{{bab}}'] }
+
+// Use:
+{ lineStartsWith: [Token.KITAB, Token.BAB] }
+
+// With named captures:
+const pattern = withCapture(Token.RAQMS, 'hadithNum') + ' ' + Token.DASH + ' ';
+// Result: '{{raqms:hadithNum}} {{dash}} '
+
+{ lineStartsAfter: [pattern], split: 'at' }
+// segment.meta.hadithNum will contain the matched number
+```
+
+Available constants: `Token.BAB`, `Token.BASMALAH`, `Token.BULLET`, `Token.DASH`, `Token.FASL`, `Token.HARF`, `Token.HARFS`, `Token.KITAB`, `Token.NAQL`, `Token.NUM`, `Token.NUMS`, `Token.NUMBERED`, `Token.RAQM`, `Token.RAQMS`, `Token.RUMUZ`, `Token.TARQIM`
+
 ### 2. Named Capture Groups
 
 Extract metadata automatically with the `{{token:name}}` syntax:
@@ -375,6 +398,10 @@ When a breakpoint pattern matches, the split position is controlled by the `spli
 }
 // If punctuation is found, "ولهذا" is never tried
 ```
+
+> **Note on lookahead patterns**: Zero-length patterns like `(?=X)` are not supported for breakpoints because they can cause non-progress scenarios. Use `{ pattern: 'X', split: 'at' }` instead to achieve "split before X" behavior.
+
+> **Note on whitespace**: Segments are trimmed by default. With `split:'at'`, if the match consists only of whitespace, it will be trimmed from the start of the next segment. This is usually desirable for delimiter patterns.
 
 **Security note (ReDoS)**: Breakpoints (and raw `regex` rules) compile user-provided regular expressions. **Do not accept untrusted patterns** (e.g. from end users) without validation/sandboxing; some regexes can trigger catastrophic backtracking and hang the process.
 

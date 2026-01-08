@@ -424,3 +424,57 @@ describe('tokens', () => {
         });
     });
 });
+
+import { Token, withCapture } from './tokens.js';
+
+describe('Token constants', () => {
+    it('should export all expected token constants', () => {
+        expect(Token.BAB).toBe('{{bab}}');
+        expect(Token.BASMALAH).toBe('{{basmalah}}');
+        expect(Token.BULLET).toBe('{{bullet}}');
+        expect(Token.DASH).toBe('{{dash}}');
+        expect(Token.FASL).toBe('{{fasl}}');
+        expect(Token.HARF).toBe('{{harf}}');
+        expect(Token.HARFS).toBe('{{harfs}}');
+        expect(Token.KITAB).toBe('{{kitab}}');
+        expect(Token.NAQL).toBe('{{naql}}');
+        expect(Token.NUM).toBe('{{num}}');
+        expect(Token.NUMS).toBe('{{nums}}');
+        expect(Token.NUMBERED).toBe('{{numbered}}');
+        expect(Token.RAQM).toBe('{{raqm}}');
+        expect(Token.RAQMS).toBe('{{raqms}}');
+        expect(Token.RUMUZ).toBe('{{rumuz}}');
+        expect(Token.TARQIM).toBe('{{tarqim}}');
+    });
+
+    it('should work with expandTokens', () => {
+        const pattern = `${Token.RAQMS} ${Token.DASH}`;
+        const expanded = expandTokens(pattern);
+        expect(expanded).toContain('[\\u0660-\\u0669]+');
+        expect(expanded).toContain('[-–—ـ]');
+    });
+});
+
+describe('withCapture', () => {
+    it('should add capture name to token', () => {
+        expect(withCapture(Token.RAQMS, 'num')).toBe('{{raqms:num}}');
+    });
+
+    it('should work with any token constant', () => {
+        expect(withCapture(Token.KITAB, 'book')).toBe('{{kitab:book}}');
+        expect(withCapture(Token.BAB, 'chapter')).toBe('{{bab:chapter}}');
+    });
+
+    it('should create capture-only token for invalid input', () => {
+        expect(withCapture('not-a-token', 'name')).toBe('{{:name}}');
+    });
+
+    it('should work in a complete pattern', () => {
+        const pattern = `${withCapture(Token.RAQMS, 'hadithNum')} ${Token.DASH} `;
+        expect(pattern).toBe('{{raqms:hadithNum}} {{dash}} ');
+
+        const result = expandTokensWithCaptures(pattern);
+        expect(result.captureNames).toContain('hadithNum');
+        expect(result.hasCaptures).toBe(true);
+    });
+});

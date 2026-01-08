@@ -286,6 +286,99 @@ const BASE_TOKENS: Record<string, string> = {
 };
 
 // ─────────────────────────────────────────────────────────────
+// Token constants for client use
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Pre-defined token constants for use in patterns.
+ *
+ * Using these constants instead of raw `{{token}}` strings provides:
+ * - Autocompletion in IDEs
+ * - Compile-time typo detection
+ * - Easier refactoring
+ *
+ * @example
+ * // Instead of:
+ * { lineStartsWith: ['{{kitab}}', '{{bab}}'] }
+ *
+ * // Use:
+ * import { Token } from 'flappa-doormal';
+ * { lineStartsWith: [Token.KITAB, Token.BAB] }
+ *
+ * @example
+ * // With named captures - use the helper function:
+ * import { Token, withCapture } from 'flappa-doormal';
+ * { lineStartsAfter: [withCapture(Token.RAQMS, 'num') + ' ' + Token.DASH + ' '] }
+ */
+export const Token = {
+    /** Chapter marker - باب */
+    BAB: '{{bab}}',
+    /** Basmala - بسم الله */
+    BASMALAH: '{{basmalah}}',
+    /** Bullet point variants */
+    BULLET: '{{bullet}}',
+    /** Dash variants (hyphen, en-dash, em-dash, tatweel) */
+    DASH: '{{dash}}',
+    /** Section marker - فصل / مسألة */
+    FASL: '{{fasl}}',
+    /** Single Arabic letter */
+    HARF: '{{harf}}',
+    /** Multiple Arabic letters separated by spaces */
+    HARFS: '{{harfs}}',
+    /** Book marker - كتاب */
+    KITAB: '{{kitab}}',
+    /** Hadith transmission phrases */
+    NAQL: '{{naql}}',
+    /** Single ASCII digit */
+    NUM: '{{num}}',
+    /** Composite: {{raqms}} {{dash}} (space) */
+    NUMBERED: '{{numbered}}',
+    /** One or more ASCII digits */
+    NUMS: '{{nums}}',
+    /** Single Arabic-Indic digit */
+    RAQM: '{{raqm}}',
+    /** One or more Arabic-Indic digits */
+    RAQMS: '{{raqms}}',
+    /** Source abbreviations (rijāl/takhrīj) */
+    RUMUZ: '{{rumuz}}',
+    /** Punctuation marks */
+    TARQIM: '{{tarqim}}',
+} as const;
+
+/**
+ * Type representing valid token constant keys.
+ */
+export type TokenKey = keyof typeof Token;
+
+/**
+ * Wraps a token with a named capture.
+ *
+ * @param token - Token constant (e.g., Token.RAQMS)
+ * @param name - Capture name for metadata extraction
+ * @returns Token string with capture syntax (e.g., '{{raqms:num}}')
+ *
+ * @example
+ * import { Token, withCapture } from 'flappa-doormal';
+ *
+ * // Create a pattern that captures the hadith number
+ * const pattern = withCapture(Token.RAQMS, 'hadithNum') + ' ' + Token.DASH + ' ';
+ * // Result: '{{raqms:hadithNum}} {{dash}} '
+ *
+ * // Use in a rule
+ * { lineStartsAfter: [pattern], split: 'at' }
+ * // segment.meta.hadithNum will contain the matched number
+ */
+export const withCapture = (token: string, name: string): string => {
+    // Extract token name from {{token}} format
+    const match = token.match(/^\{\{(\w+)\}\}$/);
+    if (!match) {
+        // If not a valid token format, return capture-only syntax
+        return `{{:${name}}}`;
+    }
+    return `{{${match[1]}:${name}}}`;
+};
+
+// ─────────────────────────────────────────────────────────────
 // Composite tokens - templates that reference base tokens
 // These are pre-expanded at module load time for performance
 // ─────────────────────────────────────────────────────────────

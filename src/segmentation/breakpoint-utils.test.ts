@@ -359,9 +359,21 @@ describe('breakpoint-utils', () => {
                 expect(result).toBe(-1);
             });
 
+            it('should return -1 when all matches are at position 0 with splitAt=true and prefer:longer', () => {
+                const regex = /^X/g;
+                const result = findPatternBreakPosition('Xabc', regex, 'longer', true);
+                expect(result).toBe(-1);
+            });
+
             it('should return -1 when only zero-length matches exist', () => {
                 const regex = /^/g;
                 const result = findPatternBreakPosition('abc', regex, 'shorter', false);
+                expect(result).toBe(-1);
+            });
+
+            it('should return -1 for zero-length matches with prefer:longer', () => {
+                const regex = /(?=X)/g;
+                const result = findPatternBreakPosition('aXb', regex, 'longer', false);
                 expect(result).toBe(-1);
             });
         });

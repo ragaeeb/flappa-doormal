@@ -230,8 +230,18 @@ interface SegmentationOptions {
   // - pageIds: []: apply to no pages (skip)
   replace?: Array<{ regex: string; replacement: string; flags?: string; pageIds?: number[] }>;
   maxPages?: number;           // Maximum pages a segment can span
-  breakpoints?: string[];      // Ordered array of regex patterns (supports token expansion)
+  breakpoints?: Breakpoint[];  // Ordered array of patterns (supports token expansion)
   prefer?: 'longer' | 'shorter'; // Select last or first match within window
+}
+
+// Breakpoint can be a string or object with split control
+type Breakpoint = string | BreakpointRule;
+interface BreakpointRule {
+  pattern: string;
+  split?: 'at' | 'after';  // Default: 'after'
+  min?: number;            // Minimum page ID for this breakpoint
+  max?: number;            // Maximum page ID for this breakpoint
+  exclude?: PageRange[];   // Pages to skip this breakpoint
 }
 ```
 
@@ -241,16 +251,24 @@ interface SegmentationOptions {
 3. Patterns are tried in order until one matches
 4. Empty string `''` means "fall back to page boundary"
 
+**Split behavior:**
+- **`split: 'after'` (default)**: Previous segment ends WITH the matched text
+- **`split: 'at'`**: Previous segment ends BEFORE the matched text (match starts next segment)
+
 **Example:**
 ```typescript
 segmentPages(pages, {
   rules: [
-    { lineStartsWith: ['{{basmalah}}'] },  // split defaults to 'at'
+    { lineStartsWith: ['{{basmalah}}'] },
     { lineStartsWith: ['{{bab}}'], meta: { type: 'chapter' } },
   ],
   maxPages: 2,
-  breakpoints: ['{{tarqim}}\\s*', '\\n', ''],  // Try: punctuation → newline → page boundary
-  prefer: 'longer',  // Greedy: make segments as large as possible
+  breakpoints: [
+    { pattern: '{{tarqim}}\\s*', split: 'after' }, // Punctuation ends current segment
+    { pattern: 'ولهذا', split: 'at' },             // Word starts next segment
+    '',                                            // Fall back to page boundary
+  ],
+  prefer: 'longer',
 });
 ```
 
@@ -259,6 +277,8 @@ segmentPages(pages, {
 - **`prefer: 'longer'`**: Finds LAST match in window (greedy)
 - **`prefer: 'shorter'`**: Finds FIRST match (conservative)
 - **Recursive**: If split result still exceeds `maxPages`, breakpoints runs again
+- **Lookahead patterns unsupported**: Zero-length matches are skipped; use `split: 'at'` instead
+- **Position 0 protection**: Matches at position 0 are skipped for `split: 'at'` to prevent empty segments
 
 > **Note**: Older per-rule span limiting approaches were removed in favor of post-processing `breakpoints`.
 
@@ -492,9 +512,26 @@ bunx biome lint .
 
 28. **Always test both sides of the fast-path threshold**: Several breakpoint bugs only reproduce at or above `FAST_PATH_THRESHOLD` (1000). Add regressions at `threshold-1` and `threshold` to avoid “works in small unit tests, fails on full books” surprises.
 
+29. **Breakpoint `split` behavior**: The `split: 'at' | 'after'` option for breakpoints controls where the split happens relative to the matched text:
+   - `'after'` (default): Match is included in the previous segment
+   - `'at'`: Match starts the next segment
+   Key implementation details in `findPatternBreakPosition`:
+   - Position is calculated as `splitAt ? idx : idx + len`
+   - Matches at position 0 are skipped for `split:'at'` to prevent empty first segments
+   - Zero-length matches (lookaheads) are always skipped to prevent infinite loops
+   - Empty pattern `''` forces `splitAt=false` since page boundaries have no matched text
+
+30. **Unicode safety is the user's responsibility for patterns**: Unlike `findSafeBreakPosition` (which adjusts for grapheme boundaries), pattern-based breaks use the exact position where the user's regex matched. If a pattern matches mid-grapheme, that's a pattern authoring error, not a library bug. The library should NOT silently adjust pattern match positions.
+
+31. **Fast path doesn't affect split behavior**: The offset-based fast path only applies to empty pattern `''` breakpoints (page boundary fallback), and empty patterns force `splitAt=false`. Pattern-based breakpoints with `split:'at'` never engage the fast path.
+
+32. **Whitespace trimming affects split:'at' output**: `createSegment()` trims segment content. With `split:'at'`, if the matched text is whitespace-only, it will be trimmed from the start of the next segment. This is usually desirable for delimiter patterns.
+
+33. **`prefer` semantics with `split:'at'`**: With `prefer:'longer'` + `split:'at'`, the algorithm selects the LAST valid match, maximizing content in the previous segment. This is correct but can be counterintuitive since the resulting previous segment might appear "shorter" than with `split:'after'`.
+
+34. **Multi-agent review synthesis**: Getting implementation reviews from multiple AI models (Claude, GPT, Grok, Gemini) and synthesizing their feedback helps catch issues a single reviewer might miss. Key insight: when reviewers disagree on "critical" issues, investigate the codebase to verify claims before implementing fixes. Some "critical" issues are based on incorrect assumptions about how fast paths or downstream functions work.
+
 ### Process Template (Multi-agent design review, TDD-first)
-
-
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:
 
@@ -513,27 +550,36 @@ If you want to repeat the “write a plan → get multiple AI critiques → synt
 
 ## Token Reference
 
-| Token | Pattern Description | Example Match |
-|-------|---------------------|---------------|
-| `{{tarqim}}` | Arabic punctuation (. , ; ? ! ( ) etc.) | `؛` `،` `.` |
-| `{{basmalah}}` | "بِسْمِ اللَّهِ" patterns | بِسْمِ اللَّهِ الرَّحْمَنِ |
-| `{{bab}}` | "باب" (chapter) | بَابُ الإيمان |
-| `{{fasl}}` | "فصل" (section) | فصل: في الطهارة |
-| `{{kitab}}` | "كتاب" (book) | كتاب الصلاة |
-| `{{raqm}}` | Single Arabic-Indic numeral | ٥ |
-| `{{raqms}}` | Multiple Arabic-Indic numerals | ٧٥٦٣ |
-| `{{num}}` | Single ASCII numeral | 5 |
-| `{{nums}}` | Multiple ASCII numerals | 123 |
-| `{{raqms:num}}` | Numerals with named capture | `meta.num = "٧٥٦٣"` |
-| `{{dash}}` | Various dash characters | - – — ـ |
-| `{{harfs}}` | Single-letter codes separated by spaces | `د ت س ي ق` |
-| `{{rumuz}}` | rijāl/takhrīj source abbreviations (matches blocks like `خت ٤`, `خ سي`, `دت عس ق`) | `خت ٤` |
-| `{{numbered}}` | Composite: `{{raqms}} {{dash}}` | ٧٥٦٣ - |
+| Token | Constant | Pattern | Example |
+|-------|----------|---------|---------|
+| `{{tarqim}}` | `Token.TARQIM` | Arabic punctuation | `؛` `.` |
+| `{{basmalah}}` | `Token.BASMALAH` | "بسم الله" | بسم الله |
+| `{{bab}}` | `Token.BAB` | "باب" (chapter) | باب الإيمان |
+| `{{fasl}}` | `Token.FASL` | "فصل/مسألة" | فصل: |
+| `{{kitab}}` | `Token.KITAB` | "كتاب" (book) | كتاب الصلاة |
+| `{{naql}}` | `Token.NAQL` | Narrator phrases | حدثنا |
+| `{{raqm}}` | `Token.RAQM` | Single Arabic digit | ٥ |
+| `{{raqms}}` | `Token.RAQMS` | Multiple Arabic digits | ٧٥٦٣ |
+| `{{num}}` | `Token.NUM` | Single ASCII digit | 5 |
+| `{{nums}}` | `Token.NUMS` | Multiple ASCII digits | 123 |
+| `{{dash}}` | `Token.DASH` | Dash variants | - – — ـ |
+| `{{harf}}` | `Token.HARF` | Single Arabic letter | أ |
+| `{{harfs}}` | `Token.HARFS` | Spaced letters | د ت س |
+| `{{rumuz}}` | `Token.RUMUZ` | Source abbreviations | خت ٤ |
+| `{{bullet}}` | `Token.BULLET` | Bullet points | • * ° |
+| `{{numbered}}` | `Token.NUMBERED` | `{{raqms}} {{dash}} ` | ٧٥٦٣ - |
 
-**Named captures**: Add `:name` suffix to capture into `meta`:
+### Token Constants (Better DX)
+
 ```typescript
-'{{raqms:hadithNum}} {{dash}}' 
-// → segment.meta.hadithNum = "٧٥٦٣"
+import { Token, withCapture } from 'flappa-doormal';
+
+// Use constants instead of strings
+{ lineStartsWith: [Token.KITAB, Token.BAB] }
+
+// Named captures with withCapture helper
+const pattern = withCapture(Token.RAQMS, 'num') + ' ' + Token.DASH + ' ';
+// → '{{raqms:num}} {{dash}} '
 ```
 
 ## Page-start Guard (`pageStartGuard`)
@@ -624,68 +670,20 @@ See README.md for complete examples.
 
 ---
 
-## Debugging Page Boundary Detection (Added 2026-01-04)
+## Debugging Tips
 
-### The Problem: False Positives in Prefix Matching
+### Page Boundary Detection Issues
 
-When using `maxPages=0` with empty breakpoint `['']` (page boundary breaks), the segmenter can fail when:
-1. **Pages have identical prefixes** - All pages start with the same text
-2. **Duplicated content within pages** - The same phrase appears multiple times in a single page
-3. **Long content** - Pages are thousands of characters, putting false matches closer to expected boundaries
+If `maxPages=0` produces merged segments when pages have identical prefixes or duplicated content:
+- Check `buildCumulativeOffsets()` for correct positions
+- Trace `findPageStartNearExpectedBoundary` candidates
+- Verify matches are within `MAX_DEVIATION` (2000 chars) of expected boundary
 
-**Root cause**: The `findPageStartNearExpectedBoundary` function in `breakpoint-utils.ts` uses prefix matching to find page boundaries. When content is duplicated, it finds matches at incorrect positions within the current page instead of at the actual page boundary.
+Key functions: `applyBreakpoints()` → `processOversizedSegment()` → `findBreakpointWindowEndPosition()` → `handlePageBoundaryBreak()`
 
-### Key Functions in the Breakpoint Chain
+### General Debugging
 
-1. **`applyBreakpoints()`** - Entry point for breakpoint processing
-2. **`processOversizedSegment()`** - Iteratively breaks segments exceeding `maxPages`
-3. **`computeWindowEndIdx()`** - Calculates max page index for current window
-4. **`findBreakpointWindowEndPosition()`** - Finds the byte position where the window ends
-5. **`findPageStartNearExpectedBoundary()`** - Content-based search for page start position
-6. **`handlePageBoundaryBreak()`** - Handles empty pattern `''` (page boundary)
-7. **`buildCumulativeOffsets()`** - Pre-computes exact byte positions for each page
+- Pass `logger` with `debug`/`trace` methods to `segmentPages()` for detailed logs
+- Check `boundaryPositions built` log for page boundary byte offsets
+- Check `iteration=N` logs for `currentFromIdx`, `cursorPos`, `windowEndPosition` per loop
 
-### Debug Strategy
-
-1. **Check cumulative offsets first** - `buildCumulativeOffsets()` returns correct positions from `pages.join('\n')`
-2. **Trace `expectedBoundary`** - This is calculated correctly from cumulative offsets
-3. **Check `findPageStartNearExpectedBoundary` candidates** - The bug is usually here; it finds false matches
-4. **Verify the deviation check** - Matches must be within `MAX_DEVIATION` (2000 chars) of expected boundary
-
-### The Fix Applied
-
-Two changes in `breakpoint-utils.ts`:
-
-1. **`findPageStartNearExpectedBoundary`** - Added `MAX_DEVIATION` check to reject matches too far from expected boundary:
-   ```typescript
-   const MAX_DEVIATION = 2000;
-   if (bestDistance <= MAX_DEVIATION) {
-       return bestCandidate.pos;
-   }
-   // Continue trying shorter prefixes or return -1
-   ```
-
-2. **`findBreakpointWindowEndPosition`** - Changed fallback from `remainingContent.length` to `bestExpectedBoundary`:
-   ```typescript
-   // Before (bug): return remainingContent.length; // Merges all remaining pages!
-   // After (fix): return Math.min(bestExpectedBoundary, remainingContent.length);
-   ```
-
-### Test Case Pattern for This Bug
-
-```typescript
-it('should correctly split pages with identical prefixes and duplicated content', () => {
-    const sharedPrefix = 'SHARED PREFIX ';
-    const filler = 'Lorem ipsum. '.repeat(200); // ~6000 chars
-    const pages: Page[] = [
-        { content: sharedPrefix + 'start ' + filler + sharedPrefix + 'end', id: 0 },
-        { content: sharedPrefix + 'page1', id: 1 },
-        { content: sharedPrefix + 'page2', id: 2 },
-    ];
-    const result = segmentPages(pages, { breakpoints: [''], maxPages: 0 });
-    expect(result).toHaveLength(3); // Without fix: 2 or 1
-});
-```
-
----
-15. **Use Synthesized AI Reviews**: For complex safety features, getting reviews from multiple models (Claude, GPT, etc.) and synthesizing them into a single action plan (see `docs/reviews/max-content-length-review-synthesis.md`) revealed critical edge cases like Arabic diacritic corruption and surrogate pair safety that a single model might miss.
