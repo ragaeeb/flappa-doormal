@@ -3336,4 +3336,103 @@ describe('segmenter', () => {
             expect(result.some((s) => s.from === 2)).toBe(true);
         });
     });
+
+    describe('Breakpoint pattern behavior: standard pattern splits AFTER match', () => {
+        it('should include matched text in previous segment with standard pattern', () => {
+            // Standard pattern: "ولهذا" - the matched text is consumed
+            // Previous segment should END WITH the matched text
+            const pages: Page[] = [{ content: 'بداية النص ولهذا منتصف النص ولهذا نهاية النص الطويل', id: 0 }];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['ولهذا'],
+                maxContentLength: 50, // Force split within the page
+                prefer: 'shorter', // Find FIRST match
+            });
+
+            // Should have 2 segments
+            expect(result.length).toBe(2);
+
+            // First segment should END WITH "ولهذا" (match is consumed)
+            expect(result[0].content).toEndWith('ولهذا');
+            expect(result[0].from).toBe(0);
+
+            // Second segment should start AFTER "ولهذا" (not contain it at start)
+            expect(result[1].content).not.toStartWith('ولهذا');
+            expect(result[1].from).toBe(0);
+        });
+
+        it('should use prefer:longer to find last match in window', () => {
+            // With prefer:'longer', should find the LAST match within the window
+            const pages: Page[] = [{ content: 'أ. ب. ج. د. ه. و', id: 0 }];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*'],
+                maxContentLength: 50,
+                prefer: 'longer',
+            });
+
+            // Content fits, so no split needed
+            expect(result.length).toBe(1);
+            expect(result[0].content).toBe('أ. ب. ج. د. ه. و');
+        });
+
+        it('should use prefer:shorter to find first match in window', () => {
+            // With prefer:'shorter', should find the FIRST match within the window
+            const pages: Page[] = [
+                {
+                    content: 'الفقرة الأولى والنص الطويل. الفقرة الثانية مع المزيد. الفقرة الثالثة وكلام إضافي.',
+                    id: 0,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*'],
+                maxContentLength: 50,
+                prefer: 'shorter',
+            });
+
+            // Should split at FIRST period
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            expect(result[0].content).toEndWith('.');
+        });
+
+        it('should try breakpoint patterns in order (first match wins)', () => {
+            // If first pattern matches, subsequent patterns are not tried
+            const pages: Page[] = [
+                {
+                    content: 'النص الأول مع كلام طويل. ولهذا النص الثاني والمزيد من الكلمات الإضافية هنا',
+                    id: 0,
+                },
+            ];
+
+            // Pattern order: punctuation first, then "ولهذا"
+            const result = segmentPages(pages, {
+                breakpoints: ['\\.\\s*', 'ولهذا'],
+                maxContentLength: 50,
+                prefer: 'shorter',
+            });
+
+            // Should split at period (first pattern), not at "ولهذا"
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            expect(result[0].content).toEndWith('.');
+            expect(result[0].content).not.toContain('ولهذا');
+        });
+
+        it('should use pattern across page boundary when maxPages allows spanning', () => {
+            // Test that patterns are found across page boundaries
+            const pages: Page[] = [
+                { content: 'بداية النص ولهذا', id: 0 },
+                { content: 'منتصف النص', id: 1 },
+                { content: 'نهاية النص', id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['ولهذا'],
+                maxPages: 1, // Allow spanning up to 2 pages
+            });
+
+            // First segment should end with "ولهذا"
+            expect(result[0].content).toContain('ولهذا');
+        });
+    });
 });

@@ -324,6 +324,34 @@ When a segment exceeds `maxPages` or `maxContentLength`, breakpoints split it at
 }
 ```
 
+#### Breakpoint Pattern Behavior
+
+When a breakpoint pattern matches, the split happens **AFTER** the matched text:
+
+- **Previous segment ENDS WITH** the matched text (the match is consumed)
+- **New segment STARTS AFTER** the matched text
+
+```typescript
+// Example: Pattern "ولهذا" on content "النص الأول ولهذا النص الثاني"
+// Result:
+// - Segment 1: "النص الأول ولهذا"  (ends WITH the matched text)
+// - Segment 2: "النص الثاني"        (starts AFTER the matched text)
+```
+
+**Pattern order matters** - the first matching pattern wins:
+
+```typescript
+{
+  // Patterns are tried in order
+  breakpoints: [
+    '\\.\\s*',    // Try punctuation first
+    'ولهذا',      // Then try specific word
+    '',           // Finally, fall back to page boundary
+  ],
+}
+// If punctuation is found, "ولهذا" is never tried
+```
+
 **Security note (ReDoS)**: Breakpoints (and raw `regex` rules) compile user-provided regular expressions. **Do not accept untrusted patterns** (e.g. from end users) without validation/sandboxing; some regexes can trigger catastrophic backtracking and hang the process.
 
 ### 12. Occurrence Filtering

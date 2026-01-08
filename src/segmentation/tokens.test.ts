@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+    applyTokenMappings,
     containsTokens,
     escapeTemplateBrackets,
     expandCompositeTokensInTemplate,
@@ -7,6 +8,8 @@ import {
     expandTokensWithCaptures,
     getAvailableTokens,
     getTokenPattern,
+    shouldDefaultToFuzzy,
+    stripTokenMappings,
     TOKEN_PATTERNS,
     templateToRegex,
 } from './tokens.js';
@@ -339,9 +342,6 @@ describe('tokens', () => {
     });
 
     describe('shouldDefaultToFuzzy', () => {
-        // Import at runtime to avoid circular deps during test setup
-        const { shouldDefaultToFuzzy } = require('./tokens.js');
-
         it('should return true for patterns containing {{bab}}', () => {
             expect(shouldDefaultToFuzzy('{{bab}} الإيمان')).toBeTrue();
         });
@@ -379,9 +379,6 @@ describe('tokens', () => {
     });
 
     describe('applyTokenMappings', () => {
-        // Import at runtime
-        const { applyTokenMappings } = require('./tokens.js');
-
         it('should transform {{token}} to {{token:name}}', () => {
             const t = '{{raqms}} {{dash}}';
             const m = [{ name: 'num', token: 'raqms' }];
@@ -414,8 +411,6 @@ describe('tokens', () => {
     });
 
     describe('stripTokenMappings', () => {
-        const { stripTokenMappings } = require('./tokens.js');
-
         it('should transform {{token:name}} to {{token}}', () => {
             expect(stripTokenMappings('{{raqms:num}}')).toBe('{{raqms}}');
         });
