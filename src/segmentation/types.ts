@@ -431,6 +431,18 @@ export type BreakpointRule = {
     pattern: string;
 
     /**
+     * Where to split relative to the match.
+     * - `'at'`: New segment starts AT the match (previous segment does NOT include match)
+     * - `'after'`: New segment starts AFTER the match (previous segment ENDS WITH match)
+     *
+     * **Note**: For empty pattern `''`, `split` is ignored (page boundary).
+     * Invalid values are treated as `'after'`.
+     *
+     * @default 'after'
+     */
+    split?: 'at' | 'after';
+
+    /**
      * Minimum page ID for this breakpoint to apply.
      * Segments starting before this page skip this pattern.
      */

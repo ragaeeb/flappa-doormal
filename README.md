@@ -117,6 +117,29 @@ Replace regex with readable tokens:
 | `{{bab}}` | "باب" (chapter) | `باب` |
 | `{{basmalah}}` | "بسم الله" | `بسم الله` |
 
+#### Token Constants (TypeScript)
+
+For better IDE support, use the `Token` constants instead of raw strings:
+
+```typescript
+import { Token, withCapture } from 'flappa-doormal';
+
+// Instead of:
+{ lineStartsWith: ['{{kitab}}', '{{bab}}'] }
+
+// Use:
+{ lineStartsWith: [Token.KITAB, Token.BAB] }
+
+// With named captures:
+const pattern = withCapture(Token.RAQMS, 'hadithNum') + ' ' + Token.DASH + ' ';
+// Result: '{{raqms:hadithNum}} {{dash}} '
+
+{ lineStartsAfter: [pattern], split: 'at' }
+// segment.meta.hadithNum will contain the matched number
+```
+
+Available constants: `Token.BAB`, `Token.BASMALAH`, `Token.BULLET`, `Token.DASH`, `Token.FASL`, `Token.HARF`, `Token.HARFS`, `Token.KITAB`, `Token.NAQL`, `Token.NUM`, `Token.NUMS`, `Token.NUMBERED`, `Token.RAQM`, `Token.RAQMS`, `Token.RUMUZ`, `Token.TARQIM`
+
 ### 2. Named Capture Groups
 
 Extract metadata automatically with the `{{token:name}}` syntax:
@@ -323,6 +346,62 @@ When a segment exceeds `maxPages` or `maxContentLength`, breakpoints split it at
   prefer: 'shorter',
 }
 ```
+
+#### Breakpoint Pattern Behavior
+
+When a breakpoint pattern matches, the split position is controlled by the `split` option:
+
+```typescript
+{
+  breakpoints: [
+    // Default: split AFTER the match (match included in previous segment)
+    { pattern: '{{tarqim}}' },  // or { pattern: '{{tarqim}}', split: 'after' }
+    
+    // Alternative: split AT the match (match starts next segment)
+    { pattern: 'ولهذا', split: 'at' },
+  ],
+}
+```
+
+**`split: 'after'` (default)**
+- Previous segment **ENDS WITH** the matched text
+- New segment **STARTS AFTER** the matched text
+
+```typescript
+// Pattern "ولهذا" with split: 'after' on "النص الأول ولهذا النص الثاني"
+// - Segment 1: "النص الأول ولهذا"  (ends WITH match)
+// - Segment 2: "النص الثاني"        (starts AFTER match)
+```
+
+**`split: 'at'`**
+- Previous segment **ENDS BEFORE** the matched text
+- New segment **STARTS WITH** the matched text
+
+```typescript
+// Pattern "ولهذا" with split: 'at' on "النص الأول ولهذا النص الثاني"
+// - Segment 1: "النص الأول"         (ends BEFORE match)
+// - Segment 2: "ولهذا النص الثاني"  (starts WITH match)
+```
+
+> **Note**: For empty pattern `''` (page boundary fallback), `split` is ignored since there is no matched text to include/exclude.
+
+**Pattern order matters** - the first matching pattern wins:
+
+```typescript
+{
+  // Patterns are tried in order
+  breakpoints: [
+    '\\.\\s*',    // Try punctuation first
+    'ولهذا',      // Then try specific word
+    '',           // Finally, fall back to page boundary
+  ],
+}
+// If punctuation is found, "ولهذا" is never tried
+```
+
+> **Note on lookahead patterns**: Zero-length patterns like `(?=X)` are not supported for breakpoints because they can cause non-progress scenarios. Use `{ pattern: 'X', split: 'at' }` instead to achieve "split before X" behavior.
+
+> **Note on whitespace**: Segments are trimmed by default. With `split:'at'`, if the match consists only of whitespace, it will be trimmed from the start of the next segment. This is usually desirable for delimiter patterns.
 
 **Security note (ReDoS)**: Breakpoints (and raw `regex` rules) compile user-provided regular expressions. **Do not accept untrusted patterns** (e.g. from end users) without validation/sandboxing; some regexes can trigger catastrophic backtracking and hang the process.
 

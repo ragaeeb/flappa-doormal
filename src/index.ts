@@ -45,7 +45,7 @@ export { applyReplacements } from './segmentation/replace.js';
 // Core segmentation
 export { segmentPages } from './segmentation/segmenter.js';
 // Token expansion types
-export type { ExpandResult, TokenMapping } from './segmentation/tokens.js';
+export type { ExpandResult, TokenKey, TokenMapping } from './segmentation/tokens.js';
 // Token expansion (with named capture support)
 export {
     applyTokenMappings,
@@ -59,7 +59,9 @@ export {
     shouldDefaultToFuzzy,
     stripTokenMappings,
     TOKEN_PATTERNS,
+    Token,
     templateToRegex,
+    withCapture,
 } from './segmentation/tokens.js';
 // Type definitions
 export type {
