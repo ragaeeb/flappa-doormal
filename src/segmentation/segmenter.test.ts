@@ -3650,5 +3650,229 @@ describe('segmenter', () => {
             // Should use FALLBACK pattern (split after)
             expect(result[0].content).toContain('FALLBACK');
         });
+
+        it('should match mid-word if pattern appears inside a word (demonstrates the risk)', () => {
+            // This test demonstrates that a breakpoint pattern like 'ولهذا' can match
+            // mid-word if the text contains that substring. For example:
+            // - "مَولهذا" = مَ + ولهذا (the pattern is embedded after the first letter)
+            // The regex will find 'ولهذا' and split there, potentially breaking the word.
+
+            const pages: Page[] = [
+                {
+                    content: 'النص الأول مَولهذا النص الثاني ولهذا النص الثالث وهذا نص إضافي للطول.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: 'ولهذا', split: 'at' }],
+                maxContentLength: 55,
+            });
+
+            // This will match at the FIRST occurrence of 'ولهذا' which is inside 'مَولهذا'
+            // The split happens mid-word, leaving 'مَ' at the end of the first segment
+            expect(result.length).toBeGreaterThanOrEqual(2);
+
+            // First segment ends with the orphaned 'مَ' (or nothing if trimmed)
+            // The second segment starts with 'ولهذا' (the matched pattern)
+            // This demonstrates that the pattern matches substrings, not whole words
+            expect(result[1].content).toMatch(/^ولهذا/);
+        });
+
+        it('should use word boundary pattern to avoid mid-word matching', () => {
+            // To avoid the mid-word matching issue, users should add word boundaries
+            // or whitespace requirements to their pattern
+
+            const pages: Page[] = [
+                {
+                    content: 'النص الأول مَولهذا النص وكلام ولهذا النص الثالث وهذا نص إضافي للطول.',
+                    id: 1,
+                },
+            ];
+
+            // Pattern requires whitespace before 'ولهذا' to avoid mid-word matches
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: '\\s+ولهذا', split: 'at' }],
+                maxContentLength: 55,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+
+            // Now it correctly skips 'مَولهذا' and finds the standalone 'ولهذا'
+            // The split happens at the whitespace before 'ولهذا'
+            // First segment should NOT end with orphaned 'مَ'
+            expect(result[0].content).not.toMatch(/مَ$/);
+        });
+
+        it('should match multiple words using alternation with whitespace prefix', () => {
+            // Use \\s+(?:word1|word2|word3) to match any of multiple words
+            // while avoiding mid-word matches
+
+            const pages: Page[] = [
+                {
+                    content: 'النص الأول مَوكذلك النص وكلام وكذلك النص الثاني فلذلك النص وأيضاً ولهذا النهاية.',
+                    id: 1,
+                },
+            ];
+
+            // Pattern matches any of: ولهذا, وكذلك, فلذلك - with preceding whitespace
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: '\\s+(?:ولهذا|وكذلك|فلذلك)', split: 'at' }],
+                maxContentLength: 50,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+
+            // Should skip 'مَوكذلك' (embedded) and find the first standalone match
+            // The first standalone match is 'وكذلك' after 'وكلام'
+            expect(result[0].content).not.toMatch(/مَ$/); // No orphaned letter
+
+            // Second segment should start with one of the matched words
+            expect(result[1].content).toMatch(/^(?:ولهذا|وكذلك|فلذلك)/);
+        });
+
+        it('should demonstrate \\b word boundary does NOT work with Arabic', () => {
+            // This test demonstrates that JavaScript's \\b doesn't work with Arabic
+            // because Arabic letters aren't considered "word characters"
+
+            // Content with standalone 'ولهذا' (should match) and embedded in 'مَولهذا' (should not)
+            const content = 'كلام ولهذا النص مَولهذا الكلام';
+
+            // Without \\b - matches ALL occurrences (even mid-word)
+            const withoutBoundary = /ولهذا/gu;
+            const matchesWithout = [...content.matchAll(withoutBoundary)];
+            expect(matchesWithout.length).toBe(2); // Finds both!
+
+            // With \\b - matches NOTHING because Arabic letters aren't "word characters"
+            const withWordBoundary = /\bولهذا\b/gu;
+            const matchesWithBoundary = [...content.matchAll(withWordBoundary)];
+            expect(matchesWithBoundary.length).toBe(0); // \\b fails completely!
+
+            // This proves \\b is unreliable for Arabic:
+            // - It doesn't match mid-word (good)
+            // - But it also doesn't match standalone words (bad!)
+            // Use \\s+ prefix pattern instead
+        });
+    });
+
+    describe('pattern vs regex field', () => {
+        it('should auto-escape brackets in pattern field', () => {
+            // The "pattern" field auto-escapes () and [] like template patterns
+            // A literal "(" in pattern becomes "\\(" in the regex
+
+            const pages: Page[] = [
+                {
+                    content:
+                        'First part (a) and more text here to reach minimum length. Second part (b) at the end of the text.',
+                    id: 1,
+                },
+            ];
+
+            // Pattern with literal "(a)" - brackets are auto-escaped
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: '(a)', split: 'after' }],
+                maxContentLength: 60,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // Should split after "(a)"
+            expect(result[0].content).toContain('(a)');
+        });
+
+        it('should NOT auto-escape brackets in regex field', () => {
+            // The "regex" field is raw - () are regex groups, not literal
+
+            const pages: Page[] = [
+                {
+                    content: 'النص الأول وكلام وكذلك النص الثاني فلذلك النص وأيضاً ولهذا النهاية.',
+                    id: 1,
+                },
+            ];
+
+            // Using regex field with non-capturing group (?:...|...)
+            const result = segmentPages(pages, {
+                breakpoints: [{ regex: '\\s+(?:ولهذا|وكذلك|فلذلك)', split: 'at' }],
+                maxContentLength: 50,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // Should split at one of the matched words
+            expect(result[1].content).toMatch(/^(?:ولهذا|وكذلك|فلذلك)/);
+        });
+
+        it('should NOT allow regex groups in pattern field (auto-escaping)', () => {
+            // This test documents that the pattern field cannot use regex groups
+            // like (?:...) because brackets are auto-escaped.
+            // Users must use the regex field for such patterns.
+
+            const pages: Page[] = [
+                {
+                    content:
+                        'First part with literal (a) text and more content to reach minimum length. Second part here.',
+                    id: 1,
+                },
+            ];
+
+            // In pattern field, ( becomes literal ( in the regex
+            // So this pattern will match the literal text "(a)"
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: '(a)', split: 'after' }],
+                maxContentLength: 60,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // First segment should contain "(a)" - it matched the literal parentheses
+            expect(result[0].content).toContain('(a)');
+        });
+
+        it('should support tokens in regex field too', () => {
+            // The regex field should still support {{token}} expansion
+
+            const pages: Page[] = [
+                {
+                    content:
+                        'First text. Second text! Third text? End here. More content to reach minimum length needed.',
+                    id: 1,
+                },
+            ];
+
+            // Using {{tarqim}} in regex field
+            const result = segmentPages(pages, {
+                breakpoints: [{ regex: '{{tarqim}}\\s*', split: 'after' }],
+                maxContentLength: 55,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // Should split after punctuation
+            expect(result[0].content).toMatch(/[.!?]$/);
+        });
+
+        it('should prefer regex over pattern when both specified', () => {
+            // If both are specified, regex takes precedence (like SplitRule)
+
+            const pages: Page[] = [
+                {
+                    content:
+                        'Text with REGEX marker and additional content here to reach minimum length. PATTERN marker at end.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [
+                    {
+                        pattern: 'PATTERN', // Would match literal PATTERN
+                        regex: 'REGEX', // Should take precedence
+                        split: 'after',
+                    },
+                ],
+                maxContentLength: 60,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // Should split after "REGEX", not "PATTERN"
+            expect(result[0].content).toContain('REGEX');
+            expect(result[0].content).not.toContain('PATTERN');
+        });
     });
 });

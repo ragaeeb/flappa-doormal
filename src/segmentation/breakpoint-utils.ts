@@ -20,9 +20,10 @@ const JOINER_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15, 12, 10, 8, 6] as const;
  * Normalizes a breakpoint to the object form.
  * Strings are converted to { pattern: str, split: 'after' } with no constraints.
  * Invalid `split` values are treated as `'after'` for backward compatibility.
+ * If both `pattern` and `regex` are specified, `regex` takes precedence.
  *
  * @param bp - Breakpoint as string or object
- * @returns Normalized BreakpointRule object
+ * @returns Normalized BreakpointRule object with resolved pattern/regex
  *
  * @example
  * normalizeBreakpoint('\\n\\n')
@@ -33,6 +34,9 @@ const JOINER_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15, 12, 10, 8, 6] as const;
  *
  * normalizeBreakpoint({ pattern: 'X', split: 'at' })
  * // → { pattern: 'X', split: 'at' }
+ *
+ * normalizeBreakpoint({ regex: '(?:X|Y)', split: 'at' })
+ * // → { regex: '(?:X|Y)', split: 'at' }
  */
 export const normalizeBreakpoint = (bp: Breakpoint): BreakpointRule => {
     if (typeof bp === 'string') {
@@ -178,8 +182,15 @@ export type PatternProcessor = (pattern: string) => string;
  * This function compiles regex patterns dynamically. This can be a ReDoS vector
  * if patterns come from untrusted sources. In typical usage, breakpoint rules
  * are application configuration, not user input.
+/**
+ * @param processPattern - Function to expand tokens in patterns (with bracket escaping)
+ * @param processRawPattern - Function to expand tokens without bracket escaping (for regex field)
  */
-export const expandBreakpoints = (breakpoints: Breakpoint[], processPattern: PatternProcessor): ExpandedBreakpoint[] =>
+export const expandBreakpoints = (
+    breakpoints: Breakpoint[],
+    processPattern: PatternProcessor,
+    processRawPattern?: PatternProcessor,
+): ExpandedBreakpoint[] =>
     breakpoints.map((bp) => {
         const rule = normalizeBreakpoint(bp);
         const excludeSet = buildExcludeSet(rule.exclude);
@@ -195,18 +206,27 @@ export const expandBreakpoints = (breakpoints: Breakpoint[], processPattern: Pat
                       }
                   })()
                 : null;
+
+        // Determine which pattern to use: regex takes precedence over pattern
+        const rawPattern = rule.regex ?? rule.pattern;
+
         // Empty pattern = page boundary fallback, split has no effect
-        if (rule.pattern === '') {
+        if (rawPattern === '' || rawPattern === undefined) {
             return { excludeSet, regex: null, rule, skipWhenRegex, splitAt: false };
         }
-        const expanded = processPattern(rule.pattern);
+
+        // Use raw processor if regex field is set and rawPatternProcessor is provided
+        const useRawProcessor = rule.regex !== undefined && processRawPattern;
+        const expanded = useRawProcessor ? processRawPattern(rawPattern) : processPattern(rawPattern);
+
         // splitAt = true means new segment starts WITH the match
         const splitAt = rule.split === 'at';
         try {
             return { excludeSet, regex: new RegExp(expanded, 'gmu'), rule, skipWhenRegex, splitAt };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
-            throw new Error(`Invalid breakpoint regex: ${rule.pattern}\n  Cause: ${message}`);
+            const fieldUsed = rule.regex !== undefined ? 'regex' : 'pattern';
+            throw new Error(`Invalid breakpoint ${fieldUsed}: ${rawPattern}\n  Cause: ${message}`);
         }
     });
 

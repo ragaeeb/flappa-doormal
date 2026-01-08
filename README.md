@@ -403,6 +403,51 @@ When a breakpoint pattern matches, the split position is controlled by the `spli
 
 > **Note on whitespace**: Segments are trimmed by default. With `split:'at'`, if the match consists only of whitespace, it will be trimmed from the start of the next segment. This is usually desirable for delimiter patterns.
 
+#### `pattern` vs `regex` Field
+
+Breakpoints support two pattern fields:
+
+| Field | Bracket escaping | Use case |
+|-------|-----------------|----------|
+| `pattern` | `()[]` auto-escaped | Simple patterns, token-friendly |
+| `regex` | None (raw regex) | Complex regex with groups, lookahead |
+
+```typescript
+// Use `pattern` for simple patterns (brackets are auto-escaped)
+{ pattern: '(a)', split: 'after' }   // Matches literal "(a)"
+{ pattern: '{{tarqim}}', split: 'after' }  // Token expansion works
+
+// Use `regex` for complex patterns with regex groups
+{ regex: '\\s+(?:ولهذا|وكذلك|فلذلك)', split: 'at' }  // Non-capturing group
+{ regex: '{{tarqim}}\\s*', split: 'after' }  // Tokens work here too!
+```
+
+If both `pattern` and `regex` are specified, `regex` takes precedence.
+
+#### ⚠️ Mid-Word Matching Caveat
+
+Breakpoint patterns match **substrings**, not whole words. A pattern like `ولهذا` will match inside `مَولهذا`, causing a mid-word split:
+
+```typescript
+// Content: "النص الأول مَولهذا النص"
+// Pattern: { pattern: 'ولهذا', split: 'at' }
+// Result: 
+// - Segment 1: "النص الأول مَ"  ← orphaned letter!
+// - Segment 2: "ولهذا النص"
+```
+
+**Solution**: Require whitespace before the pattern to ensure whole-word matching:
+
+```typescript
+// Single word - require preceding whitespace
+{ pattern: '\\s+ولهذا', split: 'at' }
+
+// Multiple words using alternation - each needs whitespace prefix
+{ pattern: '\\s+(?:ولهذا|وكذلك|فلذلك)', split: 'at' }
+```
+
+> **Why not `\b`?** JavaScript's `\b` word boundary **does not work** with Arabic text. Since Arabic letters aren't considered "word characters" (`\w` = `[a-zA-Z0-9_]`), using `\b` will match **nothing** - not even standalone words. Always use `\s+` prefix instead.
+
 **Security note (ReDoS)**: Breakpoints (and raw `regex` rules) compile user-provided regular expressions. **Do not accept untrusted patterns** (e.g. from end users) without validation/sandboxing; some regexes can trigger catastrophic backtracking and hang the process.
 
 ### 12. Occurrence Filtering

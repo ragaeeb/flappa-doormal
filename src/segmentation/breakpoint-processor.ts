@@ -987,12 +987,13 @@ export const applyBreakpoints = (
     pageJoiner: 'space' | 'newline' = 'space',
     debugMetaKey?: string,
     maxContentLength?: number,
+    rawPatternProcessor?: BreakpointPatternProcessor,
 ) => {
     const pageIds = pages.map((p) => p.id);
     const pageIdToIndex = buildPageIdToIndexMap(pageIds);
     const normalizedPages = buildNormalizedPagesMap(pages, normalizedContent);
     const cumulativeOffsets = buildCumulativeOffsets(pageIds, normalizedPages);
-    const expandedBreakpoints = expandBreakpoints(breakpoints, patternProcessor);
+    const expandedBreakpoints = expandBreakpoints(breakpoints, patternProcessor, rawPatternProcessor);
 
     const result: Segment[] = [];
 

@@ -427,8 +427,27 @@ export type BreakpointRule = {
     /**
      * Regex pattern for breaking (supports token expansion).
      * Empty string `''` means fall back to page boundary.
+     *
+     * Brackets `()[]` outside `{{tokens}}` are auto-escaped (like `template` patterns).
+     * For raw regex with full control, use `regex` instead.
+     *
+     * If both `pattern` and `regex` are specified, `regex` takes precedence.
      */
-    pattern: string;
+    pattern?: string;
+
+    /**
+     * Raw regex pattern (supports token expansion, NO bracket auto-escaping).
+     *
+     * Use this when you need regex features like non-capturing groups `(?:...)`,
+     * lookaheads, or character classes with parentheses.
+     *
+     * If both `pattern` and `regex` are specified, `regex` takes precedence.
+     *
+     * @example
+     * // Non-capturing alternation (won't work in pattern due to auto-escaping)
+     * { regex: '\\s+(?:ولهذا|وكذلك|فلذلك)', split: 'at' }
+     */
+    regex?: string;
 
     /**
      * Where to split relative to the match.

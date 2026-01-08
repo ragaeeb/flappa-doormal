@@ -85,6 +85,18 @@ export const processPattern = (pattern: string, fuzzy: boolean, capturePrefix?: 
     return { captureNames, pattern: expanded };
 };
 
+/**
+ * Processes a breakpoint pattern by expanding tokens only.
+ *
+ * Unlike `processPattern`, this does NOT escape brackets because breakpoints
+ * are treated as raw regex patterns (like the `regex` rule type).
+ * Users have full control over regex syntax including `(?:...)` groups.
+ */
+export const processBreakpointPattern = (pattern: string) => {
+    const { pattern: expanded } = expandTokensWithCaptures(pattern);
+    return expanded;
+};
+
 export const buildLineStartsAfterRegexSource = (patterns: string[], fuzzy: boolean, capturePrefix?: string) => {
     const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
     return {
