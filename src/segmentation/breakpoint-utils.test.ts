@@ -34,18 +34,30 @@ describe('breakpoint-utils', () => {
     describe('normalizeBreakpoint', () => {
         it('should convert string to BreakpointRule object', () => {
             const result = normalizeBreakpoint('\\n\\n');
-            expect(result).toEqual({ pattern: '\\n\\n' });
+            expect(result).toEqual({ pattern: '\\n\\n', split: 'after' });
         });
 
-        it('should return object breakpoints as-is', () => {
+        it('should return object breakpoints with split defaulted', () => {
             const rule = { max: 100, min: 10, pattern: '\\n' };
             const result = normalizeBreakpoint(rule);
-            expect(result).toBe(rule);
+            expect(result).toMatchObject({ max: 100, min: 10, pattern: '\\n', split: 'after' });
         });
 
         it('should handle empty string pattern', () => {
             const result = normalizeBreakpoint('');
-            expect(result).toEqual({ pattern: '' });
+            expect(result).toEqual({ pattern: '', split: 'after' });
+        });
+
+        it('should preserve split:at value', () => {
+            const rule = { pattern: 'X', split: 'at' as const };
+            const result = normalizeBreakpoint(rule);
+            expect(result).toMatchObject({ pattern: 'X', split: 'at' });
+        });
+
+        it('should treat invalid split value as after', () => {
+            const rule = { pattern: 'X', split: 'invalid' as any };
+            const result = normalizeBreakpoint(rule);
+            expect(result).toMatchObject({ pattern: 'X', split: 'after' });
         });
     });
 
@@ -188,9 +200,20 @@ describe('breakpoint-utils', () => {
         it('should expand string breakpoints', () => {
             const result = expandBreakpoints(['\\n\\n'], identityProcessor);
             expect(result).toHaveLength(1);
-            expect(result[0].rule).toEqual({ pattern: '\\n\\n' });
+            expect(result[0].rule).toMatchObject({ pattern: '\\n\\n', split: 'after' });
             expect(result[0].regex).toBeInstanceOf(RegExp);
             expect(result[0].excludeSet.size).toBe(0);
+            expect(result[0].splitAt).toBe(false);
+        });
+
+        it('should set splitAt=true for split:at breakpoints', () => {
+            const result = expandBreakpoints([{ pattern: 'X', split: 'at' }], identityProcessor);
+            expect(result[0].splitAt).toBe(true);
+        });
+
+        it('should force splitAt=false for empty patterns', () => {
+            const result = expandBreakpoints([{ pattern: '', split: 'at' }], identityProcessor);
+            expect(result[0].splitAt).toBe(false);
         });
 
         it('should handle empty pattern as page boundary', () => {
@@ -276,6 +299,71 @@ describe('breakpoint-utils', () => {
         it('should return -1 when no matches', () => {
             const regex = /XXX/g;
             expect(findPatternBreakPosition('No matches here', regex, 'shorter')).toBe(-1);
+        });
+
+        describe('split behavior', () => {
+            it('should return position AFTER match by default (splitAt=false)', () => {
+                const regex = /X/g;
+                const result = findPatternBreakPosition('aXb', regex, 'shorter', false);
+                expect(result).toBe(2); // After X (index 1 + length 1 = 2)
+            });
+
+            it('should return position AT match when splitAt=true', () => {
+                const regex = /X/g;
+                const result = findPatternBreakPosition('aXb', regex, 'shorter', true);
+                expect(result).toBe(1); // At X (index 1)
+            });
+
+            it('should skip matches at position 0 with splitAt=true', () => {
+                const regex = /X/g;
+                // First X is at position 0, should skip and find second X at position 2
+                const result = findPatternBreakPosition('XaXb', regex, 'shorter', true);
+                expect(result).toBe(2); // At second X (index 2)
+            });
+
+            it('should allow matches at position 0 with splitAt=false (result is after match)', () => {
+                const regex = /X/g;
+                // First X at 0 produces position 1, which is valid
+                const result = findPatternBreakPosition('Xab', regex, 'shorter', false);
+                expect(result).toBe(1); // After X (index 0 + length 1 = 1)
+            });
+
+            it('should skip zero-length matches (lookahead patterns)', () => {
+                const regex = /(?=X)/g;
+                // Lookahead matches have length 0, should be skipped
+                const result = findPatternBreakPosition('aXb', regex, 'shorter', false);
+                expect(result).toBe(-1);
+            });
+
+            it('should skip zero-length matches with splitAt=true', () => {
+                const regex = /(?=X)/g;
+                const result = findPatternBreakPosition('aXb', regex, 'shorter', true);
+                expect(result).toBe(-1);
+            });
+
+            it('should select last valid match with prefer:longer and splitAt=true', () => {
+                const regex = /X/g;
+                const result = findPatternBreakPosition('aXbXc', regex, 'longer', true);
+                expect(result).toBe(3); // At last X (index 3)
+            });
+
+            it('should select first valid match with prefer:shorter and splitAt=true', () => {
+                const regex = /X/g;
+                const result = findPatternBreakPosition('aXbXc', regex, 'shorter', true);
+                expect(result).toBe(1); // At first X (index 1)
+            });
+
+            it('should return -1 when all matches are at position 0 with splitAt=true', () => {
+                const regex = /^X/g;
+                const result = findPatternBreakPosition('Xabc', regex, 'shorter', true);
+                expect(result).toBe(-1);
+            });
+
+            it('should return -1 when only zero-length matches exist', () => {
+                const regex = /^/g;
+                const result = findPatternBreakPosition('abc', regex, 'shorter', false);
+                expect(result).toBe(-1);
+            });
         });
     });
 

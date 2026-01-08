@@ -18,19 +18,30 @@ const JOINER_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15, 12, 10, 8, 6] as const;
 
 /**
  * Normalizes a breakpoint to the object form.
- * Strings are converted to { pattern: str } with no constraints.
+ * Strings are converted to { pattern: str, split: 'after' } with no constraints.
+ * Invalid `split` values are treated as `'after'` for backward compatibility.
  *
  * @param bp - Breakpoint as string or object
  * @returns Normalized BreakpointRule object
  *
  * @example
  * normalizeBreakpoint('\\n\\n')
- * // → { pattern: '\\n\\n' }
+ * // → { pattern: '\\n\\n', split: 'after' }
  *
  * normalizeBreakpoint({ pattern: '\\n', min: 10 })
- * // → { pattern: '\\n', min: 10 }
+ * // → { pattern: '\\n', min: 10, split: 'after' }
+ *
+ * normalizeBreakpoint({ pattern: 'X', split: 'at' })
+ * // → { pattern: 'X', split: 'at' }
  */
-export const normalizeBreakpoint = (bp: Breakpoint): BreakpointRule => (typeof bp === 'string' ? { pattern: bp } : bp);
+export const normalizeBreakpoint = (bp: Breakpoint): BreakpointRule => {
+    if (typeof bp === 'string') {
+        return { pattern: bp, split: 'after' };
+    }
+    // Validate split value - treat invalid as 'after' for backward compatibility
+    const split = bp.split === 'at' || bp.split === 'after' ? bp.split : 'after';
+    return { ...bp, split };
+};
 
 /**
  * Checks if a page ID is in an excluded list (single pages or ranges).
@@ -149,6 +160,8 @@ export type ExpandedBreakpoint = {
     regex: RegExp | null;
     excludeSet: Set<number>;
     skipWhenRegex: RegExp | null;
+    /** true = split AT match (new segment starts with match), false = split AFTER (default) */
+    splitAt: boolean;
 };
 
 /** Function type for pattern processing */
@@ -182,12 +195,15 @@ export const expandBreakpoints = (breakpoints: Breakpoint[], processPattern: Pat
                       }
                   })()
                 : null;
+        // Empty pattern = page boundary fallback, split has no effect
         if (rule.pattern === '') {
-            return { excludeSet, regex: null, rule, skipWhenRegex };
+            return { excludeSet, regex: null, rule, skipWhenRegex, splitAt: false };
         }
         const expanded = processPattern(rule.pattern);
+        // splitAt = true means new segment starts WITH the match
+        const splitAt = rule.split === 'at';
         try {
-            return { excludeSet, regex: new RegExp(expanded, 'gmu'), rule, skipWhenRegex };
+            return { excludeSet, regex: new RegExp(expanded, 'gmu'), rule, skipWhenRegex, splitAt };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             throw new Error(`Invalid breakpoint regex: ${rule.pattern}\n  Cause: ${message}`);
@@ -675,30 +691,65 @@ export const findNextPagePosition = (remainingContent: string, nextPageData: Nor
 };
 
 /**
- * Finds matches within a window and returns the selected position based on preference.
+ * Finds matches within a window and returns the selected position based on preference and split mode.
  *
  * @param windowContent - Content to search
  * @param regex - Regex to match
  * @param prefer - 'longer' for last match, 'shorter' for first match
- * @returns Break position after the selected match, or -1 if no matches
+ * @param splitAt - If true, return position BEFORE match (at index). If false, return position AFTER match (at index + length).
+ * @returns Break position, or -1 if no valid matches
+ *
+ * @remarks
+ * - Matches with length 0 are skipped (prevents infinite loops with lookahead patterns)
+ * - Matches that would result in position 0 are skipped (prevents empty first segments)
+ * - For prefer:'shorter', returns immediately on first valid match (optimization)
  */
-export const findPatternBreakPosition = (windowContent: string, regex: RegExp, prefer: 'longer' | 'shorter') => {
-    // OPTIMIZATION: Stream matches instead of collecting all into an array.
-    // Only track first and last match to avoid allocating large arrays for dense patterns.
+export const findPatternBreakPosition = (
+    windowContent: string,
+    regex: RegExp,
+    prefer: 'longer' | 'shorter',
+    splitAt = false,
+) => {
+    // Track first and last valid matches
     let first: { index: number; length: number } | undefined;
     let last: { index: number; length: number } | undefined;
+
     for (const m of windowContent.matchAll(regex)) {
-        const match = { index: m.index, length: m[0].length };
+        const idx = m.index ?? -1;
+        const len = m[0]?.length ?? 0;
+
+        // Skip invalid matches: negative index, zero-length (lookahead)
+        if (idx < 0 || len === 0) {
+            continue;
+        }
+
+        // Compute break position based on split mode
+        const pos = splitAt ? idx : idx + len;
+
+        // Skip position 0 - would create empty first segment
+        if (pos === 0) {
+            continue;
+        }
+
+        // Track first/last valid match
+        const match = { index: idx, length: len };
         if (!first) {
             first = match;
         }
         last = match;
+
+        // Early return for 'shorter' (first valid match)
+        if (prefer === 'shorter') {
+            return pos;
+        }
     }
-    if (!first) {
+
+    if (!last) {
         return -1;
     }
-    const selected = prefer === 'longer' ? last! : first;
-    return selected.index + selected.length;
+
+    // For 'longer', use last valid match
+    return splitAt ? last.index : last.index + last.length;
 };
 
 /**
@@ -822,7 +873,7 @@ export const findBreakPosition = (
 
         // Find matches within window
         const windowContent = remainingContent.slice(0, Math.min(windowEndPosition, remainingContent.length));
-        const breakPos = findPatternBreakPosition(windowContent, regex, prefer);
+        const breakPos = findPatternBreakPosition(windowContent, regex, prefer, expandedBreakpoints[i].splitAt);
         if (breakPos > 0) {
             return { breakPos, breakpointIndex: i, rule };
         }

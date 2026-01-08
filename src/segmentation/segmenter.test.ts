@@ -3435,4 +3435,220 @@ describe('segmenter', () => {
             expect(result[0].content).toContain('ولهذا');
         });
     });
+
+    describe('breakpoint split behavior', () => {
+        it('should default to split:after (match included in previous segment)', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'Part one with marker SPLIT and then part two with more text here for testing purposes and additional content to meet length requirements.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['SPLIT'],
+                maxContentLength: 60,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // First segment should END WITH the match
+            expect(result[0].content).toContain('SPLIT');
+            // Second segment should NOT start with the match
+            expect(result[1].content).not.toMatch(/^SPLIT/);
+        });
+
+        it('should support split:at (match moves to next segment)', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'Part one with marker SPLIT and then part two with more text here for testing purposes and additional content.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: 'SPLIT', split: 'at' }],
+                maxContentLength: 60,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // First segment should NOT contain the match
+            expect(result[0].content).not.toContain('SPLIT');
+            // Second segment should START WITH the match
+            expect(result[1].content).toMatch(/^SPLIT/);
+        });
+
+        it('should honor min/max constraints with split:at', () => {
+            const pages: Page[] = [
+                { content: 'MARKER in page one.', id: 1 },
+                { content: 'MARKER in page two.', id: 2 },
+                { content: 'MARKER in page three.', id: 3 },
+            ];
+
+            // Only apply to pages 2 and 3
+            const result = segmentPages(pages, {
+                breakpoints: [{ max: 3, min: 2, pattern: 'MARKER', split: 'at' }],
+                maxPages: 0,
+            });
+
+            // Page 1 should be its own segment (no breakpoint applies)
+            expect(result[0].from).toBe(1);
+            expect(result[0].content).toContain('MARKER'); // Falls through as no split happens
+        });
+
+        it('should honor min/max constraints with split:after', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'Content MARKER more text here with additional padding to ensure content is long enough for testing.',
+                    id: 5,
+                },
+                {
+                    content:
+                        'Content MARKER more text here with additional padding to ensure content is long enough for testing.',
+                    id: 10,
+                },
+                {
+                    content:
+                        'Content MARKER more text here with additional padding to ensure content is long enough for testing.',
+                    id: 15,
+                },
+            ];
+
+            // Only apply to page ID range 8-12
+            const result = segmentPages(pages, {
+                breakpoints: [{ max: 12, min: 8, pattern: 'MARKER', split: 'after' }],
+                maxContentLength: 60,
+            });
+
+            // The breakpoint should only apply to page 10
+            // We verify the structure is as expected
+            expect(result.some((s) => s.from === 10)).toBe(true);
+        });
+
+        it('should ignore split:at for empty pattern (page boundary)', () => {
+            const pages: Page[] = [
+                { content: 'Page one content', id: 1 },
+                { content: 'Page two content', id: 2 },
+            ];
+
+            const withAt = segmentPages(pages, {
+                breakpoints: [{ pattern: '', split: 'at' }],
+                maxPages: 0,
+            });
+
+            const withAfter = segmentPages(pages, {
+                breakpoints: [{ pattern: '', split: 'after' }],
+                maxPages: 0,
+            });
+
+            // Both should produce the same result (page boundary behavior)
+            expect(withAt.length).toBe(withAfter.length);
+            expect(withAt[0].content).toBe(withAfter[0].content);
+        });
+
+        it('should treat invalid split value as after', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'Part one SPLIT part two with more text here for testing purposes and additional content to meet requirements.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: 'SPLIT', split: 'invalid' as any }],
+                maxContentLength: 50,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // Should behave as 'after' - first segment contains SPLIT
+            expect(result[0].content).toContain('SPLIT');
+        });
+
+        it('should work with Arabic text and split:at', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'بداية النص ولهذا المقطع الثاني مع كلام إضافي طويل يحتاج للتقسيم والمزيد من المحتوى لضمان الطول الكافي',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: 'ولهذا', split: 'at' }],
+                maxContentLength: 55,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // First segment should NOT contain "ولهذا"
+            expect(result[0].content).not.toContain('ولهذا');
+            // Second segment should START with "ولهذا"
+            expect(result[1].content).toMatch(/^ولهذا/);
+        });
+
+        it('should work with token expansion and split:at', () => {
+            const pages: Page[] = [
+                {
+                    content: 'النص الأول مع بعض الكلمات الإضافية. النص الثاني مع محتوى إضافي كثير للتقسيم',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: '{{tarqim}}', split: 'at' }],
+                maxContentLength: 55,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // First segment should NOT end with the period
+            expect(result[0].content).not.toMatch(/\.$/);
+            // Second segment should contain the period at start
+            expect(result[1].content).toMatch(/^\./);
+        });
+
+        it('should work with prefer:longer and split:at', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'Start X middle X end with more content to force splitting here and additional text for length.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: 'X', split: 'at' }],
+                maxContentLength: 55,
+                prefer: 'longer',
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // With prefer:longer, should split at LAST X
+            // First segment should contain first X but not second
+            expect(result[0].content).toContain('Start X middle');
+        });
+
+        it('should fall through when match at position 0 with split:at', () => {
+            const pages: Page[] = [
+                {
+                    content: 'MARKER at start then more content FALLBACK and even more text for testing purposes.',
+                    id: 1,
+                },
+            ];
+
+            // First pattern would match at position 0 with split:at, should fall through
+            const result = segmentPages(pages, {
+                breakpoints: [
+                    { pattern: 'MARKER', split: 'at' },
+                    { pattern: 'FALLBACK', split: 'after' },
+                ],
+                maxContentLength: 55,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // Should use FALLBACK pattern (split after)
+            expect(result[0].content).toContain('FALLBACK');
+        });
+    });
 });

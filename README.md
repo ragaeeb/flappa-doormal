@@ -326,17 +326,41 @@ When a segment exceeds `maxPages` or `maxContentLength`, breakpoints split it at
 
 #### Breakpoint Pattern Behavior
 
-When a breakpoint pattern matches, the split happens **AFTER** the matched text:
-
-- **Previous segment ENDS WITH** the matched text (the match is consumed)
-- **New segment STARTS AFTER** the matched text
+When a breakpoint pattern matches, the split position is controlled by the `split` option:
 
 ```typescript
-// Example: Pattern "ولهذا" on content "النص الأول ولهذا النص الثاني"
-// Result:
-// - Segment 1: "النص الأول ولهذا"  (ends WITH the matched text)
-// - Segment 2: "النص الثاني"        (starts AFTER the matched text)
+{
+  breakpoints: [
+    // Default: split AFTER the match (match included in previous segment)
+    { pattern: '{{tarqim}}' },  // or { pattern: '{{tarqim}}', split: 'after' }
+    
+    // Alternative: split AT the match (match starts next segment)
+    { pattern: 'ولهذا', split: 'at' },
+  ],
+}
 ```
+
+**`split: 'after'` (default)**
+- Previous segment **ENDS WITH** the matched text
+- New segment **STARTS AFTER** the matched text
+
+```typescript
+// Pattern "ولهذا" with split: 'after' on "النص الأول ولهذا النص الثاني"
+// - Segment 1: "النص الأول ولهذا"  (ends WITH match)
+// - Segment 2: "النص الثاني"        (starts AFTER match)
+```
+
+**`split: 'at'`**
+- Previous segment **ENDS BEFORE** the matched text
+- New segment **STARTS WITH** the matched text
+
+```typescript
+// Pattern "ولهذا" with split: 'at' on "النص الأول ولهذا النص الثاني"
+// - Segment 1: "النص الأول"         (ends BEFORE match)
+// - Segment 2: "ولهذا النص الثاني"  (starts WITH match)
+```
+
+> **Note**: For empty pattern `''` (page boundary fallback), `split` is ignored since there is no matched text to include/exclude.
 
 **Pattern order matters** - the first matching pattern wins:
 
