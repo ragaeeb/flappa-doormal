@@ -64,8 +64,7 @@ export const appendWs = (out: string, mode: 'regex' | 'space'): string => {
         return out;
     }
     const suffix = mode === 'space' ? ' ' : '\\s*';
-    const check = mode === 'space' ? ' ' : '\\\\s*';
-    return out.endsWith(check) ? out : `${out}${suffix}`;
+    return out.endsWith(suffix) ? out : `${out}${suffix}`;
 };
 
 export const findBestTokenMatchAt = (
