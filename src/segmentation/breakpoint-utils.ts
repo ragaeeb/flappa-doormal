@@ -1,12 +1,3 @@
-/**
- * Utility functions for breakpoint processing in the segmentation engine.
- *
- * These functions handle breakpoint normalization, page exclusion checking,
- * and segment creation. Extracted for independent testing and reuse.
- *
- * @module breakpoint-utils
- */
-
 import { FAST_PATH_THRESHOLD } from './breakpoint-constants.js';
 import type { Breakpoint, BreakpointRule, Logger, PageRange, Segment } from './types.js';
 
@@ -142,20 +133,17 @@ export const createSegment = (
     fromPageId: number,
     toPageId: number | undefined,
     meta: Record<string, unknown> | undefined,
-) => {
+): Segment | null => {
     const trimmed = content.trim();
     if (!trimmed) {
         return null;
     }
-
-    const seg: Segment = { content: trimmed, from: fromPageId };
-    if (toPageId !== undefined && toPageId !== fromPageId) {
-        seg.to = toPageId;
-    }
-    if (meta) {
-        seg.meta = meta;
-    }
-    return seg;
+    return {
+        content: trimmed,
+        from: fromPageId,
+        ...(toPageId !== undefined && toPageId !== fromPageId && { to: toPageId }),
+        ...(meta && { meta }),
+    };
 };
 
 /** Expanded breakpoint with pre-compiled regex and exclude set */

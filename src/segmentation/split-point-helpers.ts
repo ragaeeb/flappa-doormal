@@ -22,9 +22,7 @@ type CombinableRule = { rule: SplitRule; prefix: string; index: number };
 
 type RuleRegexInfo = RuleRegex & { prefix: string; source: string };
 
-// ─────────────────────────────────────────────────────────────
 // Combined regex matching
-// ─────────────────────────────────────────────────────────────
 
 const extractNamedCapturesForRule = (
     groups: Record<string, string> | undefined,
@@ -136,9 +134,7 @@ export const buildRuleRegexes = (combinableRules: CombinableRule[]) =>
         return { ...built, prefix, source: `(?<${prefix}>${built.regex.source})` };
     });
 
-// ─────────────────────────────────────────────────────────────
 // Standalone rule processing
-// ─────────────────────────────────────────────────────────────
 
 export const processStandaloneRule = (
     rule: SplitRule,
@@ -192,9 +188,7 @@ const findMatchesInContent = (content: string, regex: RegExp, usesCapture: boole
     return matches;
 };
 
-// ─────────────────────────────────────────────────────────────
 // Occurrence filtering
-// ─────────────────────────────────────────────────────────────
 
 export const applyOccurrenceFilter = (
     rules: SplitRule[],

@@ -1,20 +1,4 @@
 /**
- * Fuzzy matching utilities for Arabic text.
- *
- * Provides diacritic-insensitive and character-equivalence matching for Arabic text.
- * This allows matching text regardless of:
- * - Diacritical marks (harakat/tashkeel): فَتْحَة، ضَمَّة، كَسْرَة، سُكُون، شَدَّة، تَنْوين
- * - Character equivalences: ا↔آ↔أ↔إ, ة↔ه, ى↔ي
- *
- * @module fuzzy
- *
- * @example
- * // Make a pattern diacritic-insensitive
- * const pattern = makeDiacriticInsensitive('حدثنا');
- * new RegExp(pattern, 'u').test('حَدَّثَنَا') // → true
- */
-
-/**
  * Character class matching all Arabic diacritics (Tashkeel/Harakat).
  *
  * Includes the following diacritical marks:

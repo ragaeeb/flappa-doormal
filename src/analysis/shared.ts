@@ -2,9 +2,7 @@
 
 import { getAvailableTokens, TOKEN_PATTERNS } from '../segmentation/tokens.js';
 
-// ─────────────────────────────────────────────────────────────
 // Helpers shared across analysis modules
-// ─────────────────────────────────────────────────────────────
 
 // For analysis signatures we avoid escaping ()[] because:
 // - These are commonly used literally in texts (e.g., "(ح)")
@@ -46,30 +44,28 @@ export const stripArabicDiacritics = (s: string): string =>
 
 export type CompiledTokenRegex = { token: string; re: RegExp };
 
-export const compileTokenRegexes = (tokenNames: string[]): CompiledTokenRegex[] => {
-    const compiled: CompiledTokenRegex[] = [];
-    for (const token of tokenNames) {
-        const pat = TOKEN_PATTERNS[token];
-        if (!pat) {
-            continue;
-        }
-        try {
-            compiled.push({ re: new RegExp(pat, 'uy'), token });
-        } catch {
-            // Ignore invalid patterns
-        }
-    }
-    return compiled;
-};
+export const compileTokenRegexes = (tokenNames: string[]): CompiledTokenRegex[] =>
+    tokenNames
+        .map((token) => {
+            const pat = TOKEN_PATTERNS[token];
+            if (!pat) {
+                return null;
+            }
+            try {
+                return { re: new RegExp(pat, 'uy'), token };
+            } catch {
+                return null;
+            }
+        })
+        .filter((x): x is CompiledTokenRegex => x !== null);
 
 export const appendWs = (out: string, mode: 'regex' | 'space'): string => {
     if (!out) {
         return out;
     }
-    if (mode === 'space') {
-        return out.endsWith(' ') ? out : `${out} `;
-    }
-    return out.endsWith('\\s*') ? out : `${out}\\s*`;
+    const suffix = mode === 'space' ? ' ' : '\\s*';
+    const check = mode === 'space' ? ' ' : '\\\\s*';
+    return out.endsWith(check) ? out : `${out}${suffix}`;
 };
 
 export const findBestTokenMatchAt = (

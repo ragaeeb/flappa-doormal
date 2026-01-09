@@ -41,9 +41,7 @@ describe('segmenter', () => {
     });
 
     describe('segmentPages', () => {
-        // ─────────────────────────────────────────────────────────────
         // Basic split: 'at' tests (current behavior)
-        // ─────────────────────────────────────────────────────────────
 
         it('should default split to "at" when not specified', () => {
             const pages: Page[] = [
@@ -119,9 +117,7 @@ describe('segmenter', () => {
             expect(result[2]).toMatchObject({ content: '٣ - الحديث الثالث', from: 11 });
         });
 
-        // ─────────────────────────────────────────────────────────────
         // Template and token expansion tests
-        // ─────────────────────────────────────────────────────────────
 
         it('should expand {{raqms}} token in template patterns', () => {
             const pages: Page[] = [
@@ -195,9 +191,7 @@ describe('segmenter', () => {
             expect(result.some((s) => s.from === 3 && s.meta?.type === 'chapter')).toBe(false);
         });
 
-        // ─────────────────────────────────────────────────────────────
         // lineStartsWith syntax sugar tests
-        // ─────────────────────────────────────────────────────────────
 
         it('should support lineStartsWith with multiple patterns and fuzzy matching', () => {
             const pages: Page[] = [
@@ -298,9 +292,7 @@ describe('segmenter', () => {
             });
         });
 
-        // ─────────────────────────────────────────────────────────────
         // Page constraints (min/max) tests
-        // ─────────────────────────────────────────────────────────────
 
         it('should only apply pattern when page is >= min', () => {
             const pages: Page[] = [
@@ -410,9 +402,7 @@ describe('segmenter', () => {
             expect(result[1].content).toBe('## B ## C ## D');
         });
 
-        // ─────────────────────────────────────────────────────────────
         // HTML preprocessing tests
-        // ─────────────────────────────────────────────────────────────
 
         it('should match patterns on pre-processed content (client strips HTML)', () => {
             // Client pre-processes content using stripHtmlTags or htmlToMarkdown
@@ -429,9 +419,7 @@ describe('segmenter', () => {
             expect(result[0].from).toBe(142);
         });
 
-        // ─────────────────────────────────────────────────────────────
         // NEW: split: 'after' tests (end markers)
-        // ─────────────────────────────────────────────────────────────
 
         it('should split after pattern when split is after', () => {
             const pages: Page[] = [
@@ -468,9 +456,7 @@ describe('segmenter', () => {
             expect(result[1]).toMatchObject({ content: '\nLine d', from: 1 });
         });
 
-        // ─────────────────────────────────────────────────────────────
         // NEW: occurrence tests
-        // ─────────────────────────────────────────────────────────────
 
         it('should only split at last occurrence when occurrence is last', () => {
             const pages: Page[] = [{ content: 'Sentence 1. Sentence 2. Sentence 3', id: 1 }];
@@ -1002,9 +988,7 @@ describe('segmenter', () => {
         });
     });
 
-    // ─────────────────────────────────────────────────────────────
     // Auto-escaping brackets in template patterns
-    // ─────────────────────────────────────────────────────────────
 
     describe('auto-escaping brackets', () => {
         describe('lineStartsAfter', () => {
@@ -1252,9 +1236,7 @@ describe('segmenter', () => {
         });
     });
 
-    // ─────────────────────────────────────────────────────────────
     // Named Capture Groups: {{token:name}} syntax
-    // ─────────────────────────────────────────────────────────────
 
     describe('named capture groups', () => {
         describe('template patterns', () => {
@@ -1523,9 +1505,7 @@ describe('segmenter', () => {
             });
         });
 
-        // ─────────────────────────────────────────────────────────────
         // Breakpoints tests - post-processing for oversized segments
-        // ─────────────────────────────────────────────────────────────
 
         describe('breakpoints', () => {
             describe('basic behavior', () => {
@@ -3707,6 +3687,7 @@ describe('segmenter', () => {
         it('should match multiple words using alternation with whitespace prefix', () => {
             // Use \\s+(?:word1|word2|word3) to match any of multiple words
             // while avoiding mid-word matches
+            // NOTE: This uses the `regex` field since (?:...) groups require raw regex
 
             const pages: Page[] = [
                 {
@@ -3715,9 +3696,9 @@ describe('segmenter', () => {
                 },
             ];
 
-            // Pattern matches any of: ولهذا, وكذلك, فلذلك - with preceding whitespace
+            // regex field: raw regex with non-capturing group, preceding whitespace
             const result = segmentPages(pages, {
-                breakpoints: [{ pattern: '\\s+(?:ولهذا|وكذلك|فلذلك)', split: 'at' }],
+                breakpoints: [{ regex: '\\s+(?:ولهذا|وكذلك|فلذلك)', split: 'at' }],
                 maxContentLength: 50,
             });
 

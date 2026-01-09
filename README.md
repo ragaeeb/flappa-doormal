@@ -351,6 +351,8 @@ When a segment exceeds `maxPages` or `maxContentLength`, breakpoints split it at
 
 When a breakpoint pattern matches, the split position is controlled by the `split` option:
 
+> ⚠️ **Split Defaults Differ**: Rules default to `split: 'at'`, while Breakpoints default to `split: 'after'`.
+
 ```typescript
 {
   breakpoints: [

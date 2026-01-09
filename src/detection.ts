@@ -1,10 +1,3 @@
-/**
- * Pattern detection utilities for recognizing template tokens in Arabic text.
- * Used to auto-detect patterns from user-highlighted text in the segmentation dialog.
- *
- * @module pattern-detection
- */
-
 import { getAvailableTokens, TOKEN_PATTERNS } from './segmentation/tokens.js';
 
 /**
