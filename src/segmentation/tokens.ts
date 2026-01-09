@@ -1,47 +1,4 @@
-/**
- * Token-based template system for Arabic text pattern matching.
- *
- * This module provides a human-readable way to define regex patterns using
- * `{{token}}` placeholders that expand to their regex equivalents. It supports
- * named capture groups for extracting matched values into metadata.
- *
- * @module tokens
- *
- * @example
- * // Simple token expansion
- * expandTokens('{{raqms}} {{dash}}')
- * // → '[\\u0660-\\u0669]+ [-–—ـ]'
- *
- * @example
- * // Named capture groups
- * expandTokensWithCaptures('{{raqms:num}} {{dash}}')
- * // → { pattern: '(?<num>[\\u0660-\\u0669]+) [-–—ـ]', captureNames: ['num'], hasCaptures: true }
- */
-
-/**
- * Token definitions mapping human-readable token names to regex patterns.
- *
- * Tokens are used in template strings with double-brace syntax:
- * - `{{token}}` - Expands to the pattern (non-capturing in context)
- * - `{{token:name}}` - Expands to a named capture group `(?<name>pattern)`
- * - `{{:name}}` - Captures any content with the given name `(?<name>.+)`
- *
- * @remarks
- * These patterns are designed for Arabic text matching. For diacritic-insensitive
- * matching of Arabic patterns, use the `fuzzy: true` option in split rules,
- * which applies `makeDiacriticInsensitive()` to the expanded patterns.
- *
- * @example
- * // Using tokens in a split rule
- * { lineStartsWith: ['{{kitab}}', '{{bab}}'], split: 'at', fuzzy: true }
- *
- * @example
- * // Using tokens with named captures
- * { lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '], split: 'at' }
- */
-// ─────────────────────────────────────────────────────────────
 // Auto-escaping for template patterns
-// ─────────────────────────────────────────────────────────────
 
 /**
  * Escapes regex metacharacters (parentheses and brackets) in template patterns,
@@ -69,9 +26,7 @@
 export const escapeTemplateBrackets = (pattern: string) =>
     pattern.replace(/(\{\{[^}]*\}\})|([()[\]])/g, (_match, token, bracket) => token || `\\${bracket}`);
 
-// ─────────────────────────────────────────────────────────────
 // Base tokens - raw regex patterns (no template references)
-// ─────────────────────────────────────────────────────────────
 
 /**
  * Base token definitions mapping human-readable token names to regex patterns.
@@ -285,9 +240,7 @@ const BASE_TOKENS: Record<string, string> = {
     tarqim: '[.!?؟؛]',
 };
 
-// ─────────────────────────────────────────────────────────────
 // Token constants for client use
-// ─────────────────────────────────────────────────────────────
 
 /**
  * Pre-defined token constants for use in patterns.
@@ -378,10 +331,8 @@ export const withCapture = (token: string, name: string): string => {
     return `{{${match[1]}:${name}}}`;
 };
 
-// ─────────────────────────────────────────────────────────────
 // Composite tokens - templates that reference base tokens
 // These are pre-expanded at module load time for performance
-// ─────────────────────────────────────────────────────────────
 
 /**
  * Composite token definitions using template syntax.

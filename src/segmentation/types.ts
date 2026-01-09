@@ -1,6 +1,4 @@
-// ─────────────────────────────────────────────────────────────
 // Pattern Types (mutually exclusive - only ONE per rule)
-// ─────────────────────────────────────────────────────────────
 
 /**
  * Literal regex pattern rule - no token expansion or auto-escaping is applied.
@@ -189,9 +187,7 @@ export const PATTERN_TYPE_KEYS = ['lineStartsWith', 'lineStartsAfter', 'lineEnds
  */
 export type PatternTypeKey = (typeof PATTERN_TYPE_KEYS)[number];
 
-// ─────────────────────────────────────────────────────────────
 // Split Behavior
-// ─────────────────────────────────────────────────────────────
 
 /**
  * Configuration for how and where to split content when a pattern matches.
@@ -234,9 +230,7 @@ type SplitBehavior = {
     fuzzy?: boolean;
 };
 
-// ─────────────────────────────────────────────────────────────
 // Page Range Types
-// ─────────────────────────────────────────────────────────────
 
 /**
  * A single page ID or a range of page IDs.
@@ -250,9 +244,7 @@ type SplitBehavior = {
  */
 export type PageRange = number | [number, number];
 
-// ─────────────────────────────────────────────────────────────
 // Constraints & Metadata
-// ─────────────────────────────────────────────────────────────
 
 /**
  * Optional constraints and metadata for a split rule.
@@ -339,9 +331,7 @@ type RuleConstraints = {
     pageStartGuard?: string;
 };
 
-// ─────────────────────────────────────────────────────────────
 // Combined Rule Type
-// ─────────────────────────────────────────────────────────────
 
 /**
  * A complete split rule combining pattern, behavior, and constraints.
@@ -371,9 +361,7 @@ type RuleConstraints = {
  */
 export type SplitRule = PatternType & SplitBehavior & RuleConstraints;
 
-// ─────────────────────────────────────────────────────────────
 // Input & Output
-// ─────────────────────────────────────────────────────────────
 
 /**
  * Input page structure for segmentation.
@@ -404,9 +392,7 @@ export type Page = {
     content: string;
 };
 
-// ─────────────────────────────────────────────────────────────
 // Breakpoint Types
-// ─────────────────────────────────────────────────────────────
 
 /**
  * A breakpoint pattern with optional page constraints.
@@ -427,8 +413,27 @@ export type BreakpointRule = {
     /**
      * Regex pattern for breaking (supports token expansion).
      * Empty string `''` means fall back to page boundary.
+     *
+     * Brackets `()[]` outside `{{tokens}}` are auto-escaped (like `template` patterns).
+     * For raw regex with full control, use `regex` instead.
+     *
+     * If both `pattern` and `regex` are specified, `regex` takes precedence.
      */
-    pattern: string;
+    pattern?: string;
+
+    /**
+     * Raw regex pattern (supports token expansion, NO bracket auto-escaping).
+     *
+     * Use this when you need regex features like non-capturing groups `(?:...)`,
+     * lookaheads, or character classes with parentheses.
+     *
+     * If both `pattern` and `regex` are specified, `regex` takes precedence.
+     *
+     * @example
+     * // Non-capturing alternation (won't work in pattern due to auto-escaping)
+     * { regex: '\\s+(?:ولهذا|وكذلك|فلذلك)', split: 'at' }
+     */
+    regex?: string;
 
     /**
      * Where to split relative to the match.
@@ -511,9 +516,7 @@ export type BreakpointRule = {
  */
 export type Breakpoint = string | BreakpointRule;
 
-// ─────────────────────────────────────────────────────────────
 // Logger Interface
-// ─────────────────────────────────────────────────────────────
 
 /**
  * Logger interface for custom logging implementations.
@@ -573,9 +576,7 @@ export type Replacement = {
     pageIds?: number[];
 };
 
-// ─────────────────────────────────────────────────────────────
 // Segmentation Options
-// ─────────────────────────────────────────────────────────────
 
 /**
  * Segmentation options controlling how pages are split.

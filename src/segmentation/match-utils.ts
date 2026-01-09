@@ -1,13 +1,3 @@
-/**
- * Utility functions for regex matching and result processing.
- *
- * These functions were extracted from `segmenter.ts` to reduce complexity
- * and enable independent testing. They handle match filtering, capture
- * extraction, and occurrence-based selection.
- *
- * @module match-utils
- */
-
 import { isPageExcluded } from './breakpoint-utils.js';
 import type { SplitRule } from './types.js';
 

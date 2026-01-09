@@ -6,6 +6,7 @@
  */
 
 import { FAST_PATH_THRESHOLD } from './breakpoint-constants.js';
+import type { PatternProcessor } from './breakpoint-utils.js';
 import {
     adjustForUnicodeBoundary,
     applyPageJoinerBetweenPages,
@@ -23,8 +24,6 @@ import {
 } from './breakpoint-utils.js';
 import { buildBreakpointDebugPatch, mergeDebugIntoMeta } from './debug-meta.js';
 import type { Breakpoint, Logger, Page, Segment } from './types.js';
-
-export type BreakpointPatternProcessor = (pattern: string) => string;
 
 const buildPageIdToIndexMap = (pageIds: number[]) => new Map(pageIds.map((id, i) => [id, i]));
 
@@ -982,17 +981,18 @@ export const applyBreakpoints = (
     maxPages: number,
     breakpoints: Breakpoint[],
     prefer: 'longer' | 'shorter',
-    patternProcessor: BreakpointPatternProcessor,
+    patternProcessor: PatternProcessor,
     logger?: Logger,
     pageJoiner: 'space' | 'newline' = 'space',
     debugMetaKey?: string,
     maxContentLength?: number,
+    rawPatternProcessor?: PatternProcessor,
 ) => {
     const pageIds = pages.map((p) => p.id);
     const pageIdToIndex = buildPageIdToIndexMap(pageIds);
     const normalizedPages = buildNormalizedPagesMap(pages, normalizedContent);
     const cumulativeOffsets = buildCumulativeOffsets(pageIds, normalizedPages);
-    const expandedBreakpoints = expandBreakpoints(breakpoints, patternProcessor);
+    const expandedBreakpoints = expandBreakpoints(breakpoints, patternProcessor, rawPatternProcessor);
 
     const result: Segment[] = [];
 

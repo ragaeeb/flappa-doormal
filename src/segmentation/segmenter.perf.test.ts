@@ -3,18 +3,14 @@ import { describe, expect, it } from 'bun:test';
 import { segmentPages } from './segmenter.js';
 import type { Page, SegmentationOptions, SplitRule } from './types.js';
 
-// ─────────────────────────────────────────────────────────────
 // Test Configuration
-// ─────────────────────────────────────────────────────────────
 
 const perfDescribe = process.env.RUN_PERF === 'true' ? describe : describe.skip;
 const CI_MULTIPLIER = process.env.CI ? 2 : 1;
 
 const PAGE_COUNT = 10_000;
 
-// ─────────────────────────────────────────────────────────────
 // Seeded PRNG for Deterministic Tests
-// ─────────────────────────────────────────────────────────────
 
 // Mulberry32 PRNG - deterministic random number generator
 function mulberry32(seed: number): () => number {
@@ -34,9 +30,7 @@ function resetRng(): void {
     rng = mulberry32(SEED);
 }
 
-// ─────────────────────────────────────────────────────────────
 // Synthetic Arabic Data Generation
-// ─────────────────────────────────────────────────────────────
 
 const ARABIC_WORDS = [
     'الحمد',
@@ -109,9 +103,7 @@ function generateArabicPages(count: number): Page[] {
     return pages;
 }
 
-// ─────────────────────────────────────────────────────────────
 // Performance Test Suite
-// ─────────────────────────────────────────────────────────────
 
 perfDescribe('Performance Tests', () => {
     // Generate pages once for all tests
@@ -129,9 +121,7 @@ perfDescribe('Performance Tests', () => {
         });
     };
 
-    // ─────────────────────────────────────────────────────────────
     // Basic maxPages Variations
-    // ─────────────────────────────────────────────────────────────
 
     describe('maxPages variations', () => {
         runPerfTest('maxPages=0', { breakpoints: [''], maxPages: 0, rules: [] }, 500);
@@ -153,9 +143,7 @@ perfDescribe('Performance Tests', () => {
         );
     });
 
-    // ─────────────────────────────────────────────────────────────
     // Single Rule Types
-    // ─────────────────────────────────────────────────────────────
 
     describe('single rule types', () => {
         runPerfTest(
@@ -254,9 +242,7 @@ perfDescribe('Performance Tests', () => {
         );
     });
 
-    // ─────────────────────────────────────────────────────────────
     // Large Rule Sets
-    // ─────────────────────────────────────────────────────────────
 
     describe('large rule sets', () => {
         const generateRegexRules = (count: number): SplitRule[] =>
@@ -310,9 +296,7 @@ perfDescribe('Performance Tests', () => {
         );
     });
 
-    // ─────────────────────────────────────────────────────────────
     // maxContentLength
-    // ─────────────────────────────────────────────────────────────
 
     describe('maxContentLength', () => {
         runPerfTest(
@@ -336,9 +320,7 @@ perfDescribe('Performance Tests', () => {
         );
     });
 
-    // ─────────────────────────────────────────────────────────────
     // Breakpoints
-    // ─────────────────────────────────────────────────────────────
 
     describe('breakpoints', () => {
         runPerfTest(
@@ -363,9 +345,7 @@ perfDescribe('Performance Tests', () => {
         );
     });
 
-    // ─────────────────────────────────────────────────────────────
     // Exclusions
-    // ─────────────────────────────────────────────────────────────
 
     describe('exclusions', () => {
         const excludePageIds = Array.from({ length: 5000 }, (_, i) => i * 2 + 1);
@@ -381,9 +361,7 @@ perfDescribe('Performance Tests', () => {
         );
     });
 
-    // ─────────────────────────────────────────────────────────────
     // Split Behavior Variations
-    // ─────────────────────────────────────────────────────────────
 
     describe('split behavior', () => {
         runPerfTest(
@@ -417,9 +395,7 @@ perfDescribe('Performance Tests', () => {
         );
     });
 
-    // ─────────────────────────────────────────────────────────────
     // Edge Case Stress Tests
-    // ─────────────────────────────────────────────────────────────
 
     describe('edge case stress tests', () => {
         it('should handle empty pages efficiently', () => {

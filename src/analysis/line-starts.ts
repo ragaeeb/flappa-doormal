@@ -15,9 +15,7 @@ import {
     stripArabicDiacritics,
 } from './shared.js';
 
-// ─────────────────────────────────────────────────────────────
 // Types
-// ─────────────────────────────────────────────────────────────
 
 export type LineStartAnalysisOptions = {
     topK?: number;
@@ -41,9 +39,7 @@ export type CommonLineStartPattern = {
     examples: LineStartPatternExample[];
 };
 
-// ─────────────────────────────────────────────────────────────
 // Options resolution
-// ─────────────────────────────────────────────────────────────
 
 type ResolvedOptions = Required<Omit<LineStartAnalysisOptions, 'lineFilter'>> & {
     lineFilter?: LineStartAnalysisOptions['lineFilter'];
@@ -63,9 +59,7 @@ const resolveOptions = (options: LineStartAnalysisOptions = {}): ResolvedOptions
     whitespace: options.whitespace ?? 'regex',
 });
 
-// ─────────────────────────────────────────────────────────────
 // Specificity & sorting
-// ─────────────────────────────────────────────────────────────
 
 const countTokenMarkers = (pattern: string): number => (pattern.match(/\{\{/g) ?? []).length;
 
@@ -88,9 +82,7 @@ const compareBySpecificity = (a: CommonLineStartPattern, b: CommonLineStartPatte
 const compareByCount = (a: CommonLineStartPattern, b: CommonLineStartPattern): number =>
     b.count !== a.count ? b.count - a.count : compareBySpecificity(a, b);
 
-// ─────────────────────────────────────────────────────────────
 // Signature building helpers
-// ─────────────────────────────────────────────────────────────
 
 /** Remove trailing whitespace placeholders */
 const trimTrailingWs = (out: string, mode: 'regex' | 'space'): string => {
@@ -169,9 +161,7 @@ const skipWhitespace = (
     return { out: appendWs(out, ws), pos: pos + m[0].length, skipped: true };
 };
 
-// ─────────────────────────────────────────────────────────────
 // Main tokenization
-// ─────────────────────────────────────────────────────────────
 
 const tokenizeLineStart = (line: string, tokenNames: string[], opts: ResolvedOptions): string | null => {
     const trimmed = collapseWhitespace(line);
@@ -249,9 +239,7 @@ const tokenizeLineStart = (line: string, tokenNames: string[], opts: ResolvedOpt
     return matchedAny ? trimTrailingWs(out, opts.whitespace) : null;
 };
 
-// ─────────────────────────────────────────────────────────────
 // Page processing
-// ─────────────────────────────────────────────────────────────
 
 type PatternAccumulator = Map<string, { count: number; examples: LineStartPatternExample[] }>;
 
@@ -292,9 +280,7 @@ const processPage = (page: Page, tokenPriority: string[], opts: ResolvedOptions,
     }
 };
 
-// ─────────────────────────────────────────────────────────────
 // Main export
-// ─────────────────────────────────────────────────────────────
 
 /**
  * Analyze pages and return the most common line-start patterns (top K).

@@ -1,18 +1,8 @@
-/**
- * Core segmentation engine for splitting Arabic text pages into logical segments.
- *
- * The segmenter takes an array of pages and applies pattern-based rules to
- * identify split points, producing segments with content, page references,
- * and optional metadata.
- *
- * @module segmenter
- */
-
 import { applyBreakpoints } from './breakpoint-processor.js';
 import { resolveDebugConfig } from './debug-meta.js';
 import { anyRuleAllowsId } from './match-utils.js';
 import { applyReplacements } from './replace.js';
-import { processPattern } from './rule-regex.js';
+import { processBreakpointPattern, processPattern } from './rule-regex.js';
 import {
     collectFastFuzzySplitPoints,
     createPageStartGuardChecker,
@@ -364,6 +354,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
             pageJoiner,
             debug?.includeBreakpoint ? debug.metaKey : undefined,
             maxContentLength,
+            processBreakpointPattern,
         );
         logger?.info?.('[segmenter] segmentation complete (with breakpoints)', { finalSegmentCount: result.length });
         return result;

@@ -220,14 +220,17 @@ Raw `regex` patterns now support named capture groups for metadata extraction:
 
 The `breakpoints` option provides a post-processing mechanism for limiting segment size. Breakpoints runs AFTER all structural rules.
 
+**Important: Split Defaults Differ**
+| Type | Default `split` |
+|------|-----------------|
+| **Rules** (SplitRule) | `'at'` |
+| **Breakpoints** (BreakpointRule) | `'after'` |
+
 **API Options:**
 ```typescript
 interface SegmentationOptions {
   rules: SplitRule[];
   // Optional preprocessing step: regex replacements applied per-page BEFORE segmentation
-  // - default flags: 'gu' (and g+u are always enforced)
-  // - pageIds omitted: apply to all pages
-  // - pageIds: []: apply to no pages (skip)
   replace?: Array<{ regex: string; replacement: string; flags?: string; pageIds?: number[] }>;
   maxPages?: number;           // Maximum pages a segment can span
   breakpoints?: Breakpoint[];  // Ordered array of patterns (supports token expansion)
@@ -237,12 +240,30 @@ interface SegmentationOptions {
 // Breakpoint can be a string or object with split control
 type Breakpoint = string | BreakpointRule;
 interface BreakpointRule {
-  pattern: string;
+  pattern?: string;  // Auto-escapes ()[] like template patterns
+  regex?: string;    // Raw regex, no bracket escaping (for (?:...) groups)
   split?: 'at' | 'after';  // Default: 'after'
   min?: number;            // Minimum page ID for this breakpoint
   max?: number;            // Maximum page ID for this breakpoint
   exclude?: PageRange[];   // Pages to skip this breakpoint
 }
+```
+
+**`pattern` vs `regex` field:**
+| Field | Bracket escaping | Use case |
+|-------|-----------------|----------|
+| `pattern` | `()[]` auto-escaped | Simple patterns, token-friendly |
+| `regex` | None (raw regex) | Complex regex with groups, lookahead |
+
+```typescript
+// pattern field - brackets are auto-escaped (matches literal parentheses)
+{ pattern: '(a)', split: 'after' }
+
+// regex field - raw regex, use for non-capturing groups
+{ regex: '\\s+(?:ولهذا|وكذلك|فلذلك)', split: 'at' }
+
+// Both support token expansion
+{ regex: '{{tarqim}}\\s*', split: 'after' }
 ```
 
 **How it works:**
@@ -265,7 +286,7 @@ segmentPages(pages, {
   maxPages: 2,
   breakpoints: [
     { pattern: '{{tarqim}}\\s*', split: 'after' }, // Punctuation ends current segment
-    { pattern: 'ولهذا', split: 'at' },             // Word starts next segment
+    { regex: '\\s+(?:ولهذا|وكذلك)', split: 'at' }, // Word starts next segment (with groups)
     '',                                            // Fall back to page boundary
   ],
   prefer: 'longer',
@@ -279,6 +300,8 @@ segmentPages(pages, {
 - **Recursive**: If split result still exceeds `maxPages`, breakpoints runs again
 - **Lookahead patterns unsupported**: Zero-length matches are skipped; use `split: 'at'` instead
 - **Position 0 protection**: Matches at position 0 are skipped for `split: 'at'` to prevent empty segments
+- **Mid-word matching caveat**: Patterns match substrings; use `\s+` prefix for whole-word matching
+- **`\b` doesn't work with Arabic**: Use `\s+` prefix instead (Arabic letters aren't "word characters")
 
 > **Note**: Older per-rule span limiting approaches were removed in favor of post-processing `breakpoints`.
 

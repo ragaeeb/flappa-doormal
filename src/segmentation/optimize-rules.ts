@@ -1,14 +1,3 @@
-/**
- * Rule optimization utilities for merging and sorting split rules.
- *
- * Provides `optimizeRules()` to:
- * 1. Merge compatible rules with same pattern type and options
- * 2. Deduplicate patterns within each rule
- * 3. Sort rules by specificity (longer patterns first)
- *
- * @module optimize-rules
- */
-
 import { PATTERN_TYPE_KEYS, type PatternTypeKey, type SplitRule } from './types.js';
 
 // Keys that support array patterns and can be merged

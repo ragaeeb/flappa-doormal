@@ -11,9 +11,7 @@ import {
     stripArabicDiacritics,
 } from './shared.js';
 
-// ─────────────────────────────────────────────────────────────
 // Types
-// ─────────────────────────────────────────────────────────────
 
 export type TokenStreamItem = {
     type: 'token' | 'literal';
@@ -58,9 +56,7 @@ type PatternStats = {
     literalLen: number;
 };
 
-// ─────────────────────────────────────────────────────────────
 // Resolved options with defaults
-// ─────────────────────────────────────────────────────────────
 
 type ResolvedOptions = Required<RepeatingSequenceOptions>;
 
@@ -80,9 +76,7 @@ const resolveOptions = (options?: RepeatingSequenceOptions): ResolvedOptions => 
     };
 };
 
-// ─────────────────────────────────────────────────────────────
 // Raw position tracking for diacritic normalization
-// ─────────────────────────────────────────────────────────────
 
 /** Creates a cursor that tracks position in both normalized and raw text */
 const createRawCursor = (text: string, normalize: boolean) => {
@@ -121,9 +115,7 @@ const createRawCursor = (text: string, normalize: boolean) => {
     };
 };
 
-// ─────────────────────────────────────────────────────────────
 // Token content scanner
-// ─────────────────────────────────────────────────────────────
 
 /** Scans text and produces a stream of tokens and literals. */
 export const tokenizeContent = (text: string, normalize: boolean): TokenStreamItem[] => {
@@ -193,9 +185,7 @@ export const tokenizeContent = (text: string, normalize: boolean): TokenStreamIt
     return items;
 };
 
-// ─────────────────────────────────────────────────────────────
 // N-gram pattern extraction
-// ─────────────────────────────────────────────────────────────
 
 /** Build pattern string from window items */
 const buildPattern = (window: TokenStreamItem[], whitespace: 'regex' | 'space'): string =>
@@ -270,9 +260,7 @@ const extractPageNgrams = (
     }
 };
 
-// ─────────────────────────────────────────────────────────────
 // Main export
-// ─────────────────────────────────────────────────────────────
 
 /**
  * Analyze pages for commonly repeating word sequences.
