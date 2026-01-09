@@ -5,10 +5,13 @@
  * and allow unit testing of tricky edge cases (window sizing, next-page advancement, etc.).
  */
 
+import type { Breakpoint, BreakpointRule } from '@/types/breakpoints.js';
+import type { Page, Segment } from '@/types/index.js';
+import type { Logger } from '@/types/options.js';
+import { adjustForUnicodeBoundary } from '@/utils/textUtils.js';
 import { FAST_PATH_THRESHOLD } from './breakpoint-constants.js';
 import type { PatternProcessor } from './breakpoint-utils.js';
 import {
-    adjustForUnicodeBoundary,
     applyPageJoinerBetweenPages,
     type BreakpointContext,
     buildBoundaryPositions,
@@ -23,7 +26,6 @@ import {
     type NormalizedPage,
 } from './breakpoint-utils.js';
 import { buildBreakpointDebugPatch, mergeDebugIntoMeta } from './debug-meta.js';
-import type { Breakpoint, Logger, Page, Segment } from './types.js';
 
 const buildPageIdToIndexMap = (pageIds: number[]) => new Map(pageIds.map((id, i) => [id, i]));
 
@@ -208,11 +210,19 @@ const findBreakOffsetForWindow = (
     if (windowEndPosition < remainingContent.length) {
         const safeOffset = findSafeBreakPosition(remainingContent, windowEndPosition);
         if (safeOffset !== -1) {
-            return { breakOffset: safeOffset };
+            return {
+                breakOffset: safeOffset,
+                contentLengthSplit: maxContentLength ? { maxContentLength, reason: 'whitespace' as const } : undefined,
+            };
         }
         // If no safe break (whitespace) found, ensure we don't split a surrogate pair
         const adjustedOffset = adjustForUnicodeBoundary(remainingContent, windowEndPosition);
-        return { breakOffset: adjustedOffset };
+        return {
+            breakOffset: adjustedOffset,
+            contentLengthSplit: maxContentLength
+                ? { maxContentLength, reason: 'unicode_boundary' as const }
+                : undefined,
+        };
     }
 
     return { breakOffset: windowEndPosition };
@@ -431,7 +441,7 @@ const handleOversizedSegmentFit = (
     isFirstPiece: boolean,
     debugMetaKey: string | undefined,
     originalMeta: Segment['meta'] | undefined,
-    lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null,
+    lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null,
     result: Segment[],
 ) => {
     const remainingSpan = computeRemainingSpan(currentFromIdx, toIdx, pageIds);
@@ -459,21 +469,35 @@ const getSegmentMetaWithDebug = (
     isFirstPiece: boolean,
     debugMetaKey: string | undefined,
     originalMeta: Segment['meta'] | undefined,
-    lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null,
+    lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null,
+    contentLengthSplit?: { reason: 'whitespace' | 'unicode_boundary'; maxContentLength: number },
 ) => {
     const includeMeta = isFirstPiece || Boolean(debugMetaKey);
     if (!includeMeta) {
         return undefined;
     }
 
-    if (debugMetaKey && lastBreakpoint) {
-        return mergeDebugIntoMeta(
-            isFirstPiece ? originalMeta : undefined,
-            debugMetaKey,
-            buildBreakpointDebugPatch(lastBreakpoint.breakpointIndex, lastBreakpoint.rule as any),
-        );
+    let meta = isFirstPiece ? originalMeta : undefined;
+
+    if (debugMetaKey) {
+        if (lastBreakpoint) {
+            meta = mergeDebugIntoMeta(
+                meta,
+                debugMetaKey,
+                buildBreakpointDebugPatch(lastBreakpoint.breakpointIndex, lastBreakpoint.rule as any),
+            );
+        }
+        if (contentLengthSplit) {
+            meta = mergeDebugIntoMeta(meta, debugMetaKey, {
+                contentLengthSplit: {
+                    maxContentLength: contentLengthSplit.maxContentLength,
+                    splitReason: contentLengthSplit.reason,
+                },
+            });
+        }
     }
-    return isFirstPiece ? originalMeta : undefined;
+
+    return meta;
 };
 
 /**
@@ -616,7 +640,7 @@ const ensureProgressingBreakOffset = (
 
 const updateLastBreakpointFromFound = (
     found: ReturnType<typeof findBreakOffsetForWindow>,
-    lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null,
+    lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null,
 ) => {
     if (found.breakpointIndex !== undefined && found.breakpointRule) {
         return { breakpointIndex: found.breakpointIndex, rule: found.breakpointRule };
@@ -639,9 +663,10 @@ const appendPieceAndAdvance = (
     isFirstPiece: boolean,
     debugMetaKey: string | undefined,
     originalMeta: Segment['meta'] | undefined,
-    lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null,
+    lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null,
     result: Segment[],
     logger?: Logger,
+    contentLengthSplit?: { reason: 'whitespace' | 'unicode_boundary'; maxContentLength: number },
 ) => {
     let { actualEndIdx, actualStartIdx } = computePiecePages(cursorPos, breakPos, boundaryPositions, fromIdx, toIdx);
 
@@ -668,7 +693,7 @@ const appendPieceAndAdvance = (
         actualEndIdx = Math.min(actualEndIdx, maxAllowedEndIdx);
     }
 
-    const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, originalMeta, lastBreakpoint);
+    const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, originalMeta, lastBreakpoint, contentLengthSplit);
     const pieceSeg = createPieceSegment(pieceContent, actualStartIdx, actualEndIdx, pageIds, meta, true);
     if (pieceSeg) {
         result.push(pieceSeg);
@@ -765,7 +790,7 @@ const processOversizedSegmentIterative = (
     let cursorPos = 0;
     let currentFromIdx = fromIdx;
     let isFirstPiece = true;
-    let lastBreakpoint: { breakpointIndex: number; rule: { pattern: string } } | null = null;
+    let lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null = null;
 
     const boundaryPositions = buildBoundaryPositions(
         fullContent,
@@ -898,6 +923,7 @@ const processOversizedSegmentIterative = (
             lastBreakpoint,
             result,
             logger,
+            found.contentLengthSplit,
         );
         cursorPos = next.cursorPos;
         currentFromIdx = next.currentFromIdx;

@@ -13,6 +13,11 @@
 
 import { getTokenPattern } from './tokens.js';
 
+export type FastFuzzyTokenRule = {
+    token: string;
+    alternatives: string[];
+};
+
 // U+064B..U+0652 (tashkeel/harakat)
 const isArabicDiacriticCode = (code: number) => code >= 0x064b && code <= 0x0652;
 

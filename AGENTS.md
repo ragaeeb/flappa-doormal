@@ -23,118 +23,97 @@ Traditional Arabic text segmentation requires:
 
 ### Repository Structure
 
-```text
 src/
-├── index.ts                    # Main entry point and exports
-├── analysis/                   # Analysis helpers module
-│   ├── index.ts                # Barrel exports for analysis functions
-│   ├── shared.ts               # Shared utilities for analysis
-│   ├── line-starts.ts          # analyzeCommonLineStarts (line-based patterns)
-│   ├── repeating-sequences.ts  # analyzeRepeatingSequences (continuous text N-grams)
-│   └── *.test.ts               # Analysis tests
-├── pattern-detection.ts        # Token detection for auto-generating rules
-├── pattern-detection.test.ts   # Pattern detection tests
-├── recovery.ts                 # Marker recovery utility (recover mistaken lineStartsAfter)
-├── recovery.test.ts            # Marker recovery tests
-└── segmentation/
-    ├── types.ts                # TypeScript type definitions for rules/segments
-    ├── segmenter.ts            # Core segmentation engine (segmentPages)
-    ├── breakpoint-processor.ts # Breakpoint post-processing engine (applyBreakpoints)
-    ├── breakpoint-utils.ts     # Breakpoint processing utilities (windowing, excludes, page joins)
-    ├── rule-regex.ts           # SplitRule -> compiled regex builder (buildRuleRegex, processPattern)
-    ├── optimize-rules.ts       # Rule optimization logic (merge, dedupe, sort)
-    ├── tokens.ts               # Token definitions and expansion logic  
-    ├── fuzzy.ts                # Diacritic-insensitive matching utilities
-    ├── html.ts                 # HTML utilities (stripHtmlTags)
-    ├── textUtils.ts            # Text processing utilities
-    ├── match-utils.ts          # Extracted match processing utilities
-    ├── segmenter.test.ts       # Core test suite (150+ tests including breakpoints)
-    ├── segmenter.bukhari.test.ts # Real-world test cases
-    ├── breakpoint-utils.test.ts # Breakpoint utility tests (55 tests)
-    ├── rule-regex.test.ts      # Rule regex builder tests
-    ├── segmenter-utils.test.ts # Segmenter helper tests
-    ├── tokens.test.ts          # Token expansion tests
-    ├── fuzzy.test.ts           # Fuzzy matching tests
-    ├── textUtils.test.ts       # Text utility tests
-    └── match-utils.test.ts     # Utility function tests
-```
+├── types/                      # Centralized type definitions
+│   ├── index.ts                # Common types (Page, Segment, etc.)
+│   ├── rules.ts                # SplitRule and pattern rule types
+│   ├── breakpoints.ts          # Breakpoint types
+│   ├── options.ts              # SegmentationOptions and Logger
+│   └── segmenter.ts            # Internal segmenter types
+├── analysis/                   # Pattern discovery module
+│   ├── line-starts.ts          # analyzeCommonLineStarts (frequent line markers)
+│   ├── repeating-sequences.ts  # analyzeRepeatingSequences (N-grams)
+│   └── shared.ts               # Shared analysis utilities
+├── segmentation/               # Core engine components
+│   ├── segmenter.ts            # High-level API (segmentPages)
+│   ├── breakpoint-processor.ts # Breakpoint enforcement and windowing
+│   ├── breakpoint-utils.ts     # Windowing, exclusion, and joining logic
+│   ├── rule-regex.ts           # Pattern-to-RegExp compiler
+│   ├── tokens.ts               # Arabic-aware pattern tokens
+│   ├── segmenter-rule-utils.ts # Rule partitioning and optimization
+│   ├── fast-fuzzy-prefix.ts    # High-performance fuzzy matching
+│   ├── debug-meta.ts           # _flappa debug metadata helpers
+│   ├── pattern-validator.ts    # Rule syntax validation
+│   ├── match-utils.ts          # Capture group and constraint logic
+│   └── breakpoint-constants.ts # Performance thresholds and limits
+├── optimization/               # Rule optimization module
+│   └── optimize-rules.ts       # Specificity-based sorting and merging
+├── preprocessing/              # Text normalization module
+│   └── replace.ts              # Idem-safe content replacements
+├── utils/                      # Low-level helpers
+│   └── textUtils.ts            # Diacritics, Unicode, and bracket escaping
+├── index.ts                    # Public barrel exports
+├── recovery.ts                 # Mistaken stripping recovery logic
+├── detection.ts                # Pattern auto-detection (standalone)
+└── *.test.ts                   # Unit and integration tests (co-located)
 
 ### Core Components
 
-1. **`segmentPages(pages, options)`** - Main entry point
+1. **`segmentPages(pages, options)`** - Main entry point (`src/segmentation/segmenter.ts`)
    - Takes array of `{id, content}` pages and split rules
    - Returns array of `{content, from, to?, meta?}` segments
+   - Orchestrates rule matching, optimization, and breakpoint processing
 
-1. **`recoverMistakenLineStartsAfterMarkers(pages, segments, options, selector)`** - Recovery helper
+2. **`recoverMistakenLineStartsAfterMarkers(...)`** - Recovery helper (`src/recovery.ts`)
    - Use when a client mistakenly used `lineStartsAfter` where `lineStartsWith` was intended
    - Deterministic mode reruns segmentation with selected rules converted to `lineStartsWith` and merges recovered `content` back into the provided segments
    - Optional `mode: 'best_effort_then_rerun'` attempts a conservative anchor-based recovery first, then falls back to rerun for unresolved segments
 
-3. **`tokens.ts`** - Template system
+3. **`tokens.ts`** - Template system (`src/segmentation/tokens.ts`)
    - `TOKEN_PATTERNS` - Map of token names to regex patterns
    - `expandTokensWithCaptures()` - Expands `{{token:name}}` syntax
-   - `shouldDefaultToFuzzy()` - Checks if patterns contain fuzzy-default tokens (bab, basmalah, fasl, kitab, naql)
+   - `shouldDefaultToFuzzy()` - Auto-enables fuzzy matching for `bab`, `basmalah`, `fasl`, `kitab`, `naql`
    - `applyTokenMappings()` - Applies named captures (`{{token:name}}`) to raw templates
    - `stripTokenMappings()` - Strips named captures (reverts to `{{token}}`)
-   - Supports fuzzy transform for diacritic-insensitive matching
-   - **Fuzzy-default tokens**: `bab`, `basmalah`, `fasl`, `kitab`, `naql` - auto-enable fuzzy matching unless `fuzzy: false` is set
 
-4. **`match-utils.ts`** - Extracted utilities (for testability)
-   - `extractNamedCaptures()` - Get named groups from regex match
-   - `filterByConstraints()` - Apply min/max page filters
-   - `anyRuleAllowsId()` - Check if page passes rule constraints
+4. **`rule-regex.ts`** - Rule compiler (`src/segmentation/rule-regex.ts`)
+   - `buildRuleRegex()` - Compiles various rule types to executable RegExp
+   - `processPattern()` - Token expansion, auto-escaping, and fuzzy application
+   - `extractNamedCaptureNames()` - Extract metadata field names from raw regex
 
-5. **`rule-regex.ts`** - SplitRule → compiled regex builder
-   - `buildRuleRegex()` - Compiles rule patterns (`lineStartsWith`, `lineStartsAfter`, `lineEndsWith`, `template`, `regex`)
-   - `processPattern()` - Token expansion + auto-escaping + optional fuzzy application
-   - `extractNamedCaptureNames()` - Extract `(?<name>...)` groups from raw regex patterns
+5. **`fast-fuzzy-prefix.ts`** - Performance optimization (`src/segmentation/fast-fuzzy-prefix.ts`)
+   - Performs diacritic-insensitive matching without expensive regex alternations
+   - Used for frequent line-start rules in larger books
 
-6. **`optimize-rules.ts`** - Rule management logic
-   - `optimizeRules()` - Merges compatible rules, deduplicates patterns, and sorts by specificity (longest patterns first)
+6. **`optimize-rules.ts`** - Rule management (`src/optimization/optimize-rules.ts`)
+   - `optimizeRules()` - Merges compatible rules, deduplicates patterns, and sorts by specificity (longest patterns first) to maximize match performance
 
-7. **`pattern-validator.ts`** - Rule validation utilities
-   - `validateRules()` - Detects typos in patterns (missing `{{}}`, unknown tokens, duplicates)
-   - `formatValidationReport()` - Formats validation issues into human-readable strings
-   - Returns parallel array structure for easy error tracking
+7. **`pattern-validator.ts`** - Rule validation (`src/segmentation/pattern-validator.ts`)
+   - `validateRules()` - Detects typos, unknown tokens, and duplicate patterns
+   - Returns detailed reports for UI error highlighting
 
-8. **`breakpoint-processor.ts`** - Breakpoint post-processing engine
-   - `applyBreakpoints()` - Splits oversized structural segments using breakpoint patterns + windowing
-   - Applies `pageJoiner` normalization to breakpoint-created segments
+8. **`breakpoint-processor.ts`** - Structural splitting engine (`src/segmentation/breakpoint-processor.ts`)
+   - `applyBreakpoints()` - Splits oversized chunks using breakpoint patterns + windowing
+   - Robustly handles page attribution and content joining across boundaries
 
-9. **`breakpoint-utils.ts`** - Breakpoint processing utilities
-   - `normalizeBreakpoint()` - Convert string to BreakpointRule object
-   - `isPageExcluded()` - Check if page is in exclude list
-   - `isInBreakpointRange()` - Validate page against min/max/exclude constraints
-   - `buildExcludeSet()` - Create Set from PageRange[] for O(1) lookups
-   - `createSegment()` - Create segment with optional to/meta fields
-   - `expandBreakpoints()` - Expand patterns with pre-compiled regexes
-   - `buildBoundaryPositions()` - Build position map of page boundaries for O(log n) lookups
-   - `findPageIndexForPosition()` - Binary search to find page index for a character position
-   - `estimateStartOffsetInCurrentPage()` - Estimate offset when segment starts mid-page
-   - `findBreakpointWindowEndPosition()` - Compute window boundary in content-space (robust to marker stripping)
-   - `applyPageJoinerBetweenPages()` - Normalize page-boundary join in output segments (`space` vs `newline`)
-   - `findBreakPosition()` - Find break position using breakpoint patterns
-   - `hasExcludedPageInRange()` - Check if range contains excluded pages
-   - `findNextPagePosition()` - Find next page content position
-   - `findPatternBreakPosition()` - Find pattern match by preference
-   - `findSafeBreakPosition()` - Search backward for a safe linguistic split point (whitespace/punctuation)
-   - `adjustForUnicodeBoundary()` - Ensure split position doesn't corrupt surrogate pairs, combining marks, ZWJ/ZWNJ, or variation selectors
+9. **`debug-meta.ts`** - Debugging utilities (`src/segmentation/debug-meta.ts`)
+   - Generates the `_flappa` metadata object for segments
+   - Tracks which rule index, pattern type, or breakpoint triggered the segment split
 
-10. **`types.ts`** - Type definitions
-   - `Logger` interface - Optional logging for debugging
-   - `SegmentationOptions` - Options with `logger` property
-   - `pageJoiner` - Controls how page boundaries are represented in output (`space` default)
-   - `PATTERN_TYPE_KEYS` - Runtime array of all pattern types (for UI building)
-   - Verbosity levels: `trace`, `debug`, `info`, `warn`, `error`
+10. **`src/types/`** - Centralized type system
+    - `rules.ts`: Core `SplitRule` and `Replacement` types
+    - `breakpoints.ts`: `Breakpoint` and `BreakpointRule` types
+    - `options.ts`: Comprehensive `SegmentationOptions` and `Logger` definitions
+    - `index.ts`: Public API types for consumers
 
-11. **`fuzzy.ts`** - Arabic text normalization
-   - `makeDiacriticInsensitive()` - Generate regex that ignores diacritics
+11. **`textUtils.ts`** - Low-level helpers (`src/utils/textUtils.ts`)
+    - `makeDiacriticInsensitive()`: Arabic-aware regex generation
+    - `adjustForUnicodeBoundary()`: Prevents invalid splits across multi-character clusters
+    - `escapeTemplateBrackets()`: Auto-escaping logic for non-token brackets
 
-12. **`pattern-detection.ts`** - Token auto-detection (NEW)
-   - `detectTokenPatterns()` - Detect tokens in text with positions
-   - `generateTemplateFromText()` - Convert text to template string
-   - `suggestPatternConfig()` - Suggest rule configuration
-   - `analyzeTextForRule()` - Complete analysis returning template + config
+12. **`detection.ts`** - Pattern auto-detection (`src/detection.ts`)
+    - Analyzes raw text to suggest optimal templates and rule configurations
+    - Heuristically identifies numbers, headers, and structural markers
 
 ## Key Algorithms
 
@@ -185,7 +164,7 @@ Step 1: "\({{harf}}\): "           (brackets escaped)
 Step 2: "\([أ-ي]\): "              (token expanded - its [] preserved)
 ```
 
-**Implementation in `tokens.ts`:**
+**Implementation in `src/utils/textUtils.ts`:**
 ```typescript
 export const escapeTemplateBrackets = (pattern: string): string => {
     return pattern.replace(/(\{\{[^}]*\}\})|([()[\]])/g, (match, token, bracket) => {
@@ -318,6 +297,30 @@ When using `maxContentLength`, the segmenter prevents text corruption through se
 **Progress Guarantee**:
 The loop in `processOversizedSegment` has been refactored to remove fixed iteration limits (e.g., 10k). Instead, it relies on strict `cursorPos` progression and input validation (`maxContentLength >= 50`) to support processing infinitely large content streams without risk of truncation.
 
+### 6. Debug Metadata (`_flappa`)
+
+When `debug: true` is enabled in `SegmentationOptions`, the library attaches a `_flappa` object to each segment's `meta` property. This provides provenance and split-reason tracking.
+
+#### Metadata Structure
+
+The `_flappa` object contains different fields based on why the segment was produced:
+
+**Rule-based Splits**
+- `rule.index` (number): The index of the rule in the `rules` array.
+- `rule.patternType` (string): The type of pattern used (e.g., `'lineStartsWith'`).
+
+**Breakpoint-based Splits**
+- `breakpoint.index` (number): The index of the breakpoint in the `breakpoints` array.
+- `breakpoint.pattern` (string): The pattern (or `regex`) that matched.
+- `breakpoint.kind` (string): Either `'pattern'` or `'regex'`.
+
+**Safety Fallback Splits (`maxContentLength`)**
+- `contentLengthSplit.maxContentLength` (number): The limit that was exceeded.
+- `contentLengthSplit.splitReason` (string):
+  - `'whitespace'`: Split at a safe space/newline.
+  - `'unicode_boundary'`: Split at a safe character boundary (no surrogate corruption).
+  - `'grapheme_cluster'`: Split at a safe grapheme cluster boundary.
+
 ## Design Decisions
 
 ### 1. Why `{{double-braces}}`?
@@ -351,31 +354,31 @@ The original `segmentPages` had complexity 37 (max: 15). Extraction:
 
 ### Adding a New Token
 
-1. Add to `TOKEN_PATTERNS` in `tokens.ts`:
+1. Add to `TOKEN_PATTERNS` in `src/segmentation/tokens.ts`:
    ```typescript
    export const TOKEN_PATTERNS = {
      // ...existing
      verse: '﴿[^﴾]+﴾',  // Quranic verse markers
    };
    ```
-2. Add test cases in `segmenter.test.ts`
+2. Add test cases in `src/segmentation/segmenter.test.ts`
 3. Document in README.md
 
 ### Adding a New Pattern Type
 
-1. Add type to union in `types.ts`:
+1. Add type to union in `src/types/rules.ts`:
    ```typescript
    type NewPattern = { newPatternField: string[] };
    type PatternType = ... | NewPattern;
    ```
-2. Handle in `buildRuleRegex()` in `segmenter.ts`
+2. Handle in `buildRuleRegex()` in `src/segmentation/rule-regex.ts`
 3. Add comprehensive tests
 
 ### Testing Strategy
 
 - **Unit tests**: Each utility function has dedicated tests
-- **Integration tests**: Full pipeline tests in `segmenter.test.ts`
-- **Real-world tests**: `segmenter.bukhari.test.ts` uses actual hadith data
+- **Integration tests**: Full pipeline tests in `src/segmentation/segmenter.test.ts`
+- **Real-world tests**: `src/segmentation/segmenter.bukhari.test.ts` uses actual hadith data
 - **Style convention**: Prefer `it('should ...', () => { ... })` (Bun) for consistency across the suite
 - Run: `bun test`
 
@@ -384,7 +387,7 @@ The original `segmentPages` had complexity 37 (max: 15). Extraction:
 1. **TypeScript strict mode** - No `any` types
 2. **Biome linting** - Max complexity 15 per function (some exceptions exist)
 3. **JSDoc comments** - All exported functions documented
-4. **Test coverage** - 352 tests across 12 files
+4. **Test coverage** - 642 tests across 21 files
 
 ## Dependencies
 
@@ -450,7 +453,7 @@ bunx biome lint .
 
 1. **`lineStartsAfter` vs `lineStartsWith` is not “cosmetic”**: `lineStartsAfter` changes output by stripping the matched marker via an internal `contentStartOffset` during segment construction. If a client used it by accident, you cannot reconstruct the exact stripped prefix from output alone without referencing the original pages and re-matching the marker.
 
-2. **Recovery must mirror segmentation’s preprocessing**: If `SegmentationOptions.replace` was used, recovery must apply the same replacements (see `src/segmentation/replace.ts`) before attempting anchoring or rerun alignment, otherwise substring matching and page joins will drift.
+2. **Recovery must mirror segmentation’s preprocessing**: If `SegmentationOptions.replace` was used, recovery must apply the same replacements (see `src/preprocessing/replace.ts`) before attempting anchoring or rerun alignment, otherwise substring matching and page joins will drift.
 
 3. **Page joining differs between matching and output**:
    - Matching always happens on pages concatenated with `\\n` separators.
@@ -470,7 +473,7 @@ bunx biome lint .
 9. **When debugging recovery, start here**:
    - `src/segmentation/segmenter.ts` (how content is sliced/trimmed and how `from/to` are computed)
    - `src/segmentation/rule-regex.ts` + `src/segmentation/tokens.ts` (token expansion + fuzzy behavior)
-   - `src/segmentation/replace.ts` (preprocessing parity)
+   - `src/preprocessing/replace.ts` (preprocessing parity)
    - `src/recovery.ts` (recovery implementation)
 
 10. **Prefer library utilities for UI tasks**: Instead of re-implementing rule merging, validation, or token mapping in client code, use `optimizeRules`, `validateRules`/`formatValidationReport`, and `applyTokenMappings`. They handle edge cases (like duplicate patterns, regex safety, or diacritic handling) that ad-hoc implementations might miss.
@@ -622,7 +625,7 @@ Use `pageStartGuard` on a rule to allow matches at the start of a page **only if
 
 Notes:
 - Applies only at page starts; mid-page line starts are unaffected.
-- Implemented in `src/segmentation/segmenter.ts` match filtering.
+- Implemented in `src/segmentation/segmenter-rule-utils.ts` match filtering.
 
 ## Analysis Helper (`analyzeCommonLineStarts`)
 

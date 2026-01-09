@@ -1,11 +1,13 @@
-import { FAST_PATH_THRESHOLD } from './breakpoint-constants.js';
-import type { Breakpoint, BreakpointRule, Logger, PageRange, Segment } from './types.js';
-
-const WINDOW_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15] as const;
-// For page-join normalization we need to handle cases where only the very beginning of the next page
-// is present in the current segment (e.g. the segment ends right before the next structural marker).
-// That can be as short as a few words, so we allow shorter prefixes here.
-const JOINER_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15, 12, 10, 8, 6] as const;
+import type { Breakpoint, BreakpointRule } from '@/types/breakpoints.js';
+import type { PageRange, Segment } from '@/types/index.js';
+import type { Logger } from '@/types/options.js';
+import { adjustForUnicodeBoundary } from '@/utils/textUtils.js';
+import {
+    FAST_PATH_THRESHOLD,
+    JOINER_PREFIX_LENGTHS,
+    STOP_CHARACTERS,
+    WINDOW_PREFIX_LENGTHS,
+} from './breakpoint-constants.js';
 
 /**
  * Normalizes a breakpoint to the object form.
@@ -898,8 +900,7 @@ export const findSafeBreakPosition = (content: string, targetPosition: number, l
         const char = content[i];
 
         // Check for safe delimiter: Whitespace or Punctuation
-        // Includes Arabic comma (،), semicolon (؛), full stop (.), etc.
-        if (/[\s\n.,;!?؛،۔]/.test(char)) {
+        if (STOP_CHARACTERS.test(char)) {
             return i + 1;
         }
     }
@@ -925,48 +926,4 @@ export const adjustForSurrogate = (content: string, position: number) => {
     }
 
     return position;
-};
-
-const isCombiningMarkOrSelector = (char: string | undefined) => {
-    if (!char) {
-        return false;
-    }
-    // \p{M} = Unicode combining mark category (includes Arabic harakat)
-    // FE0E/FE0F = variation selectors
-    return /\p{M}/u.test(char) || char === '\uFE0E' || char === '\uFE0F';
-};
-
-const isJoiner = (char: string | undefined) => char === '\u200C' || char === '\u200D';
-
-/**
- * Ensures the position does not split a grapheme cluster (surrogate pairs,
- * combining marks, or zero-width joiners / variation selectors).
- *
- * This is only used as a last-resort fallback when we are forced to split
- * near a hard limit (e.g. maxContentLength with no safe whitespace/punctuation).
- */
-export const adjustForUnicodeBoundary = (content: string, position: number) => {
-    let adjusted = position;
-    while (adjusted > 0) {
-        // 1. Ensure we don't split a surrogate pair
-        // (High surrogate at adjusted-1, Low surrogate at adjusted)
-        const high = content.charCodeAt(adjusted - 1);
-        const low = content.charCodeAt(adjusted);
-        if (high >= 0xd800 && high <= 0xdbff && low >= 0xdc00 && low <= 0xdfff) {
-            adjusted -= 1;
-            continue;
-        }
-
-        const nextChar = content[adjusted];
-        const prevChar = content[adjusted - 1];
-        // 2. If we'd start the next segment with a combining mark / selector / joiner, back up.
-        // For joiners, also avoid ending the previous segment with a joiner.
-        // (Splitting AFTER combining marks / selectors is safe; splitting before them is not.)
-        if (isCombiningMarkOrSelector(nextChar) || isJoiner(nextChar) || isJoiner(prevChar)) {
-            adjusted -= 1;
-            continue;
-        }
-        break;
-    }
-    return adjusted;
 };

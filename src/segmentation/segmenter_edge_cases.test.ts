@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { segmentPages } from './segmenter';
-import type { Page } from './types';
+import { segmentPages } from '@/segmentation/segmenter.js';
+import type { Page } from '@/types/index.js';
 
 describe('Segmenter Edge Cases', () => {
     // Test Idea #2: Non-consecutive Page IDs

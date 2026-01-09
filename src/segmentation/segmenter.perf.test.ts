@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-
+import type { Page } from '@/types/index.js';
+import type { SegmentationOptions } from '@/types/options.js';
+import type { SplitRule } from '@/types/rules.js';
 import { segmentPages } from './segmenter.js';
-import type { Page, SegmentationOptions, SplitRule } from './types.js';
 
 // Test Configuration
 

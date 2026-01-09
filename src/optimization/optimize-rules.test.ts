@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-
+import type { SplitRule } from '@/types/rules.js';
 import { optimizeRules } from './optimize-rules.js';
-import type { SplitRule } from './types.js';
 
 describe('optimizeRules', () => {
     describe('merging', () => {

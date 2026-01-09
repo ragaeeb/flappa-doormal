@@ -1,16 +1,5 @@
-import type { Page, SegmentationOptions } from './types.js';
-
-/**
- * A single replacement rule applied by `applyReplacements()` / `SegmentationOptions.replace`.
- *
- * Notes:
- * - `regex` is a raw JavaScript regex source string (no token expansion).
- * - Default flags are `gu` (global + unicode).
- * - If `flags` is provided, it is validated and `g` + `u` are always enforced.
- * - If `pageIds` is omitted, the rule applies to all pages.
- * - If `pageIds` is `[]`, the rule applies to no pages (rule is skipped).
- */
-export type ReplaceRule = NonNullable<SegmentationOptions['replace']>[number];
+import type { Page } from '@/types';
+import type { Replacement } from '@/types/options';
 
 const DEFAULT_REPLACE_FLAGS = 'gu';
 
@@ -34,7 +23,7 @@ const normalizeReplaceFlags = (flags?: string) => {
     return ['g', 'i', 'm', 's', 'y', 'u'].filter((c) => set.has(c)).join('');
 };
 
-const compileReplaceRules = (rules: ReplaceRule[]) =>
+const compileReplaceRules = (rules: Replacement[]) =>
     rules
         .filter((r) => !(r.pageIds && r.pageIds.length === 0))
         .map((r) => ({
@@ -43,7 +32,7 @@ const compileReplaceRules = (rules: ReplaceRule[]) =>
             replacement: r.replacement,
         }));
 
-export const applyReplacements = (pages: Page[], rules?: ReplaceRule[]) => {
+export const applyReplacements = (pages: Page[], rules?: Replacement[]) => {
     if (!rules?.length || !pages.length) {
         return pages;
     }

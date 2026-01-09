@@ -1,15 +1,14 @@
-import type { BreakpointRule, SplitRule } from './types.js';
+import type { BreakpointRule } from '@/types/breakpoints';
+import { PATTERN_TYPE_KEYS, type SplitRule } from '@/types/rules.js';
 
 export type DebugConfig = { includeBreakpoint: boolean; includeRule: boolean; metaKey: string } | null;
 
 export const resolveDebugConfig = (debug: unknown) => {
-    if (!debug) {
-        return null;
-    }
     if (debug === true) {
         return { includeBreakpoint: true, includeRule: true, metaKey: '_flappa' };
     }
-    if (typeof debug !== 'object') {
+
+    if (!debug || typeof debug !== 'object') {
         return null;
     }
 
@@ -19,16 +18,9 @@ export const resolveDebugConfig = (debug: unknown) => {
     return { includeBreakpoint, includeRule, metaKey: typeof metaKey === 'string' && metaKey ? metaKey : '_flappa' };
 };
 
-export const getRulePatternType = (rule: SplitRule) =>
-    'lineStartsWith' in rule
-        ? 'lineStartsWith'
-        : 'lineStartsAfter' in rule
-          ? 'lineStartsAfter'
-          : 'lineEndsWith' in rule
-            ? 'lineEndsWith'
-            : 'template' in rule
-              ? 'template'
-              : 'regex';
+export const getRulePatternType = (rule: SplitRule) => {
+    return PATTERN_TYPE_KEYS.find((key) => key in rule) ?? 'regex';
+};
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> =>
     Boolean(v) && typeof v === 'object' && !Array.isArray(v);
@@ -52,6 +44,20 @@ export const buildBreakpointDebugPatch = (breakpointIndex: number, rule: Breakpo
     breakpoint: {
         index: breakpointIndex,
         kind: rule.pattern === '' ? 'pageBoundary' : 'pattern',
-        pattern: rule.pattern,
+        pattern: rule.pattern ?? rule.regex,
+    },
+});
+
+export type ContentLengthSplitReason = 'whitespace' | 'unicode_boundary' | 'grapheme_cluster';
+
+export const buildContentLengthDebugPatch = (
+    maxContentLength: number,
+    actualLength: number,
+    splitReason: ContentLengthSplitReason = 'whitespace',
+) => ({
+    contentLengthSplit: {
+        actualLength,
+        maxContentLength,
+        splitReason,
     },
 });

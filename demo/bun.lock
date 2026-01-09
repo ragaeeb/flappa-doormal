@@ -116,7 +116,7 @@
 
     "fdir": ["fdir@6.5.0", "", { "peerDependencies": { "picomatch": "^3 || ^4" }, "optionalPeers": ["picomatch"] }, "sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg=="],
 
-    "flappa-doormal": ["flappa-doormal@2.13.0", "", {}, "sha512-2NVyYmrb4F+1uuBjk3iw3NC/mvHlchEBbSh5lM02Plfxwf+C03clA3z9v7GO6f14+qdVJoZGJEdA+UP/6okOug=="],
+    "flappa-doormal": ["flappa-doormal@2.13.1", "", {}, "sha512-Ja+brsgP+pVplFuBFXsYImlXVAKcCB9nSOOh/6gJMGNr9Ytx17RwKxQulrLu2mScxKz2eeWv+UZ5+I5rxilSag=="],
 
     "fsevents": ["fsevents@2.3.3", "", { "os": "darwin" }, "sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw=="],
 

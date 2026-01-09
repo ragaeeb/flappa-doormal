@@ -1,4 +1,4 @@
-import { PATTERN_TYPE_KEYS, type PatternTypeKey, type SplitRule } from './types.js';
+import { PATTERN_TYPE_KEYS, type PatternTypeKey, type SplitRule } from '@/types/rules';
 
 // Keys that support array patterns and can be merged
 const MERGEABLE_KEYS = new Set<PatternTypeKey>(['lineStartsWith', 'lineStartsAfter', 'lineEndsWith']);

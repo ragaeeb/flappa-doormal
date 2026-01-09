@@ -1,6 +1,6 @@
 // Repeating sequences analysis module
 
-import type { Page } from '../segmentation/types.js';
+import type { Page } from '@/types/index.js';
 import {
     buildTokenPriority,
     compileTokenRegexes,

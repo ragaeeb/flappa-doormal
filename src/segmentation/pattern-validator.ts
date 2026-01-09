@@ -5,8 +5,8 @@
  * for segmentation.
  */
 
+import type { SplitRule } from '@/types/rules.js';
 import { getAvailableTokens } from './tokens.js';
-import type { SplitRule } from './types.js';
 
 /**
  * Types of validation issues that can be detected.

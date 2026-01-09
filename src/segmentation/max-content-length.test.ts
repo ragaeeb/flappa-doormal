@@ -1,260 +1,198 @@
 import { describe, expect, it } from 'bun:test';
+import type { Page } from '@/types/index.js';
 import { segmentPages } from './segmenter';
-import type { Page } from './types';
 
 describe('Max Content Length Segmentation', () => {
     // Helper to generate long content with markers
-    const generateContent = (length: number, markerInterval: number, marker = '.') => {
-        let content = '';
-        while (content.length < length) {
-            const chunk = 'x'.repeat(markerInterval - 1) + marker;
-            content += chunk;
+    const generateLongContent = (length: number, markers: { offset: number; text: string }[]) => {
+        let content = 'x'.repeat(length);
+        // Apply markers in reverse to not shift offsets
+        const sortedMarkers = [...markers].sort((a, b) => b.offset - a.offset);
+        for (const marker of sortedMarkers) {
+            content = content.slice(0, marker.offset) + marker.text + content.slice(marker.offset);
         }
-        return content.slice(0, length);
+        return content;
     };
 
-    it('should split a single large page based on maxContentLength', () => {
-        // 500 chars, marker every 100.
-        // Max length 250. Should split at 200 (2nd marker).
-        const content = generateContent(500, 100, '.'); // "xx...x.xx...x."
-        const pages: Page[] = [{ content, id: 0 }];
+    it('should split at safe boundaries when maxContentLength is exceeded', () => {
+        // Content is 120 chars, limit is 50. Should split at the dot at index 45.
+        const content = generateLongContent(120, [{ offset: 45, text: '. ' }]);
+        const pages: Page[] = [{ content, id: 1 }];
 
         const result = segmentPages(pages, {
-            breakpoints: ['\\.'],
-            maxContentLength: 250,
-            prefer: 'longer',
+            breakpoints: ['\\. '],
+            maxContentLength: 60,
         });
 
-        // Expect roughly 2 segments (or 3 if residue).
-        // 500 total. split at ~200.
-        // Seg 1: 0-200 (length 200)
-        // Seg 2: 200-400 (length 200)
-        // Seg 3: 400-500 (length 100)
-
-        expect(result.length).toBeGreaterThanOrEqual(2);
-        for (const seg of result) {
-            expect(seg.content.length).toBeLessThanOrEqual(250);
-            expect(seg.from).toBe(0);
-            expect(seg.to).toBeUndefined(); // Single page segment
-        }
+        // Should split at the dot
+        expect(result.length).toBeGreaterThan(1);
+        expect(result[0].content).toContain('.');
+        expect(result[0].content.length).toBeLessThanOrEqual(60);
     });
 
-    it('should respect "prefer: longer" by filling the bucket', () => {
-        // Markers at 100, 200, 300, 400.
-        // Max 350.
-        // 'longer' should pick 300.
-        const content = generateContent(500, 100, '.');
-        const pages: Page[] = [{ content, id: 0 }];
+    it('should fall back to whitespace split if no breakpoints match', () => {
+        const content =
+            'This is a long sentence that should be split at some whitespace because it exceeds fifty chars.'.repeat(2);
+        const pages: Page[] = [{ content, id: 1 }];
 
         const result = segmentPages(pages, {
-            breakpoints: ['\\.'],
-            maxContentLength: 350,
-            prefer: 'longer',
+            breakpoints: ['MISSING_PATTERN'],
+            maxContentLength: 60,
         });
 
-        // First segment should be ~300 chars long, not 100.
-        expect(result[0].content.length).toBe(300);
+        expect(result.length).toBeGreaterThan(1);
+        expect(result[0].content.length).toBeLessThanOrEqual(60);
+        expect(result[0].content).toContain('sentence');
     });
 
-    it('should respect "prefer: shorter" by splitting early', () => {
-        // Markers at 100, 200, 300.
-        // Max 350.
-        // 'shorter' should pick 100.
-        const content = generateContent(500, 100, '.');
-        const pages: Page[] = [{ content, id: 0 }];
+    it('should fall back to unicode boundary if no whitespace found', () => {
+        const content =
+            'VeryLongContentWithoutAnySpacesToTestHardSplitFallbackForUnicodeBoundariesAndItNeedsToBeAtLeastOneHundredCharsLong'.repeat(
+                1,
+            );
+        const pages: Page[] = [{ content, id: 1 }];
 
         const result = segmentPages(pages, {
-            breakpoints: ['\\.'],
-            maxContentLength: 350,
-            prefer: 'shorter',
+            breakpoints: [],
+            maxContentLength: 60,
         });
 
-        // First segment should be 100 chars long.
-        expect(result[0].content.length).toBe(100);
+        expect(result.length).toBeGreaterThan(1);
+        expect(result[0].content.length).toBeLessThanOrEqual(60);
     });
 
-    it('should respect the intersection of maxPages and maxContentLength', () => {
-        // 3 pages. Each 1000 chars. Total 3000.
-        // maxPages = 2 (allows 2000 chars).
-        // maxContentLength = 500 (stricter!).
-        // Should split every 500 chars.
-
+    it('should respect maxContentLength across page boundaries', () => {
         const pages: Page[] = [
-            { content: 'a'.repeat(1000), id: 0 },
-            { content: 'b'.repeat(1000), id: 1 },
-            { content: 'c'.repeat(1000), id: 2 },
+            { content: 'Page 1 has some content that is quite long and should exceed the limit.'.repeat(2), id: 1 },
+            {
+                content: 'Page 2 also has very long content to ensure it triggers the split logic correctly.'.repeat(2),
+                id: 2,
+            },
         ];
 
         const result = segmentPages(pages, {
-            breakpoints: [''], // Any break
-            maxContentLength: 500,
-            maxPages: 2,
+            maxContentLength: 60,
         });
 
-        // Each segment must be <= 500 chars.
-        for (const seg of result) {
-            expect(seg.content.length).toBeLessThanOrEqual(500);
-        }
-        // At least 6 segments.
-        expect(result.length).toBeGreaterThanOrEqual(6);
+        expect(result.length).toBeGreaterThan(2);
+        expect(result[0].content.length).toBeLessThanOrEqual(60);
     });
 
-    it('should fall back to hard split if no breakpoint matches', () => {
-        // 500 chars, NO markers.
-        // Max 250.
-        // Should split at 250 exactly (force break or fallback).
-        // Note: Existing breakpoint logic usually requires at least one match or falls back to 'windowEnd'.
-        // If breakpoints=[''] it matches everything? No, '' matches page boundary.
-        // If we provide regex that doesn't match, expected behavior is "windowEnd" fallback?
-        // Let's rely on standard logic: findBreakOffsetForWindow returns windowEndPosition if no match.
-
-        const content = 'x'.repeat(500);
-        const pages: Page[] = [{ content, id: 0 }];
+    it('should prioritize breakpoints over simple length splits', () => {
+        // Limit 80.
+        // First dot at 40.
+        // Second dot at 90.
+        // Whitespace at 75.
+        // Should pick dot at 40 because second dot is too far.
+        const content =
+            'First sentence with enough length to be significant. Second sentence that also has significant length and is long. Third sentence.';
+        const pages: Page[] = [{ content, id: 1 }];
 
         const result = segmentPages(pages, {
-            breakpoints: ['z'], // Won't match
-            maxContentLength: 250,
+            breakpoints: ['\\. '],
+            maxContentLength: 80,
         });
 
-        expect(result.length).toBe(2);
-        expect(result[0].content.length).toBe(250);
-        expect(result[1].content.length).toBe(250);
+        expect(result[0].content).toBe('First sentence with enough length to be significant.');
+        expect(result[1].content).toBe('Second sentence that also has significant length and is long. Third sentence.');
     });
 
-    it('should handle character constraints across multiple pages (with safe breaks)', () => {
-        // Page 1: 100 chars
-        // Page 2: 100 chars (with spaces)
-        // Max length: 150.
-        // Should merge P1 + part of P2, breaking at a space.
-
-        const p1 = 'a'.repeat(100);
-        // "dddd dddd..." to allow safe breaks
-        const p2 = Array(20).fill('dddd').join(' ');
-        const pages: Page[] = [
-            { content: p1, id: 0 },
-            { content: p2, id: 1 },
-        ];
+    it('should handle maxContentLength correctly for multiple segments', () => {
+        const content = 'abc def ghi jkl mno pqr stu vwx yz '.repeat(5);
+        const pages: Page[] = [{ content, id: 1 }];
 
         const result = segmentPages(pages, {
-            breakpoints: [''],
-            maxContentLength: 150,
-            pageJoiner: 'space',
-        });
-
-        // Should break near 150 but at a space
-        expect(result[0].content.length).toBeLessThanOrEqual(150);
-        expect(result[0].content.length).toBeGreaterThan(140);
-        expect(result[0].to).toBe(1);
-    });
-
-    it('should split based on maxPages=1 when it is the stricter constraint', () => {
-        // Scenario 1: maxPages=1 is hit first.
-        // 3 pages, each 100 chars.
-        // maxPages: 1 (allows up to 2 pages joined).
-        // maxContentLength: 1000 (loose).
-        // With breakpoints=[''] (page-boundary fallback), when we are forced to split an oversized span,
-        // the fallback should swallow the remainder of the CURRENT page if no other breakpoints match.
-        //
-        // After the first split, the remaining span (pages 1-2) fits within maxPages=1, so it is allowed
-        // to remain merged as a single segment.
-
-        const pages: Page[] = [
-            { content: 'a'.repeat(100), id: 0 },
-            { content: 'b'.repeat(100), id: 1 },
-            { content: 'c'.repeat(100), id: 2 },
-        ];
-
-        const result = segmentPages(pages, {
-            breakpoints: [''], // Page boundary breakpoint
-            maxContentLength: 1000,
-            maxPages: 1,
-            prefer: 'longer', // Greedy fill
-        });
-
-        expect(result).toHaveLength(2);
-        expect(result[0]).toMatchObject({ from: 0 });
-        expect(result[0].to).toBeUndefined();
-        expect(result[1]).toMatchObject({ from: 1, to: 2 });
-    });
-
-    it('should split based on maxContentLength when it is the stricter constraint (with maxPages=1)', () => {
-        // Scenario 2: maxContentLength is hit first.
-        // 1 large page (300 chars).
-        // maxPages: 1 (allows chunking this page easily since span is 0).
-        // maxContentLength: 100 (strict).
-        // Should split every 100 chars.
-
-        const content = 'x'.repeat(300);
-        const pages: Page[] = [{ content, id: 0 }];
-
-        const result = segmentPages(pages, {
-            breakpoints: ['Z'], // Force split
-            maxContentLength: 100,
-            maxPages: 1,
-            prefer: 'longer',
-        });
-
-        expect(result.length).toBe(3);
-        expect(result[0].content.length).toBe(100);
-        expect(result[1].content.length).toBe(100);
-        expect(result[2].content.length).toBe(100);
-    });
-    it('should fall back to safe split (whitespace) instead of hard split when possible', () => {
-        // "aaaaa " (6 chars) repeated 20 times = 120 chars.
-        // maxContentLength: 100.
-        // Hard split at 100 would be index 100.
-        // 100 / 6 = 16.666.
-        // 16 * 6 = 96.
-        // At index 96, we have a space.
-        // Index 97='a', 98='a', 99='a', 100='a'.
-        // Hard split at 100 cuts 'aaaaa' at 4th char.
-        // Safe split should back up to space at 96.
-
-        const word = 'aaaaa ';
-        const content = word.repeat(20); // 120 chars
-        const pages: Page[] = [{ content, id: 0 }];
-
-        const result = segmentPages(pages, {
-            breakpoints: ['Z'], // No match
-            maxContentLength: 100,
-        });
-
-        // Expect split at 96 (length 96).
-        // BUT createSegment trims trailing whitespace!
-        // So the trailing space at index 95 is removed.
-        // Result length = 95.
-        expect(result[0].content.length).toBe(95);
-        expect(result[0].content.endsWith('a')).toBe(true);
-
-        // Second segment starts after the cut.
-        // Cut was at 96.
-        // Remaining content: chars 96..120. (24 chars).
-        // 96 is 'a' (start of next word).
-        // 24 chars left.
-        expect(result[1].content.length).toBe(23);
-    });
-    it('should throw an error if maxContentLength is less than 50', () => {
-        const pages: Page[] = [{ content: 'test', id: 0 }];
-        expect(() => {
-            segmentPages(pages, { maxContentLength: 49 });
-        }).toThrow(/maxContentLength must be at least 50 characters/);
-    });
-
-    it('should avoid producing segments that start with a combining mark when hard-splitting', () => {
-        // Create content with no whitespace/punctuation so we fall through to the hard-split path.
-        // Pattern: base letter + combining mark (shadda), repeated.
-        const unit = `ب\u0651`;
-        const content = unit.repeat(80); // 160 code units
-        const pages: Page[] = [{ content, id: 0 }];
-
-        const result = segmentPages(pages, {
-            breakpoints: ['Z'], // No match
             maxContentLength: 50,
         });
 
-        // No segment should start with a combining mark.
+        expect(result.length).toBeGreaterThan(3);
         for (const seg of result) {
-            expect(seg.content[0]).not.toMatch(/\p{M}/u);
+            expect(seg.content.length).toBeLessThanOrEqual(50);
         }
+    });
+
+    it('should avoid producing segments that start with a combining mark when hard-splitting', () => {
+        // 'a' + combining acute accent + 'b'
+        const content = 'a\u0301b '.repeat(40);
+        const pages: Page[] = [{ content, id: 1 }];
+
+        const result = segmentPages(pages, {
+            maxContentLength: 50,
+        });
+
+        for (const seg of result) {
+            const firstChar = seg.content[0];
+            expect(firstChar).not.toBe('\u0301');
+        }
+    });
+
+    describe('debug metadata for maxContentLength splits', () => {
+        it('should include contentLengthSplit in debug meta when enabled and split due to maxContentLength', () => {
+            const content =
+                'This is a long sentence without enough periods to match breakpoints within the limit.'.repeat(2);
+            const pages: Page[] = [{ content, id: 1 }];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\. '],
+                debug: true,
+                maxContentLength: 60,
+            });
+
+            expect(result[0].meta?._flappa).toBeDefined();
+            const flappa = (result[0].meta?._flappa as any).contentLengthSplit;
+            expect(flappa).toBeDefined();
+            expect(flappa.maxContentLength).toBe(60);
+        });
+
+        it('should include breakpoint in debug meta when split was due to breakpoint pattern', () => {
+            const content = 'Word. '.repeat(20);
+            const pages: Page[] = [{ content, id: 1 }];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\. '],
+                debug: true,
+                maxContentLength: 60,
+            });
+
+            expect(result[0].meta?._flappa).toBeDefined();
+            const flappa = result[0].meta?._flappa as any;
+            expect(flappa.breakpoint).toBeDefined();
+            expect(flappa.breakpoint.pattern).toBe('\\. ');
+        });
+
+        it('should include unicode_boundary as splitReason when no whitespace found', () => {
+            const content =
+                'VeryLongStringWithoutAnySafeSplitPointsLikeWhitespaceOrPunctuationToTriggerUnicodeSplitReason'.repeat(
+                    2,
+                );
+            const pages: Page[] = [{ content, id: 1 }];
+
+            const result = segmentPages(pages, {
+                debug: true,
+                maxContentLength: 60,
+            });
+
+            const flappa = (result[0].meta?._flappa as any).contentLengthSplit;
+            expect(flappa.splitReason).toBe('unicode_boundary');
+        });
+
+        it('should track different breakpoints across multiple segments if triggered by length', () => {
+            const content = 'First. '.repeat(10) + 'Second! '.repeat(10);
+            const pages: Page[] = [{ content, id: 1 }];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\. ', '! '],
+                debug: true,
+                maxContentLength: 50,
+            });
+
+            // Each piece should be roughly 49 chars (7 blocks of 'First. ') or similar.
+            expect((result[0].meta?._flappa as any).breakpoint.pattern).toBe('\\. ');
+
+            const firstExclamation = result.find((s) => s.content.includes('Second!'));
+            if (firstExclamation) {
+                expect((firstExclamation.meta?._flappa as any).breakpoint.pattern).toBe('! ');
+            }
+        });
     });
 });

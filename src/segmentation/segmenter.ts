@@ -1,22 +1,24 @@
+import { applyReplacements } from '@/preprocessing/replace.js';
+import type { Page, Segment } from '@/types';
+import type { Logger, SegmentationOptions } from '@/types/options.js';
+import type { SplitRule } from '@/types/rules.js';
+import { normalizeLineEndings } from '@/utils/textUtils.js';
+import type { PageBoundary, PageMap, SplitPoint } from '../types/segmenter.js';
 import { applyBreakpoints } from './breakpoint-processor.js';
 import { resolveDebugConfig } from './debug-meta.js';
 import { anyRuleAllowsId } from './match-utils.js';
-import { applyReplacements } from './replace.js';
 import { processBreakpointPattern, processPattern } from './rule-regex.js';
 import {
     collectFastFuzzySplitPoints,
     createPageStartGuardChecker,
     partitionRulesForMatching,
 } from './segmenter-rule-utils.js';
-import type { PageBoundary, PageMap, SplitPoint } from './segmenter-types.js';
 import {
     applyOccurrenceFilter,
     buildRuleRegexes,
     processCombinedMatches,
     processStandaloneRule,
 } from './split-point-helpers.js';
-import { normalizeLineEndings } from './textUtils.js';
-import type { Logger, Page, Segment, SegmentationOptions, SplitRule } from './types.js';
 
 /**
  * Builds a concatenated content string and page mapping from input pages.
@@ -309,7 +311,8 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
         throw new Error(`maxContentLength must be at least 50 characters.`);
     }
 
-    const maxPages = options.maxPages ?? (maxContentLength ? Number.MAX_SAFE_INTEGER : 0);
+    const maxPages = options.maxPages ?? Number.MAX_SAFE_INTEGER;
+    const hasLimits = options.maxPages !== undefined || maxContentLength !== undefined;
     const debug = resolveDebugConfig((options as any).debug);
     const debugMetaKey = debug?.includeRule ? debug.metaKey : undefined;
 
@@ -340,7 +343,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
 
     segments = ensureFallbackSegment(segments, processedPages, normalizedContent, pageJoiner);
 
-    if ((maxPages >= 0 || (maxContentLength && maxContentLength > 0)) && breakpoints.length) {
+    if (hasLimits) {
         logger?.debug?.('[segmenter] applying breakpoints to oversized segments');
         const result = applyBreakpoints(
             segments,

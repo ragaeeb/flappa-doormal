@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
+import type { SplitRule } from '@/types/rules.js';
+import type { PageMap } from '@/types/segmenter.js';
 import {
     collectFastFuzzySplitPoints,
     createPageStartGuardChecker,
     partitionRulesForMatching,
 } from './segmenter-rule-utils';
-import type { PageMap } from './segmenter-types';
-import type { SplitRule } from './types';
 
 const makePageMap = (pages: Array<{ id: number; content: string }>): { matchContent: string; pageMap: PageMap } => {
     const boundaries: PageMap['boundaries'] = [];

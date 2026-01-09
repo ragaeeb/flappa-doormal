@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { Page } from '../segmentation/types.js';
+import type { Page } from '@/types/index.js';
 import { analyzeCommonLineStarts } from './line-starts.js';
 
 describe('analyzeCommonLineStarts', () => {

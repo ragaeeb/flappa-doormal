@@ -1,5 +1,5 @@
+import type { SplitRule } from '@/types/rules.js';
 import { isPageExcluded } from './breakpoint-utils.js';
-import type { SplitRule } from './types.js';
 
 /**
  * Result of a regex match with position and optional capture information.

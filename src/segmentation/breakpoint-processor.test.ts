@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import type { Segment } from '@/types/index.js';
 import { applyBreakpoints, computeNextFromIdx, computeWindowEndIdx } from './breakpoint-processor.js';
 import type { NormalizedPage } from './breakpoint-utils.js';
-import type { Segment } from './types.js';
 
 describe('breakpoint-processor', () => {
     describe('computeWindowEndIdx', () => {

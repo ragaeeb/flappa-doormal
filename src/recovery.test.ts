@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import { segmentPages } from '@/segmentation/segmenter.js';
+import type { Page } from '@/types/index.js';
+import type { SegmentationOptions } from '@/types/options.js';
 import { recoverMistakenLineStartsAfterMarkers } from './recovery';
-import { segmentPages } from './segmentation/segmenter';
-import type { Page, SegmentationOptions } from './segmentation/types';
 
 describe('marker recovery (rerun-only MVP)', () => {
     it('baseline: lineStartsAfter strips marker (data loss)', () => {

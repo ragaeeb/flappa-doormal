@@ -5,9 +5,9 @@
  * independent unit testing of regex compilation and token expansion behavior.
  */
 
-import { makeDiacriticInsensitive } from './fuzzy.js';
-import { escapeTemplateBrackets, expandTokensWithCaptures, shouldDefaultToFuzzy } from './tokens.js';
-import type { SplitRule } from './types.js';
+import type { SplitRule } from '@/types/rules.js';
+import { escapeTemplateBrackets, makeDiacriticInsensitive } from '@/utils/textUtils.js';
+import { expandTokensWithCaptures, shouldDefaultToFuzzy } from './tokens.js';
 
 /**
  * Result of processing a pattern with token expansion and optional fuzzy matching.

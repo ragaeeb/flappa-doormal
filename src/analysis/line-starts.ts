@@ -1,7 +1,7 @@
 // Line-starts analysis module
 
-import { normalizeLineEndings } from '../segmentation/textUtils.js';
-import type { Page } from '../segmentation/types.js';
+import type { Page } from '@/types/index.js';
+import { normalizeLineEndings } from '@/utils/textUtils.js';
 import {
     appendWs,
     buildTokenPriority,

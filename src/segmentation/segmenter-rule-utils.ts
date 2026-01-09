@@ -1,8 +1,8 @@
+import type { SplitRule } from '@/types/rules.js';
+import type { PageMap, SplitPoint } from '@/types/segmenter.js';
 import { isPageExcluded } from './breakpoint-utils.js';
 import { compileFastFuzzyTokenRule, type FastFuzzyTokenRule, matchFastFuzzyTokenAt } from './fast-fuzzy-prefix.js';
 import { extractNamedCaptureNames, hasCapturingGroup, processPattern } from './rule-regex.js';
-import type { PageMap, SplitPoint } from './segmenter-types.js';
-import type { SplitRule } from './types.js';
 
 export type FastFuzzyRule = {
     compiled: FastFuzzyTokenRule;

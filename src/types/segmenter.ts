@@ -58,5 +58,3 @@ export type SplitPoint = {
      */
     contentStartOffset?: number;
 };
-
-

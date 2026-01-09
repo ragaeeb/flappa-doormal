@@ -1,33 +1,3 @@
-// Auto-escaping for template patterns
-
-/**
- * Escapes regex metacharacters (parentheses and brackets) in template patterns,
- * but preserves content inside `{{...}}` token delimiters.
- *
- * This allows users to write intuitive patterns like `({{harf}}):` instead of
- * the verbose `\\({{harf}}\\):`. The escaping is applied BEFORE token expansion,
- * so tokens like `{{harf}}` which expand to `[أ-ي]` work correctly.
- *
- * @param pattern - Template pattern that may contain `()[]` and `{{tokens}}`
- * @returns Pattern with `()[]` escaped outside of `{{...}}` delimiters
- *
- * @example
- * escapeTemplateBrackets('({{harf}}): ')
- * // → '\\({{harf}}\\): '
- *
- * @example
- * escapeTemplateBrackets('[{{raqm}}] ')
- * // → '\\[{{raqm}}\\] '
- *
- * @example
- * escapeTemplateBrackets('{{harf}}')
- * // → '{{harf}}' (unchanged - no brackets outside tokens)
- */
-export const escapeTemplateBrackets = (pattern: string) =>
-    pattern.replace(/(\{\{[^}]*\}\})|([()[\]])/g, (_match, token, bracket) => token || `\\${bracket}`);
-
-// Base tokens - raw regex patterns (no template references)
-
 /**
  * Base token definitions mapping human-readable token names to regex patterns.
  *
@@ -43,7 +13,9 @@ export const escapeTemplateBrackets = (pattern: string) =>
 // - Single-letter codes must NOT be followed by Arabic diacritics (\u064B-\u0652, \u0670) or letters (أ-ي),
 //   otherwise we'd incorrectly match the first letter of Arabic words like عَن as rumuz ع.
 const RUMUZ_SINGLE_LETTER = '[خرزيمنصسدفلتقع](?![\\u064B-\\u0652\\u0670أ-ي])';
+
 const RUMUZ_FOUR = '(?<![\\u0660-\\u0669])٤(?![\\u0660-\\u0669])';
+
 // IMPORTANT: order matters. Put longer/more specific codes before shorter ones.
 const RUMUZ_ATOMS: string[] = [
     // Multi-letter word codes (must NOT be followed by diacritics or letters)
@@ -78,191 +50,57 @@ const RUMUZ_ATOMS: string[] = [
 ];
 
 const RUMUZ_ATOM = `(?:${RUMUZ_ATOMS.join('|')})`;
+
 const RUMUZ_BLOCK = `${RUMUZ_ATOM}(?:\\s+${RUMUZ_ATOM})*`;
 
 const BASE_TOKENS: Record<string, string> = {
-    /**
-     * Chapter marker - Arabic word for "chapter" (باب).
-     *
-     * Commonly used in hadith collections to mark chapter divisions.
-     *
-     * @example 'باب ما جاء في الصلاة' (Chapter on what came regarding prayer)
-     */
+    /** Chapter marker (باب). */
     bab: 'باب',
 
-    /**
-     * Basmala pattern - Arabic invocation "In the name of Allah" (بسم الله).
-     *
-     * Matches the beginning of the basmala formula, commonly appearing
-     * at the start of chapters, books, or documents.
-     *
-     * @example 'بسم الله الرحمن الرحيم' (In the name of Allah, the Most Gracious, the Most Merciful)
-     */
+    /** Basmala (بسم الله). Also matches ﷽. */
     basmalah: ['بسم الله', '﷽'].join('|'),
 
-    /**
-     * Bullet point variants - common bullet characters.
-     *
-     * Character class matching: `•` (bullet), `*` (asterisk), `°` (degree).
-     *
-     * @example '• First item'
-     */
+    /** Bullet point variants: `•`, `*`, `°`. */
     bullet: '[•*°]',
 
-    /**
-     * Dash variants - various dash and separator characters.
-     *
-     * Character class matching:
-     * - `-` (hyphen-minus U+002D)
-     * - `–` (en-dash U+2013)
-     * - `—` (em-dash U+2014)
-     * - `ـ` (tatweel U+0640, Arabic elongation character)
-     *
-     * @example '٦٦٩٦ - حدثنا' or '٦٦٩٦ ـ حدثنا'
-     */
+    /** Dash variants: `-` (U+002D), `–` (U+2013), `—` (U+2014), `ـ` (tatweel U+0640). */
     dash: '[-–—ـ]',
 
-    /**
-     * Section marker - Arabic word for "section/issue".
-     * Commonly used for fiqh books.
-     */
+    /** Section marker (فصل / مسألة). */
     fasl: ['مسألة', 'فصل'].join('|'),
 
-    /**
-     * Single Arabic letter - matches any Arabic letter character.
-     *
-     * Character range from أ (alef with hamza) to ي (ya).
-     * Does NOT include diacritics (harakat/tashkeel).
-     *
-     * @example '{{harf}}' matches 'ب' in 'باب'
-     */
+    /** Single Arabic letter (أ-ي). Does NOT include diacritics. */
     harf: '[أ-ي]',
 
-    /**
-     * One or more Arabic letters separated by spaces - matches sequences like "د ت س ي ق".
-     *
-     * Useful for matching abbreviation *lists* that are encoded as single-letter tokens
-     * separated by spaces.
-     *
-     * IMPORTANT:
-     * - This token intentionally matches **single letters only** (with optional spacing).
-     * - It does NOT match multi-letter rumuz like "سي" or "خت". For those, use `{{rumuz}}`.
-     *
-     * @example '{{harfs}}' matches 'د ت س ي ق' in '١١١٨ د ت س ي ق: حجاج'
-     * @example '{{raqms:num}} {{harfs}}:' matches number + abbreviations + colon
-     */
-    // Example matches: "د ت س ي ق"
-    // Example non-matches: "وعلامة ...", "في", "لا", "سي", "خت"
+    /** One or more single Arabic letters separated by spaces. For multi-letter codes use `{{rumuz}}`. */
     harfs: '[أ-ي](?:\\s+[أ-ي])*',
 
-    /**
-     * Book marker - Arabic word for "book" (كتاب).
-     *
-     * Commonly used in hadith collections to mark major book divisions.
-     *
-     * @example 'كتاب الإيمان' (Book of Faith)
-     */
+    /** Book marker (كتاب). */
     kitab: 'كتاب',
 
-    /**
-     * Naql (transmission) phrases - common hadith transmission phrases.
-     *
-     * Alternation of Arabic phrases used to indicate narration chains:
-     * - حدثنا (he narrated to us)
-     * - أخبرنا (he informed us)
-     * - حدثني (he narrated to me)
-     * - وحدثنا (and he narrated to us)
-     * - أنبأنا (he reported to us)
-     * - سمعت (I heard)
-     *
-     * @example '{{naql}}' matches any of the above phrases
-     */
+    /** Hadith transmission phrases (حدثنا, أخبرنا, حدثني, etc.). */
     naql: ['حدثني', 'وأخبرنا', 'حدثنا', 'سمعت', 'أنبأنا', 'وحدثنا', 'أخبرنا', 'وحدثني', 'وحدثنيه'].join('|'),
 
-    /**
-     * Single ASCII digit - matches one digit (0-9).
-     *
-     * @example '{{num}}' matches '5' in '5 - '
-     */
+    /** Single ASCII digit (0-9). */
     num: '\\d',
 
-    /**
-     * One or more ASCII digits - matches digit sequences (0-9)+.
-     *
-     * @example '{{nums}}' matches '123' in '123 - '
-     */
+    /** One or more ASCII digits (0-9)+. */
     nums: '\\d+',
 
-    /**
-     * Single Arabic-Indic digit - matches one digit (٠-٩).
-     *
-     * Unicode range: U+0660 to U+0669 (Arabic-Indic digits).
-     * Use `{{raqms}}` for one or more digits.
-     *
-     * @example '{{raqm}}' matches '٥' in '٥ - '
-     */
+    /** Single Arabic-Indic digit (٠-٩, U+0660-U+0669). */
     raqm: '[\\u0660-\\u0669]',
 
-    /**
-     * One or more Arabic-Indic digits - matches digit sequences (٠-٩)+.
-     *
-     * Unicode range: U+0660 to U+0669 (Arabic-Indic digits).
-     * Commonly used for hadith numbers, verse numbers, etc.
-     *
-     * @example '{{raqms}}' matches '٦٦٩٦' in '٦٦٩٦ - حدثنا'
-     */
+    /** One or more Arabic-Indic digits (٠-٩)+. */
     raqms: '[\\u0660-\\u0669]+',
 
-    /**
-     * Rumuz (source abbreviations) used in rijāl / takhrīj texts.
-     *
-     * This token matches the known abbreviation set used to denote sources like:
-     * - All six books: (ع)
-     * - The four Sunan: (٤)
-     * - Bukhari: خ / خت / خغ / بخ / عخ / ز / ي
-     * - Muslim: م / مق / مت
-     * - Nasa'i: س / ن / ص / عس / سي / كن
-     * - Abu Dawud: د / مد / قد / خد / ف / فد / ل / دل / كد / غد / صد
-     * - Tirmidhi: ت / تم
-     * - Ibn Majah: ق / فق
-     *
-     * Notes:
-     * - Order matters: longer alternatives must come before shorter ones (e.g., "خد" before "خ")
-     * - This token matches a rumuz *block*: one or more codes separated by whitespace
-     *   (e.g., "خ سي", "خ فق", "خت ٤", "د ت سي ق")
-     */
+    /** Rijāl/takhrīj source abbreviations. Matches one or more codes separated by whitespace. */
     rumuz: RUMUZ_BLOCK,
 
-    /**
-     * Punctuation characters.
-     * Use {{tarqim}} which is especially useful when splitting using split: 'after' on punctuation marks.
-     */
+    /** Arabic/common punctuation: `.`, `!`, `?`, `؟`, `؛`. */
     tarqim: '[.!?؟؛]',
 };
 
-// Token constants for client use
-
-/**
- * Pre-defined token constants for use in patterns.
- *
- * Using these constants instead of raw `{{token}}` strings provides:
- * - Autocompletion in IDEs
- * - Compile-time typo detection
- * - Easier refactoring
- *
- * @example
- * // Instead of:
- * { lineStartsWith: ['{{kitab}}', '{{bab}}'] }
- *
- * // Use:
- * import { Token } from 'flappa-doormal';
- * { lineStartsWith: [Token.KITAB, Token.BAB] }
- *
- * @example
- * // With named captures - use the helper function:
- * import { Token, withCapture } from 'flappa-doormal';
- * { lineStartsAfter: [withCapture(Token.RAQMS, 'num') + ' ' + Token.DASH + ' '] }
- */
+/** Pre-defined token constants for use in patterns. */
 export const Token = {
     /** Chapter marker - باب */
     BAB: '{{bab}}',
@@ -303,24 +141,7 @@ export const Token = {
  */
 export type TokenKey = keyof typeof Token;
 
-/**
- * Wraps a token with a named capture.
- *
- * @param token - Token constant (e.g., Token.RAQMS)
- * @param name - Capture name for metadata extraction
- * @returns Token string with capture syntax (e.g., '{{raqms:num}}')
- *
- * @example
- * import { Token, withCapture } from 'flappa-doormal';
- *
- * // Create a pattern that captures the hadith number
- * const pattern = withCapture(Token.RAQMS, 'hadithNum') + ' ' + Token.DASH + ' ';
- * // Result: '{{raqms:hadithNum}} {{dash}} '
- *
- * // Use in a rule
- * { lineStartsAfter: [pattern], split: 'at' }
- * // segment.meta.hadithNum will contain the matched number
- */
+/** Wraps a token constant with a named capture: `{{token}}` → `{{token:name}}`. */
 export const withCapture = (token: string, name: string): string => {
     // Extract token name from {{token}} format
     const match = token.match(/^\{\{(\w+)\}\}$/);
@@ -331,57 +152,13 @@ export const withCapture = (token: string, name: string): string => {
     return `{{${match[1]}:${name}}}`;
 };
 
-// Composite tokens - templates that reference base tokens
-// These are pre-expanded at module load time for performance
-
-/**
- * Composite token definitions using template syntax.
- *
- * These tokens reference base tokens using `{{token}}` syntax and are
- * automatically expanded to their final regex patterns at module load time.
- *
- * This provides better abstraction - if base tokens change, composites
- * automatically update on the next build.
- *
- * @internal
- */
+/** Composite tokens that reference base tokens. Pre-expanded at load time. @internal */
 const COMPOSITE_TOKENS: Record<string, string> = {
-    /**
-     * Numbered hadith marker - common format for hadith numbering.
-     *
-     * Matches patterns like "٢٢ - " (number, space, dash, space).
-     * This is the most common format in hadith collections.
-     *
-     * Use with `lineStartsAfter` to cleanly extract hadith content:
-     * ```typescript
-     * { lineStartsAfter: ['{{numbered}}'], split: 'at' }
-     * ```
-     *
-     * For capturing the hadith number, use explicit capture syntax:
-     * ```typescript
-     * { lineStartsAfter: ['{{raqms:hadithNum}} {{dash}} '], split: 'at' }
-     * ```
-     *
-     * @example '٢٢ - حدثنا' matches, content starts after '٢٢ - '
-     * @example '٦٦٩٦ – أخبرنا' matches (with en-dash)
-     */
+    /** Common hadith numbering format: Arabic-Indic digits + dash + space. */
     numbered: '{{raqms}} {{dash}} ',
 };
 
-/**
- * Expands any *composite* tokens (like `{{numbered}}`) into their underlying template form
- * (like `{{raqms}} {{dash}} `).
- *
- * This is useful when you want to take a signature produced by `analyzeCommonLineStarts()`
- * and turn it into an editable template where you can add named captures, e.g.:
- *
- * - `{{numbered}}` → `{{raqms}} {{dash}} `
- * - then: `{{raqms:num}} {{dash}} ` to capture the number
- *
- * Notes:
- * - This only expands the plain `{{token}}` form (not `{{token:name}}`).
- * - Expansion is repeated a few times to support nested composites.
- */
+/** Expands composite tokens (e.g. `{{numbered}}`) to their underlying template form. */
 export const expandCompositeTokensInTemplate = (template: string) => {
     let out = template;
     for (let i = 0; i < 10; i++) {
@@ -513,14 +290,13 @@ const splitTemplateIntoSegments = (query: string) => {
     const segments: TemplateSegment[] = [];
     let lastIndex = 0;
     TOKEN_WITH_CAPTURE_REGEX.lastIndex = 0;
-    let match: RegExpExecArray | null;
 
-    while ((match = TOKEN_WITH_CAPTURE_REGEX.exec(query)) !== null) {
-        if (match.index > lastIndex) {
+    for (const match of query.matchAll(TOKEN_WITH_CAPTURE_REGEX)) {
+        if (match.index! > lastIndex) {
             segments.push({ type: 'text', value: query.slice(lastIndex, match.index) });
         }
         segments.push({ type: 'token', value: match[0] });
-        lastIndex = match.index + match[0].length;
+        lastIndex = match.index! + match[0].length;
     }
 
     if (lastIndex < query.length) {
@@ -827,7 +603,7 @@ export const applyTokenMappings = (template: string, mappings: TokenMapping[]): 
  * stripTokenMappings('{{raqms:num}} {{dash}}')
  * // → '{{raqms}} {{dash}}'
  */
-export const stripTokenMappings = (template: string): string => {
+export const stripTokenMappings = (template: string) => {
     // Match {{token:name}} and replace with {{token}}
     return template.replace(/\{\{([^:}]+):[^}]+\}\}/g, '{{$1}}');
 };

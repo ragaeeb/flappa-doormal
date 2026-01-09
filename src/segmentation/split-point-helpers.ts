@@ -3,6 +3,9 @@
  * Handles combined regex matching and split point creation.
  */
 
+import type { Logger } from '@/types/options.js';
+import type { SplitRule } from '@/types/rules.js';
+import type { PageMap, SplitPoint } from '../types/segmenter.js';
 import { isPageExcluded } from './breakpoint-utils.js';
 import { buildRuleDebugPatch, mergeDebugIntoMeta } from './debug-meta.js';
 import {
@@ -12,8 +15,6 @@ import {
     type MatchResult,
 } from './match-utils.js';
 import { buildRuleRegex, type RuleRegex } from './rule-regex.js';
-import type { PageMap, SplitPoint } from './segmenter-types.js';
-import type { Logger, SplitRule } from './types.js';
 
 // Maximum iterations before throwing to prevent infinite loops
 const MAX_REGEX_ITERATIONS = 100000;
@@ -133,8 +134,6 @@ export const buildRuleRegexes = (combinableRules: CombinableRule[]) =>
         const built = buildRuleRegex(rule, prefix);
         return { ...built, prefix, source: `(?<${prefix}>${built.regex.source})` };
     });
-
-// Standalone rule processing
 
 export const processStandaloneRule = (
     rule: SplitRule,

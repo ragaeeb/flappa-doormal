@@ -117,6 +117,76 @@ Replace regex with readable tokens:
 | `{{bab}}` | "باب" (chapter) | `باب` |
 | `{{basmalah}}` | "بسم الله" | `بسم الله` |
 
+#### Token Details
+
+<details>
+<summary><b>Structural markers</b></summary>
+
+- **`{{kitab}}`** – Matches "كتاب" (Book). Used in hadith collections to mark major book divisions. Example: `كتاب الإيمان` (Book of Faith).
+- **`{{bab}}`** – Matches "باب" (Chapter). Example: `باب ما جاء في الصلاة` (Chapter on what came regarding prayer).
+- **`{{fasl}}`** – Matches "فصل" or "مسألة" (Section/Issue). Common in fiqh books.
+- **`{{basmalah}}`** – Matches "بسم الله" or "﷽". Commonly appears at the start of chapters, books, or documents.
+
+</details>
+
+<details>
+<summary><b>Transmission phrases (<code>naql</code>)</b></summary>
+
+**`{{naql}}`** matches common hadith transmission phrases:
+- حدثنا (he narrated to us)
+- أخبرنا (he informed us)
+- حدثني (he narrated to me)
+- وحدثنا (and he narrated to us)
+- أنبأنا (he reported to us)
+- سمعت (I heard)
+
+</details>
+
+<details>
+<summary><b>Source abbreviations (<code>rumuz</code>)</b></summary>
+
+**`{{rumuz}}`** matches rijāl/takhrīj source abbreviations used in narrator biography books:
+- **All six books**: ع
+- **The four Sunan**: ٤
+- **Bukhari**: خ / خت / خغ / بخ / عخ / ز / ي
+- **Muslim**: م / مق / مت
+- **Nasa'i**: س / ن / ص / عس / سي / كن
+- **Abu Dawud**: د / مد / قد / خد / ف / فد / ل / دل / كد / غد / صد
+- **Tirmidhi**: ت / تم
+- **Ibn Majah**: ق / فق
+
+Matches blocks of codes separated by whitespace (e.g., `خ سي`, `خ فق`, `خت ٤`, `د ت سي ق`).
+
+> **Note**: Single-letter rumuz like `ع` are only matched when they appear as standalone codes, not as the first letter of words like `عَن`.
+
+</details>
+
+<details>
+<summary><b>Digits</b></summary>
+
+| Token | Matches | Example |
+|-------|---------|---------|
+| `{{raqms}}` | One or more Arabic-Indic digits (٠-٩) | `٦٦٩٦` in `٦٦٩٦ - حدثنا` |
+| `{{raqm}}` | Single Arabic-Indic digit | `٥` |
+| `{{nums}}` | One or more ASCII digits (0-9) | `123` |
+| `{{num}}` | Single ASCII digit | `5` |
+| `{{numbered}}` | Common hadith format: `{{raqms}} {{dash}} ` | `٢٢ - حدثنا` |
+
+</details>
+
+<details>
+<summary><b>Dash variants</b></summary>
+
+**`{{dash}}`** matches:
+- `-` (hyphen-minus U+002D)
+- `–` (en-dash U+2013)
+- `—` (em-dash U+2014)
+- `ـ` (tatweel U+0640, Arabic elongation character)
+
+Example: `٦٦٩٦ - حدثنا` or `٦٦٩٦ ـ حدثنا`
+
+</details>
+
 #### Token Constants (TypeScript)
 
 For better IDE support, use the `Token` constants instead of raw strings:
@@ -139,6 +209,7 @@ const pattern = withCapture(Token.RAQMS, 'hadithNum') + ' ' + Token.DASH + ' ';
 ```
 
 Available constants: `Token.BAB`, `Token.BASMALAH`, `Token.BULLET`, `Token.DASH`, `Token.FASL`, `Token.HARF`, `Token.HARFS`, `Token.KITAB`, `Token.NAQL`, `Token.NUM`, `Token.NUMS`, `Token.NUMBERED`, `Token.RAQM`, `Token.RAQMS`, `Token.RUMUZ`, `Token.TARQIM`
+
 
 ### 2. Named Capture Groups
 
@@ -305,7 +376,7 @@ Pass an optional `logger` to trace segmentation decisions or enable `debug` to a
 ```typescript
 const segments = segmentPages(pages, {
   rules: [...],
-  debug: true, // Attaches .meta.debug with regex and match indices
+  debug: true, // Enables detailed match metadata
   logger: {
     debug: (msg, data) => console.log(`[DEBUG] ${msg}`, data),
     info: (msg, data) => console.info(`[INFO] ${msg}`, data),
@@ -314,6 +385,61 @@ const segments = segmentPages(pages, {
   }
 });
 ```
+
+#### Debug Metadata (`_flappa`)
+
+When `debug: true` is enabled, the library attaches a `_flappa` object to each segment's `meta` property. This is extremely useful for understanding exactly why a segment was created and which pattern matched.
+
+The metadata includes different fields based on the split reason:
+
+**1. Rule-based Splits**
+If a segment was created by one of your `rules`:
+```json
+{
+  "meta": {
+    "_flappa": {
+      "rule": {
+        "index": 0,                // Index of the rule in your rules array
+        "patternType": "lineStartsWith" // The type of pattern that matched
+      }
+    }
+  }
+}
+```
+
+**2. Breakpoint-based Splits**
+If a segment was created by a `breakpoint` pattern (e.g. because it exceeded `maxPages` or `maxContentLength`):
+```json
+{
+  "meta": {
+    "_flappa": {
+      "breakpoint": {
+        "index": 0,         // Index of the breakpoint in your array
+        "pattern": "\\.",   // The pattern that matched
+        "kind": "pattern"   // "pattern" or "regex"
+      }
+    }
+  }
+}
+```
+
+**3. Safety Fallback Splits (`maxContentLength`)**
+If no rule or breakpoint matched and the library was forced to perform a safety fallback split:
+```json
+{
+  "meta": {
+    "_flappa": {
+      "contentLengthSplit": {
+        "maxContentLength": 5000,
+        "splitReason": "whitespace" // "whitespace", "unicode_boundary", or "grapheme_cluster"
+      }
+    }
+  }
+}
+```
+*   `whitespace`: Found a safe space/newline to split at.
+*   `unicode_boundary`: No whitespace found, split at a safe character boundary (avoiding surrogate pairs).
+*   `grapheme_cluster`: Split at a grapheme boundary (avoiding diacritic/ZWJ corruption).
 
 ### 10. Page Joiners
 

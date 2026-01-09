@@ -1,8 +1,10 @@
-import { applyReplacements } from './segmentation/replace.js';
+import type { Page, Segment } from '@/types/index.js';
+import type { SegmentationOptions } from '@/types/options.js';
+import type { SplitRule } from '@/types/rules.js';
+import { applyReplacements } from './preprocessing/replace.js';
 import { buildRuleRegex } from './segmentation/rule-regex.js';
 import { segmentPages } from './segmentation/segmenter.js';
-import { normalizeLineEndings } from './segmentation/textUtils.js';
-import type { Page, Segment, SegmentationOptions, SplitRule } from './segmentation/types.js';
+import { normalizeLineEndings } from './utils/textUtils.js';
 
 export type MarkerRecoverySelector =
     | { type: 'rule_indices'; indices: number[] }

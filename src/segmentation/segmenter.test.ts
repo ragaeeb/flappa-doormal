@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-
+import type { Page } from '@/types/index.js';
+import type { SplitRule } from '@/types/rules.js';
 import { FAST_PATH_THRESHOLD } from './breakpoint-constants';
 import { dedupeSplitPoints, ensureFallbackSegment, segmentPages } from './segmenter';
-import type { Page, SplitRule } from './types';
 
 describe('segmenter', () => {
     describe('dedupeSplitPoints', () => {
@@ -814,6 +814,44 @@ describe('segmenter', () => {
                 expect(result).toHaveLength(2);
                 expect((result[0].meta as any)?._flappa?.breakpoint?.index).toBe(0);
                 expect((result[1].meta as any)?._flappa?.breakpoint?.index).toBe(0);
+            });
+
+            it('should track which rule triggered each segment when multiple rules are used', () => {
+                const pages: Page[] = [{ content: '## Chapter 1\nContent one\n--- Section A\nMore content', id: 1 }];
+                const rules: SplitRule[] = [
+                    { lineStartsWith: ['## '], meta: { type: 'chapter' } },
+                    { lineStartsWith: ['--- '], meta: { type: 'section' } },
+                ];
+
+                const result = segmentPages(pages, { debug: true, rules } as any);
+
+                expect(result).toHaveLength(2);
+
+                // First segment triggered by rule 0 (chapter)
+                expect(result[0].meta?.type).toBe('chapter');
+                expect((result[0].meta as any)?._flappa?.rule).toEqual({ index: 0, patternType: 'lineStartsWith' });
+
+                // Second segment triggered by rule 1 (section)
+                expect(result[1].meta?.type).toBe('section');
+                expect((result[1].meta as any)?._flappa?.rule).toEqual({ index: 1, patternType: 'lineStartsWith' });
+            });
+
+            it('should show different patternTypes for different rule types', () => {
+                const pages: Page[] = [{ content: 'كتاب الإيمان\nContent here\n٤٢ - Second item', id: 1 }];
+                const rules: SplitRule[] = [
+                    { fuzzy: true, lineStartsWith: ['{{kitab}}'], meta: { type: 'book' } },
+                    { lineStartsAfter: ['{{raqms}} {{dash}} '], meta: { type: 'hadith' } },
+                ];
+
+                const result = segmentPages(pages, { debug: true, rules } as any);
+
+                expect(result).toHaveLength(2);
+
+                // First rule is lineStartsWith
+                expect((result[0].meta as any)?._flappa?.rule?.patternType).toBe('lineStartsWith');
+
+                // Second rule is lineStartsAfter
+                expect((result[1].meta as any)?._flappa?.rule?.patternType).toBe('lineStartsAfter');
             });
 
             it('should correctly split pages when pages have identical prefixes and duplicated content', () => {
@@ -2632,8 +2670,8 @@ describe('segmenter', () => {
                 const seg = result[i];
                 // The trimmed content shouldn't end with a character that looks like mid-word
                 // Mid-word would mean the last char isn't whitespace and the next segment starts with continuation
-                const nextSeg = result[i + 1];
-                const firstCharOfNext = nextSeg.content[0];
+                // const nextSeg = result[i + 1];
+                // const firstCharOfNext = nextSeg.content[0];
                 // If cut correctly, next segment should start with a complete word (starts with space after trim, or starts with new word)
                 // A mid-word split would show the next segment starting with a letter fragment
                 // For Arabic, we just verify the segment content length is reasonable
