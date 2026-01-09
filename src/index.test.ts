@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import { convertContentToMarkdown } from 'shamela';
-import { type Page, type Segment, type SegmentationOptions, segmentPages } from './index';
+import { type Page, type Replacement, type Segment, type SegmentationOptions, segmentPages } from './index';
 
 const mapPageToMarkdown = (p: Page) => ({ content: convertContentToMarkdown(p.content), id: p.id });
 
@@ -846,8 +846,10 @@ describe('index', () => {
     it('should not match عَ with diacritics or followed by another character that is not a ramz', () => {
         initPages(['٤٩٢٢ - عَن: قَيْس بن مُسْلِم الْمَذْحَجِيّ (١) ، شامي.\r• • •']);
 
+        const replace: Replacement[] = [{ regex: '\r• • •', replacement: '' }];
+
         const segments = segmentPages(pages, {
-            replace: [{ regex: '\r• • •', replacement: '' }],
+            replace,
             rules: [
                 {
                     lineStartsAfter: ['{{raqms:num}} {{dash}} {{rumuz:rumuz}}:\\s*'],
