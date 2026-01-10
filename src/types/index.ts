@@ -84,3 +84,68 @@ export type Page = {
  * [10, 20]    // Pages 10 through 20 (inclusive)
  */
 export type PageRange = number | [number, number];
+
+/**
+ * Base page range constraint with min/max page IDs.
+ *
+ * Used by rules, breakpoints, and preprocess transforms to limit
+ * which pages a configuration applies to.
+ *
+ * @example
+ * // Only apply from page 10 onwards
+ * { min: 10 }
+ *
+ * @example
+ * // Only apply to pages 50-100
+ * { min: 50, max: 100 }
+ */
+export type PageRangeConstraint = {
+    /**
+     * Minimum page ID for this to apply.
+     * Items on pages with `id < min` are skipped.
+     */
+    min?: number;
+
+    /**
+     * Maximum page ID for this to apply.
+     * Items on pages with `id > max` are skipped.
+     */
+    max?: number;
+};
+
+/**
+ * Extended page range constraint with exclude list.
+ *
+ * Used by rules and breakpoints (not preprocess transforms) to
+ * provide fine-grained control over which pages to skip.
+ *
+ * @example
+ * // Apply to pages 1-100, but skip front matter and specific pages
+ * { min: 1, max: 100, exclude: [[1, 5], 50] }
+ */
+export type PageRangeConstraintWithExclude = PageRangeConstraint & {
+    /**
+     * Specific pages or page ranges to exclude.
+     *
+     * @example
+     * // Exclude specific pages
+     * exclude: [1, 2, 5]
+     *
+     * @example
+     * // Exclude page ranges
+     * exclude: [[1, 10], [50, 100]]
+     *
+     * @example
+     * // Mix single pages and ranges
+     * exclude: [1, [5, 10], 50]
+     */
+    exclude?: PageRange[];
+};
+
+// Re-export preprocess types for convenience
+export type {
+    CondenseEllipsisRule,
+    FixTrailingWawRule,
+    PreprocessTransform,
+    RemoveZeroWidthRule,
+} from './options.js';

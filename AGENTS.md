@@ -49,7 +49,7 @@ src/
 ├── optimization/               # Rule optimization module
 │   └── optimize-rules.ts       # Specificity-based sorting and merging
 ├── preprocessing/              # Text normalization module
-│   └── replace.ts              # Idem-safe content replacements
+│   └── transforms.ts           # Built-in preprocess transforms (removeZeroWidth, condenseEllipsis, fixTrailingWaw)
 ├── utils/                      # Low-level helpers
 │   └── textUtils.ts            # Diacritics, Unicode, and bracket escaping
 ├── index.ts                    # Public barrel exports
@@ -555,6 +555,12 @@ bunx biome lint .
 
 33. **Multi-agent review synthesis**: Getting implementation reviews from multiple AI models (Claude, GPT, Grok, Gemini) and synthesizing their feedback helps catch issues a single reviewer might miss. Key insight: when reviewers disagree on "critical" issues, investigate the codebase to verify claims before implementing fixes. Some "critical" issues are based on incorrect assumptions about how fast paths or downstream functions work.
 
+34. **`preprocess` option applies transforms before rules**: The `preprocess` array in `SegmentationOptions` applies text transforms to each page's content BEFORE `buildPageMap()` is called. This ensures patterns match on the normalized text. Transforms are: `removeZeroWidth`, `condenseEllipsis`, `fixTrailingWaw`. Each can have `min`/`max` page constraints.
+
+35. **`words` field simplifies word-based breakpoints**: Instead of manually writing `\s+(?:word1|word2|...)` alternations, use `words: ['word1', 'word2']`. The field auto-escapes metacharacters (except inside `{{tokens}}`), sorts by length descending, deduplicates, and defaults to `split: 'at'`. Cannot be combined with `pattern` or `regex`.
+
+36. **`{{newline}}` token for readability**: Instead of `\\n` in breakpoint patterns, use `{{newline}}`. This expands to `\n` and is more readable in JSON configuration files.
+
 ### Process Template (Multi-agent design review, TDD-first)
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:
@@ -591,6 +597,7 @@ If you want to repeat the “write a plan → get multiple AI critiques → synt
 | `{{harfs}}` | `Token.HARFS` | Spaced letters | د ت س |
 | `{{rumuz}}` | `Token.RUMUZ` | Source abbreviations | خت ٤ |
 | `{{bullet}}` | `Token.BULLET` | Bullet points | • * ° |
+| `{{newline}}` | `Token.NEWLINE` | Newline character | `\n` |
 | `{{numbered}}` | `Token.NUMBERED` | `{{raqms}} {{dash}} ` | ٧٥٦٣ - |
 
 ### Token Constants (Better DX)

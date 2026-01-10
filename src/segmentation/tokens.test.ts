@@ -396,12 +396,18 @@ describe('Token constants', () => {
         expect(Token.KITAB).toBe('{{kitab}}');
         expect(Token.NAQL).toBe('{{naql}}');
         expect(Token.NUM).toBe('{{num}}');
+        expect(Token.NEWLINE).toBe('{{newline}}');
         expect(Token.NUMS).toBe('{{nums}}');
         expect(Token.NUMBERED).toBe('{{numbered}}');
         expect(Token.RAQM).toBe('{{raqm}}');
         expect(Token.RAQMS).toBe('{{raqms}}');
         expect(Token.RUMUZ).toBe('{{rumuz}}');
         expect(Token.TARQIM).toBe('{{tarqim}}');
+    });
+
+    it('should expand {{newline}} to literal newline pattern', () => {
+        const pattern = expandTokens('{{newline}}');
+        expect(pattern).toBe('\\n');
     });
 
     it('should work with expandTokens', () => {

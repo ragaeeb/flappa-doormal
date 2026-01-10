@@ -3652,6 +3652,200 @@ describe('segmenter', () => {
             expect(result[0].content).toContain('FALLBACK');
         });
 
+        it('should split on newline with split:after (newline ends previous segment)', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'Line one with enough content to exceed the limit here\nLine two with enough content to exceed the limit here\nLine three with enough content here',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: '\\n', split: 'after' }],
+                maxContentLength: 60,
+            });
+
+            expect(result.length).toBe(3);
+            // With split:after, the newline is consumed at the END of the previous segment
+            // But createSegment() trims content, so trailing newlines are removed
+            expect(result[0].content).toBe('Line one with enough content to exceed the limit here');
+            expect(result[1].content).toBe('Line two with enough content to exceed the limit here');
+            expect(result[2].content).toBe('Line three with enough content here');
+        });
+
+        it('should split on newline with split:at (newline starts next segment, then trimmed)', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'Line one with enough content to exceed the limit here\nLine two with enough content to exceed the limit here\nLine three with enough content here',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: '\\n', split: 'at' }],
+                maxContentLength: 60,
+            });
+
+            expect(result.length).toBe(3);
+            // With split:at, the newline moves to START of next segment
+            // But createSegment() trims content, so leading newlines are removed
+            expect(result[0].content).toBe('Line one with enough content to exceed the limit here');
+            expect(result[1].content).toBe('Line two with enough content to exceed the limit here');
+            expect(result[2].content).toBe('Line three with enough content here');
+        });
+
+        it('should support {{newline}} token in breakpoints', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'Line one with enough content to exceed the limit here\nLine two with enough content to exceed the limit here',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['{{newline}}'],
+                maxContentLength: 60,
+            });
+
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('Line one with enough content to exceed the limit here');
+            expect(result[1].content).toBe('Line two with enough content to exceed the limit here');
+        });
+
+        it('should split on double newline paragraph boundary', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'First paragraph with some content.\n\nSecond paragraph with more content.\n\nThird paragraph here.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['\\n\\n'], // Double newline (paragraph break)
+                maxContentLength: 50,
+            });
+
+            expect(result.length).toBe(3);
+            expect(result[0].content).toBe('First paragraph with some content.');
+            expect(result[1].content).toBe('Second paragraph with more content.');
+            expect(result[2].content).toBe('Third paragraph here.');
+        });
+
+        describe('\\s* after {{tarqim}} redundancy proof', () => {
+            it('should produce identical results with and without \\s* using split:after', () => {
+                // Test that {{tarqim}}\s* and {{tarqim}} produce identical segments
+                // because createSegment() trims content anyway
+                const pages: Page[] = [
+                    {
+                        content:
+                            'النص الأول مع محتوى إضافي هنا للطول.   النص الثاني مع المزيد من الكلمات! النص الثالث؟ نهاية',
+                        id: 1,
+                    },
+                ];
+
+                const withWhitespace = segmentPages(pages, {
+                    breakpoints: ['{{tarqim}}\\s*'],
+                    maxContentLength: 60,
+                });
+
+                const withoutWhitespace = segmentPages(pages, {
+                    breakpoints: ['{{tarqim}}'],
+                    maxContentLength: 60,
+                });
+
+                // Both should produce identical trimmed content
+                expect(withWhitespace.length).toBe(withoutWhitespace.length);
+                for (let i = 0; i < withWhitespace.length; i++) {
+                    expect(withWhitespace[i].content).toBe(withoutWhitespace[i].content);
+                    expect(withWhitespace[i].from).toBe(withoutWhitespace[i].from);
+                    expect(withWhitespace[i].to).toBe(withoutWhitespace[i].to);
+                }
+            });
+
+            it('should produce identical results with and without \\s* using split:at', () => {
+                const pages: Page[] = [
+                    {
+                        content:
+                            'النص الأول مع محتوى إضافي هنا للطول.   النص الثاني مع المزيد من الكلمات! النص الثالث؟ نهاية',
+                        id: 1,
+                    },
+                ];
+
+                const withWhitespace = segmentPages(pages, {
+                    breakpoints: [{ pattern: '{{tarqim}}\\s*', split: 'at' }],
+                    maxContentLength: 60,
+                });
+
+                const withoutWhitespace = segmentPages(pages, {
+                    breakpoints: [{ pattern: '{{tarqim}}', split: 'at' }],
+                    maxContentLength: 60,
+                });
+
+                // Both should produce identical trimmed content
+                expect(withWhitespace.length).toBe(withoutWhitespace.length);
+                for (let i = 0; i < withWhitespace.length; i++) {
+                    expect(withWhitespace[i].content).toBe(withoutWhitespace[i].content);
+                    expect(withWhitespace[i].from).toBe(withoutWhitespace[i].from);
+                    expect(withWhitespace[i].to).toBe(withoutWhitespace[i].to);
+                }
+            });
+
+            it('should produce identical results with multiple punctuation marks and varying whitespace', () => {
+                // More comprehensive test with mixed punctuation and whitespace patterns
+                const pages: Page[] = [
+                    {
+                        content:
+                            'جملة أولى.  جملة ثانية!   جملة ثالثة؟ جملة رابعة؛  جملة خامسة. نهاية النص مع كلمات إضافية',
+                        id: 1,
+                    },
+                ];
+
+                const withWhitespace = segmentPages(pages, {
+                    breakpoints: ['{{tarqim}}\\s*'],
+                    maxContentLength: 55,
+                });
+
+                const withoutWhitespace = segmentPages(pages, {
+                    breakpoints: ['{{tarqim}}'],
+                    maxContentLength: 55,
+                });
+
+                expect(withWhitespace.length).toBe(withoutWhitespace.length);
+                for (let i = 0; i < withWhitespace.length; i++) {
+                    expect(withWhitespace[i].content).toBe(withoutWhitespace[i].content);
+                }
+            });
+
+            it('should produce identical results when punctuation has no trailing whitespace', () => {
+                // Edge case: punctuation immediately followed by more text (no whitespace)
+                const pages: Page[] = [
+                    {
+                        content: 'النص.النص التالي مباشرة بدون مسافة!المزيد من النص هنا للاختبار؟نهاية',
+                        id: 1,
+                    },
+                ];
+
+                const withWhitespace = segmentPages(pages, {
+                    breakpoints: ['{{tarqim}}\\s*'],
+                    maxContentLength: 50,
+                });
+
+                const withoutWhitespace = segmentPages(pages, {
+                    breakpoints: ['{{tarqim}}'],
+                    maxContentLength: 50,
+                });
+
+                expect(withWhitespace.length).toBe(withoutWhitespace.length);
+                for (let i = 0; i < withWhitespace.length; i++) {
+                    expect(withWhitespace[i].content).toBe(withoutWhitespace[i].content);
+                }
+            });
+        });
+
         it('should match mid-word if pattern appears inside a word (demonstrates the risk)', () => {
             // This test demonstrates that a breakpoint pattern like 'ولهذا' can match
             // mid-word if the text contains that substring. For example:
@@ -3875,6 +4069,322 @@ describe('segmenter', () => {
             // Should split after "REGEX", not "PATTERN"
             expect(result[0].content).toContain('REGEX');
             expect(result[0].content).not.toContain('PATTERN');
+        });
+    });
+
+    describe('preprocess option', () => {
+        it('should apply removeZeroWidth before segmentation', () => {
+            const pages: Page[] = [
+                {
+                    content: 'Text\u200Bhere with more content',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [],
+                preprocess: ['removeZeroWidth'],
+            });
+
+            expect(result.length).toBe(1);
+            // Zero-width character should be stripped
+            expect(result[0].content).toBe('Texthere with more content');
+            expect(result[0].content).not.toContain('\u200B');
+        });
+
+        it('should apply condenseEllipsis before segmentation', () => {
+            const pages: Page[] = [
+                {
+                    content: 'First sentence... Second sentence.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['{{tarqim}}'],
+                maxContentLength: 50,
+                preprocess: ['condenseEllipsis'],
+            });
+
+            // With ellipsis condensed to …, {{tarqim}} should only match the period at end
+            // The '...' becomes '…' which is not matched by {{tarqim}}'s period pattern
+            expect(result.length).toBe(1);
+            expect(result[0].content).toContain('…'); // Condensed ellipsis
+        });
+
+        it('should apply fixTrailingWaw before segmentation', () => {
+            const pages: Page[] = [
+                {
+                    content: 'الكتاب و السنة',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [],
+                preprocess: ['fixTrailingWaw'],
+            });
+
+            expect(result.length).toBe(1);
+            // Trailing waw should be joined to next word
+            expect(result[0].content).toBe('الكتاب والسنة');
+        });
+
+        it('should apply multiple preprocess transforms in order', () => {
+            const pages: Page[] = [
+                {
+                    content: 'text\u200B... و word',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [],
+                preprocess: ['removeZeroWidth', 'condenseEllipsis', 'fixTrailingWaw'],
+            });
+
+            expect(result.length).toBe(1);
+            // All transforms applied:
+            // - \u200B stripped
+            // - ... -> …
+            // - ' و ' -> ' و'
+            expect(result[0].content).toBe('text… وword');
+        });
+
+        it('should respect min constraint on preprocess transform', () => {
+            const pages: Page[] = [
+                { id: 1, content: 'text...' },
+                { id: 10, content: 'more...' },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [],
+                preprocess: [{ type: 'condenseEllipsis', min: 5 }],
+            });
+
+            // Page 1 (id < min 5): not transformed
+            // Page 10 (id >= min 5): transformed
+            expect(result.length).toBe(1);
+            expect(result[0].content).toContain('text...');
+            expect(result[0].content).toContain('more…');
+        });
+
+        it('should respect max constraint on preprocess transform', () => {
+            const pages: Page[] = [
+                { id: 1, content: 'text...' },
+                { id: 10, content: 'more...' },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [],
+                preprocess: [{ type: 'condenseEllipsis', max: 5 }],
+            });
+
+            // Page 1 (id <= max 5): transformed
+            // Page 10 (id > max 5): not transformed
+            expect(result.length).toBe(1);
+            expect(result[0].content).toContain('text…');
+            expect(result[0].content).toContain('more...');
+        });
+
+        it('should work with removeZeroWidth mode:space', () => {
+            const pages: Page[] = [
+                {
+                    content: 'مرح\u200Bبا',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [],
+                preprocess: [{ type: 'removeZeroWidth', mode: 'space' }],
+            });
+
+            expect(result.length).toBe(1);
+            expect(result[0].content).toBe('مرح با');
+        });
+
+        it('should preprocess before rules are applied', () => {
+            // fixTrailingWaw should fix the pattern before rule matching
+            const pages: Page[] = [
+                {
+                    content: '## Chapter\nكتاب و السنة',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsWith: ['## '], split: 'at' }],
+                preprocess: ['fixTrailingWaw'],
+            });
+
+            expect(result.length).toBe(1);
+            expect(result[0].content).toContain('والسنة'); // Waw joined
+        });
+
+        it('should preprocess before breakpoints are applied', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'First part... some text here to make it longer. Second part with more content to exceed limit.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: ['{{tarqim}}'],
+                maxContentLength: 60,
+                preprocess: ['condenseEllipsis'],
+            });
+
+            // Ellipsis condensed, so {{tarqim}} only matches the final period
+            expect(result.length).toBe(2);
+            expect(result[0].content).toContain('…');
+        });
+
+        it('should work with empty preprocess array', () => {
+            const pages: Page[] = [
+                {
+                    content: 'text...',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [],
+                preprocess: [],
+            });
+
+            expect(result.length).toBe(1);
+            expect(result[0].content).toBe('text...');
+        });
+
+        it('should work without preprocess option', () => {
+            const pages: Page[] = [
+                {
+                    content: 'text...',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [],
+            });
+
+            expect(result.length).toBe(1);
+            expect(result[0].content).toBe('text...');
+        });
+    });
+
+    describe('breakpoint words field', () => {
+        it('should split at words with automatic whitespace boundary', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'First part of the text فهذا some more content here ثم even more content to exceed the limit.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ words: ['فهذا', 'ثم'] }],
+                maxContentLength: 60,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // With split:at (default for words), the word should start the next segment
+            // But it's trimmed, so we check that the first segment doesn't end with the word
+            expect(result[0].content).not.toMatch(/فهذا$/);
+        });
+
+        it('should respect split:after override for words', () => {
+            const pages: Page[] = [
+                {
+                    content: 'Text before والله أعلم and more content here to make it longer for splitting.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ words: ['والله أعلم'], split: 'after' }],
+                maxContentLength: 50,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // With split:after, the phrase should be at the END of the first segment
+            expect(result[0].content).toContain('والله أعلم');
+        });
+
+        it('should prefer longer words in alternation', () => {
+            const pages: Page[] = [
+                {
+                    content: 'Start ثم إن we have more content here ثم another match.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ words: ['ثم', 'ثم إن'] }],
+                maxContentLength: 50,
+                prefer: 'shorter',
+            });
+
+            // The longer "ثم إن" should be matched first (prefer:shorter = first match)
+            expect(result.length).toBeGreaterThanOrEqual(2);
+        });
+
+        it('should work with tokens in words', () => {
+            const pages: Page[] = [
+                {
+                    content: 'Some text. Split here حدثنا and more content to exceed the limit here.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ words: ['{{naql}}'] }],
+                maxContentLength: 50,
+            });
+
+            expect(result.length).toBeGreaterThanOrEqual(2);
+        });
+
+        it('should respect min/max constraints on words', () => {
+            const pages: Page[] = [
+                { id: 1, content: 'First page with word فهذا and more content here to exceed limit.' },
+                { id: 10, content: 'Second page with word فهذا and more content here to exceed limit.' },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [
+                    { words: ['فهذا'], min: 5 }, // Only applies from page 5+
+                    '', // Fallback
+                ],
+                maxPages: 0,
+            });
+
+            // Page 1 shouldn't be split by the word (below min)
+            // Page 10 should be split by the word
+            expect(result.length).toBe(2);
+        });
+
+        it('should escape metacharacters in words', () => {
+            const pages: Page[] = [
+                {
+                    content: 'Text with a.*b literal here and more content to exceed the limit.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ words: ['a.*b'] }],
+                maxContentLength: 50,
+            });
+
+            // Should match literal "a.*b", not regex pattern
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // First segment should end before "a.*b"
+            expect(result[0].content).not.toContain('a.*b');
         });
     });
 });

@@ -112,6 +112,7 @@ Replace regex with readable tokens:
 | `{{fasl}}` | Section markers | `فصل\|مسألة` |
 | `{{tarqim}}` | Punctuation marks | `[.!?؟؛]` |
 | `{{bullet}}` | Bullet points | `[•*°]` |
+| `{{newline}}` | Newline character | `\n` |
 | `{{naql}}` | Narrator phrases | `حدثنا\|أخبرنا\|...` |
 | `{{kitab}}` | "كتاب" (book) | `كتاب` |
 | `{{bab}}` | "باب" (chapter) | `باب` |
@@ -350,6 +351,49 @@ The library implements **safety hardening** for character-based splits:
 - **Unicode Safety**: Automatically prevents splitting inside Unicode surrogate pairs (e.g., emojis), preventing text corruption.
 - **Validation**: `maxContentLength` must be at least **50**.
 
+### 7.1 Preprocessing
+
+Apply text normalization transforms **before** segmentation rules are evaluated:
+
+```typescript
+segmentPages(pages, {
+  preprocess: [
+    'removeZeroWidth',    // Strip invisible Unicode control characters
+    'condenseEllipsis',   // "..." → "…" (prevents {{tarqim}} false matches)
+    'fixTrailingWaw',     // " و " → " و" (joins waw to next word)
+  ],
+  rules: [...],
+});
+```
+
+**Available transforms:**
+
+| Transform | Effect | Use Case |
+|-----------|--------|----------|
+| `removeZeroWidth` | Strips U+200B–U+200F, U+202A–U+202E, U+2060–U+2064, U+FEFF | Invisible chars interfering with patterns |
+| `condenseEllipsis` | `...` → `…` | Prevent `{{tarqim}}` matching inside ellipsis |
+| `fixTrailingWaw` | ` و ` → ` و` | Fix OCR artifacts with detached waw |
+
+**Page constraints:**
+
+```typescript
+preprocess: [
+  'removeZeroWidth',                              // All pages
+  { type: 'condenseEllipsis', min: 100 },        // Pages 100+
+  { type: 'fixTrailingWaw', min: 50, max: 500 }, // Pages 50-500
+]
+```
+
+**`removeZeroWidth` modes:**
+
+```typescript
+// Default: strip entirely
+{ type: 'removeZeroWidth', mode: 'strip' }
+
+// Alternative: replace with space (preserves word boundaries)
+{ type: 'removeZeroWidth', mode: 'space' }
+```
+
 ### 8. Advanced Structural Filters
 
 Refine rule matching with page-specific constraints:
@@ -519,7 +563,7 @@ When a breakpoint pattern matches, the split position is controlled by the `spli
 {
   // Patterns are tried in order
   breakpoints: [
-    '\\.\\s*',    // Try punctuation first
+    '\\.',        // Try punctuation first (no need for \\s* - segments are trimmed)
     'ولهذا',      // Then try specific word
     '',           // Finally, fall back to page boundary
   ],
@@ -530,6 +574,8 @@ When a breakpoint pattern matches, the split position is controlled by the `spli
 > **Note on lookahead patterns**: Zero-length patterns like `(?=X)` are not supported for breakpoints because they can cause non-progress scenarios. Use `{ pattern: 'X', split: 'at' }` instead to achieve "split before X" behavior.
 
 > **Note on whitespace**: Segments are trimmed by default. With `split:'at'`, if the match consists only of whitespace, it will be trimmed from the start of the next segment. This is usually desirable for delimiter patterns.
+
+> **Tip: `\s*` after punctuation is redundant**: Because segments are trimmed, `{{tarqim}}\s*` produces **identical output** to `{{tarqim}}`. The trailing whitespace captured by `\s*` gets trimmed anyway. Save yourself the extra characters!
 
 #### `pattern` vs `regex` Field
 
@@ -547,7 +593,7 @@ Breakpoints support two pattern fields:
 
 // Use `regex` for complex patterns with regex groups
 { regex: '\\s+(?:ولهذا|وكذلك|فلذلك)', split: 'at' }  // Non-capturing group
-{ regex: '{{tarqim}}\\s*', split: 'after' }  // Tokens work here too!
+{ regex: '{{tarqim}}', split: 'after' }  // Tokens work in regex too!
 ```
 
 If both `pattern` and `regex` are specified, `regex` takes precedence.
@@ -575,6 +621,39 @@ Breakpoint patterns match **substrings**, not whole words. A pattern like `ول�
 ```
 
 > **Why not `\b`?** JavaScript's `\b` word boundary **does not work** with Arabic text. Since Arabic letters aren't considered "word characters" (`\w` = `[a-zA-Z0-9_]`), using `\b` will match **nothing** - not even standalone words. Always use `\s+` prefix instead.
+
+#### The `words` Field (Simplified Word Breakpoints)
+
+For breaking on multiple words, the `words` field provides a simpler syntax with automatic whitespace boundaries:
+
+```typescript
+{
+  breakpoints: [
+    // Instead of manually writing:
+    // { regex: '\\s+(?:فهذا|ثم|أقول)', split: 'at' }
+    
+    // Use the `words` field:
+    { words: ['فهذا', 'ثم', 'أقول'], min: 100 }
+  ],
+}
+```
+
+**Features:**
+- **Automatic `\s+` prefix** for whole-word matching
+- **Defaults to `split: 'at'`** (can be overridden)
+- **Metacharacters auto-escaped** (literals match literally)
+- **Tokens supported** (`{{naql}}` expands as usual)
+- **Longest match first** (words sorted by length descending)
+
+```typescript
+// Override split behavior
+{ words: ['والله أعلم'], split: 'after' }  // Include phrase in previous segment
+
+// Use tokens in words
+{ words: ['{{naql}}', 'وكذلك'] }  // Token expansion works
+
+// Note: `words` cannot be combined with `pattern` or `regex`
+```
 
 **Security note (ReDoS)**: Breakpoints (and raw `regex` rules) compile user-provided regular expressions. **Do not accept untrusted patterns** (e.g. from end users) without validation/sandboxing; some regexes can trigger catastrophic backtracking and hang the process.
 
@@ -1055,7 +1134,7 @@ Your tasks:
    - Use min/max/exclude when front matter differs or specific pages are noisy.
 4) If segments can span many pages:
    - Set maxPages and breakpoints.
-   - Suggested breakpoints (in order): "{{tarqim}}\\s*", "\\n", "" (page boundary)
+   - Suggested breakpoints (in order): "{{tarqim}}", "\\n", "" (page boundary)
    - Prefer "longer" unless there’s a reason to prefer shorter segments.
 5) Capture useful metadata:
    - For numbering patterns, capture the number into meta.num (e.g., {{raqms:num}}).

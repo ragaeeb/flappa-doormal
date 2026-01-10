@@ -1,5 +1,119 @@
 import type { Breakpoint } from './breakpoints.js';
+import type { PageRangeConstraint } from './index.js';
 import type { SplitRule } from './rules.js';
+
+// =============================================================================
+// Preprocess Transform Types
+// =============================================================================
+
+/**
+ * Remove zero-width control characters.
+ *
+ * Strips invisible Unicode control characters that can interfere with
+ * pattern matching and text processing:
+ * - U+200B–U+200F (Zero Width Space, Joiners, Direction Marks)
+ * - U+202A–U+202E (Bidirectional Formatting)
+ * - U+2060–U+2064 (Word Joiner, Invisible Operators)
+ * - U+FEFF (Byte Order Mark / Zero Width No-Break Space)
+ *
+ * @example
+ * // Strip from all pages
+ * preprocess: ['removeZeroWidth']
+ *
+ * @example
+ * // Replace with spaces (preserves word boundaries)
+ * preprocess: [{ type: 'removeZeroWidth', mode: 'space' }]
+ *
+ * @example
+ * // Only on specific pages
+ * preprocess: [{ type: 'removeZeroWidth', min: 10, max: 100 }]
+ */
+export type RemoveZeroWidthRule = PageRangeConstraint & {
+    type: 'removeZeroWidth';
+    /**
+     * How to handle zero-width characters:
+     * - `'strip'`: Remove entirely (default)
+     * - `'space'`: Replace with single space (preserves word boundaries)
+     *
+     * @default 'strip'
+     */
+    mode?: 'strip' | 'space';
+};
+
+/**
+ * Condense multiple periods (...) into ellipsis character (…).
+ *
+ * Prevents `{{tarqim}}` breakpoints from false-matching inside ellipsis.
+ * The ellipsis character `…` is not matched by the `.` pattern in `{{tarqim}}`.
+ *
+ * @example
+ * // Before: "Speaker: ... and then"
+ * // After:  "Speaker: … and then"
+ * //
+ * // Without this, {{tarqim}} would split at each period in "..."
+ *
+ * @example
+ * // Apply to all pages
+ * preprocess: ['condenseEllipsis']
+ *
+ * @example
+ * // Only on specific pages
+ * preprocess: [{ type: 'condenseEllipsis', min: 50 }]
+ */
+export type CondenseEllipsisRule = PageRangeConstraint & {
+    type: 'condenseEllipsis';
+};
+
+/**
+ * Join trailing و (waw) to the next word.
+ *
+ * Fixes common OCR/digitization artifacts where the Arabic conjunction
+ * و appears separated from its following word. This can break word-based
+ * pattern matching.
+ *
+ * Transforms: `' و '` → `' و'` (joins waw to next word)
+ *
+ * @example
+ * // Before: "الكتاب و السنة"
+ * // After:  "الكتاب والسنة"
+ *
+ * @example
+ * // Apply to all pages
+ * preprocess: ['fixTrailingWaw']
+ *
+ * @example
+ * // Only on specific pages
+ * preprocess: [{ type: 'fixTrailingWaw', min: 100, max: 500 }]
+ */
+export type FixTrailingWawRule = PageRangeConstraint & {
+    type: 'fixTrailingWaw';
+};
+
+/**
+ * A preprocess transform - string shorthand or object with constraints.
+ *
+ * String shorthands apply to all pages with default settings.
+ * Object forms allow page constraints and configuration options.
+ *
+ * @example
+ * // String shorthands (all pages, default settings)
+ * preprocess: ['removeZeroWidth', 'condenseEllipsis', 'fixTrailingWaw']
+ *
+ * @example
+ * // Object forms (with constraints)
+ * preprocess: [
+ *     'removeZeroWidth',                              // All pages
+ *     { type: 'condenseEllipsis', min: 100 },        // Pages 100+
+ *     { type: 'fixTrailingWaw', min: 50, max: 500 }, // Pages 50-500
+ * ]
+ */
+export type PreprocessTransform =
+    | 'removeZeroWidth'
+    | 'condenseEllipsis'
+    | 'fixTrailingWaw'
+    | RemoveZeroWidthRule
+    | CondenseEllipsisRule
+    | FixTrailingWawRule;
 
 /**
  * Logger interface for custom logging implementations.
@@ -212,4 +326,30 @@ export type SegmentationOptions = {
      * }
      */
     logger?: Logger;
+
+    /**
+     * Text normalization transforms applied per-page BEFORE segmentation.
+     *
+     * Transforms run in array order. Each can be limited to specific pages.
+     * This is useful for fixing common OCR artifacts and text encoding issues
+     * that can interfere with pattern matching.
+     *
+     * Available transforms:
+     * - `'removeZeroWidth'`: Strip invisible Unicode control characters
+     * - `'condenseEllipsis'`: Convert `...` to `…` (prevents {{tarqim}} false matches)
+     * - `'fixTrailingWaw'`: Join `و` to next word (fixes OCR artifacts)
+     *
+     * @example
+     * // String shorthands (all pages)
+     * preprocess: ['removeZeroWidth', 'condenseEllipsis', 'fixTrailingWaw']
+     *
+     * @example
+     * // With page constraints
+     * preprocess: [
+     *     'removeZeroWidth',                              // All pages
+     *     { type: 'condenseEllipsis', min: 100 },        // Pages 100+
+     *     { type: 'fixTrailingWaw', min: 50, max: 500 }, // Pages 50-500
+     * ]
+     */
+    preprocess?: PreprocessTransform[];
 };

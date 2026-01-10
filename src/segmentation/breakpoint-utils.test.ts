@@ -58,6 +58,60 @@ describe('breakpoint-utils', () => {
             const result = normalizeBreakpoint(rule);
             expect(result).toMatchObject({ pattern: 'X', split: 'after' });
         });
+
+        it('should default split to at when words is specified', () => {
+            const rule = { words: ['فهذا', 'ثم'] };
+            const result = normalizeBreakpoint(rule);
+            expect(result).toMatchObject({ words: ['فهذا', 'ثم'], split: 'at' });
+        });
+
+        it('should allow split:after override for words', () => {
+            const rule = { words: ['والله أعلم'], split: 'after' as const };
+            const result = normalizeBreakpoint(rule);
+            expect(result).toMatchObject({ words: ['والله أعلم'], split: 'after' });
+        });
+
+        it('should throw when words combined with pattern', () => {
+            const rule = { words: ['test'], pattern: 'X' };
+            expect(() => normalizeBreakpoint(rule)).toThrow('cannot be combined');
+        });
+
+        it('should throw when words combined with regex', () => {
+            const rule = { words: ['test'], regex: 'X' };
+            expect(() => normalizeBreakpoint(rule)).toThrow('cannot be combined');
+        });
+    });
+
+    describe('escapeWordsOutsideTokens', () => {
+        it('should escape regex metacharacters', () => {
+            const { escapeWordsOutsideTokens } = require('./breakpoint-utils.js');
+            expect(escapeWordsOutsideTokens('a.*b')).toBe('a\\.\\*b');
+        });
+
+        it('should preserve {{token}} delimiters', () => {
+            const { escapeWordsOutsideTokens } = require('./breakpoint-utils.js');
+            expect(escapeWordsOutsideTokens('{{naql}}.test')).toBe('{{naql}}\\.test');
+        });
+
+        it('should handle multiple tokens', () => {
+            const { escapeWordsOutsideTokens } = require('./breakpoint-utils.js');
+            expect(escapeWordsOutsideTokens('{{naql}}.*{{bab}}')).toBe('{{naql}}\\.\\*{{bab}}');
+        });
+
+        it('should handle text without tokens', () => {
+            const { escapeWordsOutsideTokens } = require('./breakpoint-utils.js');
+            expect(escapeWordsOutsideTokens('simple text')).toBe('simple text');
+        });
+
+        it('should escape all standard regex metacharacters', () => {
+            const { escapeWordsOutsideTokens } = require('./breakpoint-utils.js');
+            expect(escapeWordsOutsideTokens('.*+?^${}()|[]\\')).toBe('\\.\\*\\+\\?\\^\\$\\{\\}\\(\\)\\|\\[\\]\\\\');
+        });
+
+        it('should handle token with capture name', () => {
+            const { escapeWordsOutsideTokens } = require('./breakpoint-utils.js');
+            expect(escapeWordsOutsideTokens('{{naql:name}}.test')).toBe('{{naql:name}}\\.test');
+        });
     });
 
     describe('isPageExcluded', () => {
@@ -229,6 +283,70 @@ describe('breakpoint-utils', () => {
             const processor = (p: string) => p.toUpperCase();
             const result = expandBreakpoints(['test'], processor);
             expect(result[0].regex?.source).toBe('TEST');
+        });
+
+        it('should generate regex from words field', () => {
+            const result = expandBreakpoints([{ words: ['فهذا', 'ثم'] }], identityProcessor);
+            expect(result).toHaveLength(1);
+            expect(result[0].splitAt).toBe(true); // words defaults to split:at
+            expect(result[0].regex).toBeInstanceOf(RegExp);
+            // Should generate alternation with whitespace prefix
+            expect(result[0].regex?.source).toContain('فهذا');
+            expect(result[0].regex?.source).toContain('ثم');
+            expect(result[0].regex?.source).toMatch(/^\\s\+/); // whitespace prefix
+        });
+
+        it('should sort words by length descending', () => {
+            const result = expandBreakpoints([{ words: ['ثم', 'ثم إن'] }], identityProcessor);
+            // Longer word should come first in alternation
+            const source = result[0].regex?.source ?? '';
+            const longPos = source.indexOf('ثم إن');
+            const shortPos = source.indexOf('(?:ثم)');
+            // "ثم إن" should appear before standalone "ثم"
+            expect(longPos).toBeLessThan(shortPos);
+        });
+
+        it('should deduplicate words', () => {
+            const result = expandBreakpoints([{ words: ['test', 'test', 'other'] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            // Count occurrences of "test" (should be 1)
+            const matches = source.match(/test/g);
+            expect(matches?.length).toBe(1);
+        });
+
+        it('should filter empty words', () => {
+            const result = expandBreakpoints([{ words: ['', 'valid', '  '] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            expect(source).toContain('valid');
+            expect(source).not.toMatch(/\(\?\:\)|\(\?\:\|/); // No empty alternations
+        });
+
+        it('should escape metacharacters in words', () => {
+            const result = expandBreakpoints([{ words: ['a.*b'] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            expect(source).toContain('a\\.\\*b');
+        });
+
+        it('should apply pattern processor to words', () => {
+            const processor = (p: string) => p.replace(/X/g, 'Y');
+            const result = expandBreakpoints([{ words: ['testX'] }], processor);
+            expect(result[0].regex?.source).toContain('testY');
+        });
+
+        it('should handle empty words array', () => {
+            const result = expandBreakpoints([{ words: [] }], identityProcessor);
+            expect(result[0].regex).toBeNull();
+        });
+
+        it('should respect split:after override for words', () => {
+            const result = expandBreakpoints([{ words: ['والله أعلم'], split: 'after' }], identityProcessor);
+            expect(result[0].splitAt).toBe(false);
+        });
+
+        it('should preserve min/max constraints for words', () => {
+            const result = expandBreakpoints([{ words: ['test'], min: 10, max: 100 }], identityProcessor);
+            expect(result[0].rule.min).toBe(10);
+            expect(result[0].rule.max).toBe(100);
         });
     });
 

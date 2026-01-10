@@ -81,6 +81,9 @@ const BASE_TOKENS: Record<string, string> = {
     /** Hadith transmission phrases (حدثنا, أخبرنا, حدثني, etc.). */
     naql: ['حدثني', 'وأخبرنا', 'حدثنا', 'سمعت', 'أنبأنا', 'وحدثنا', 'أخبرنا', 'وحدثني', 'وحدثنيه'].join('|'),
 
+    /** Newline character. Useful for breakpoints that split on line boundaries. */
+    newline: '\\n',
+
     /** Single ASCII digit (0-9). */
     num: '\\d',
 
@@ -120,6 +123,8 @@ export const Token = {
     KITAB: '{{kitab}}',
     /** Hadith transmission phrases */
     NAQL: '{{naql}}',
+    /** Newline character (for breakpoints) */
+    NEWLINE: '{{newline}}',
     /** Single ASCII digit */
     NUM: '{{num}}',
     /** Composite: {{raqms}} {{dash}} (space) */
