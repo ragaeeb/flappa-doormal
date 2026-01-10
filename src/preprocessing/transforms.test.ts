@@ -102,6 +102,14 @@ describe('removeZeroWidth', () => {
             expect(removeZeroWidth('hello \u200Bworld', 'space')).toBe('hello world');
         });
 
+        it('should not add space after newline', () => {
+            expect(removeZeroWidth('hello\n\u200Bworld', 'space')).toBe('hello\nworld');
+        });
+
+        it('should not add space after tab', () => {
+            expect(removeZeroWidth('hello\t\u200Bworld', 'space')).toBe('hello\tworld');
+        });
+
         it('should handle text with no zero-width characters', () => {
             expect(removeZeroWidth('السلام عليكم', 'space')).toBe('السلام عليكم');
         });
@@ -264,5 +272,13 @@ describe('applyPreprocessToPage', () => {
             { type: 'fixTrailingWaw', min: 10 },
         ]);
         expect(result).toBe('text… و word');
+    });
+
+    it('should throw for unknown transform types', () => {
+        const content = 'test';
+        // @ts-expect-error - Testing runtime validation for invalid type
+        expect(() => applyPreprocessToPage(content, 1, [{ type: 'unknownTransform' }])).toThrow(
+            'Unknown preprocess transform type',
+        );
     });
 });

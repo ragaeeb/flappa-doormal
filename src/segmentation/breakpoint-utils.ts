@@ -13,10 +13,13 @@ import {
  * Escapes regex metacharacters outside of `{{token}}` delimiters.
  *
  * This allows words in the `words` field to contain tokens while treating
- * all other characters as literals.
+ * most other characters as literals.
+ *
+ * Note: `()[]` are NOT escaped here because `processPattern` will handle them
+ * via `escapeTemplateBrackets`. This avoids double-escaping.
  *
  * @param word - Word string that may contain {{tokens}}
- * @returns String with metacharacters escaped outside tokens
+ * @returns String with metacharacters escaped outside tokens (except ()[] which are escaped by processPattern)
  *
  * @example
  * escapeWordsOutsideTokens('a.*b')
@@ -24,13 +27,14 @@ import {
  *
  * escapeWordsOutsideTokens('{{naql}}.test')
  * // → '{{naql}}\\.test'
+ *
+ * escapeWordsOutsideTokens('(literal)')
+ * // → '(literal)' (not escaped here - processPattern handles it)
  */
 export const escapeWordsOutsideTokens = (word: string): string =>
     word
         .split(/(\{\{[^}]+\}\})/g)
-        .map((part) =>
-            part.startsWith('{{') && part.endsWith('}}') ? part : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
-        )
+        .map((part) => (part.startsWith('{{') && part.endsWith('}}') ? part : part.replace(/[.*+?^${}|\\]/g, '\\$&')))
         .join('');
 
 /**
@@ -263,7 +267,7 @@ const expandSingleBreakpoint = (
     bp: Breakpoint,
     processPattern: PatternProcessor,
     processRawPattern?: PatternProcessor,
-): ExpandedBreakpoint => {
+): ExpandedBreakpoint | null => {
     const rule = normalizeBreakpoint(bp);
     const excludeSet = buildExcludeSet(rule.exclude);
     const skipWhenRegex = compileSkipWhenRegex(rule, processPattern);
@@ -272,7 +276,9 @@ const expandSingleBreakpoint = (
     if (rule.words !== undefined) {
         const wordsPattern = buildWordsRegex(rule.words, processPattern);
         if (wordsPattern === null) {
-            return { excludeSet, regex: null, rule, skipWhenRegex, splitAt: false };
+            // Empty words array = no-op breakpoint (filter out)
+            // This is NOT the same as '' which is page-boundary fallback
+            return null;
         }
         const regex = compilePatternRegex(wordsPattern, `words: ${rule.words.join(', ')}`);
         return { excludeSet, regex, rule, skipWhenRegex, splitAt: rule.split === 'at' };
@@ -299,7 +305,10 @@ export const expandBreakpoints = (
     breakpoints: Breakpoint[],
     processPattern: PatternProcessor,
     processRawPattern?: PatternProcessor,
-): ExpandedBreakpoint[] => breakpoints.map((bp) => expandSingleBreakpoint(bp, processPattern, processRawPattern));
+): ExpandedBreakpoint[] =>
+    breakpoints
+        .map((bp) => expandSingleBreakpoint(bp, processPattern, processRawPattern))
+        .filter((bp): bp is ExpandedBreakpoint => bp !== null);
 
 /** Normalized page data for efficient lookups */
 export type NormalizedPage = { content: string; length: number; index: number };

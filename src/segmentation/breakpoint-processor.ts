@@ -727,7 +727,8 @@ const tryProcessOversizedSegmentFastPath = (
 
     const isAligned = checkFastPathAlignment(cumulativeOffsets, fullContent, fromIdx, toIdx, pageCount, logger);
     const isPageBoundaryOnly = expandedBreakpoints.every(
-        (bp) => bp.regex === null && bp.excludeSet.size === 0 && bp.skipWhenRegex === undefined,
+        // Note: compileSkipWhenRegex returns null (not undefined) when skipWhen is not set
+        (bp) => bp.regex === null && bp.excludeSet.size === 0 && bp.skipWhenRegex === null,
     );
     if (pageCount < FAST_PATH_THRESHOLD || !isAligned || !isPageBoundaryOnly || maxContentLength || debugMetaKey) {
         return null;

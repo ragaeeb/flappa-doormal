@@ -2,10 +2,6 @@ import type { Breakpoint } from './breakpoints.js';
 import type { PageRangeConstraint } from './index.js';
 import type { SplitRule } from './rules.js';
 
-// =============================================================================
-// Preprocess Transform Types
-// =============================================================================
-
 /**
  * Remove zero-width control characters.
  *

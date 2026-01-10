@@ -391,6 +391,7 @@ preprocess: [
 { type: 'removeZeroWidth', mode: 'strip' }
 
 // Alternative: replace with space (preserves word boundaries)
+// Note: Won't insert space after existing whitespace (space, newline, tab)
 { type: 'removeZeroWidth', mode: 'space' }
 ```
 
@@ -653,6 +654,7 @@ For breaking on multiple words, the `words` field provides a simpler syntax with
 { words: ['{{naql}}', 'وكذلك'] }  // Token expansion works
 
 // Note: `words` cannot be combined with `pattern` or `regex`
+// Note: Empty `words: []` is filtered out (no-op), NOT treated as page-boundary fallback
 ```
 
 **Security note (ReDoS)**: Breakpoints (and raw `regex` rules) compile user-provided regular expressions. **Do not accept untrusted patterns** (e.g. from end users) without validation/sandboxing; some regexes can trigger catastrophic backtracking and hang the process.

@@ -4386,5 +4386,64 @@ describe('segmenter', () => {
             // First segment should end before "a.*b"
             expect(result[0].content).not.toContain('a.*b');
         });
+
+        it('should match literal brackets in words (no double-escaping)', () => {
+            const pages: Page[] = [
+                {
+                    content: 'Some text (important) and then more content here to exceed limit.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ words: ['(important)'] }],
+                maxContentLength: 50,
+            });
+
+            // Should split at literal "(important)"
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // First segment should NOT contain "(important)" since we split at it
+            expect(result[0].content).not.toContain('(important)');
+        });
+
+        it('should match literal square brackets in words', () => {
+            const pages: Page[] = [
+                {
+                    content: 'Reference [note] followed by more text to exceed the maximum limit.',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ words: ['[note]'] }],
+                maxContentLength: 50,
+            });
+
+            // Should split at literal "[note]"
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            expect(result[0].content).not.toContain('[note]');
+        });
+
+        it('should filter out empty words arrays (not treat as page-boundary)', () => {
+            const pages: Page[] = [
+                { content: 'Page one content here.', id: 1 },
+                { content: 'Page two content here.', id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                maxPages: 0, // Force single-page segments
+                // Empty words should be filtered out, leaving only '' as fallback
+                // If empty words WAS treated as page-boundary, we'd have 2 breakpoints
+                // but since it's filtered, only '' breakpoint applies
+                breakpoints: [{ words: [] }, ''],
+            });
+
+            // Should produce 2 segments (one per page) from '' fallback
+            expect(result.length).toBe(2);
+            expect(result[0].from).toBe(1);
+            expect(result[0].to).toBeUndefined();
+            expect(result[1].from).toBe(2);
+            expect(result[1].to).toBeUndefined();
+        });
     });
 });

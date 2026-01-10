@@ -13,6 +13,7 @@ import {
     buildBoundaryPositions,
     buildExcludeSet,
     createSegment,
+    escapeWordsOutsideTokens,
     estimateStartOffsetInCurrentPage,
     expandBreakpoints,
     findBreakpointWindowEndPosition,
@@ -62,54 +63,54 @@ describe('breakpoint-utils', () => {
         it('should default split to at when words is specified', () => {
             const rule = { words: ['فهذا', 'ثم'] };
             const result = normalizeBreakpoint(rule);
-            expect(result).toMatchObject({ words: ['فهذا', 'ثم'], split: 'at' });
+            expect(result).toMatchObject({ split: 'at', words: ['فهذا', 'ثم'] });
         });
 
         it('should allow split:after override for words', () => {
-            const rule = { words: ['والله أعلم'], split: 'after' as const };
+            const rule = { split: 'after' as const, words: ['والله أعلم'] };
             const result = normalizeBreakpoint(rule);
-            expect(result).toMatchObject({ words: ['والله أعلم'], split: 'after' });
+            expect(result).toMatchObject({ split: 'after', words: ['والله أعلم'] });
         });
 
         it('should throw when words combined with pattern', () => {
-            const rule = { words: ['test'], pattern: 'X' };
+            const rule = { pattern: 'X', words: ['test'] };
             expect(() => normalizeBreakpoint(rule)).toThrow('cannot be combined');
         });
 
         it('should throw when words combined with regex', () => {
-            const rule = { words: ['test'], regex: 'X' };
+            const rule = { regex: 'X', words: ['test'] };
             expect(() => normalizeBreakpoint(rule)).toThrow('cannot be combined');
         });
     });
 
     describe('escapeWordsOutsideTokens', () => {
         it('should escape regex metacharacters', () => {
-            const { escapeWordsOutsideTokens } = require('./breakpoint-utils.js');
             expect(escapeWordsOutsideTokens('a.*b')).toBe('a\\.\\*b');
         });
 
         it('should preserve {{token}} delimiters', () => {
-            const { escapeWordsOutsideTokens } = require('./breakpoint-utils.js');
             expect(escapeWordsOutsideTokens('{{naql}}.test')).toBe('{{naql}}\\.test');
         });
 
         it('should handle multiple tokens', () => {
-            const { escapeWordsOutsideTokens } = require('./breakpoint-utils.js');
             expect(escapeWordsOutsideTokens('{{naql}}.*{{bab}}')).toBe('{{naql}}\\.\\*{{bab}}');
         });
 
         it('should handle text without tokens', () => {
-            const { escapeWordsOutsideTokens } = require('./breakpoint-utils.js');
             expect(escapeWordsOutsideTokens('simple text')).toBe('simple text');
         });
 
-        it('should escape all standard regex metacharacters', () => {
-            const { escapeWordsOutsideTokens } = require('./breakpoint-utils.js');
-            expect(escapeWordsOutsideTokens('.*+?^${}()|[]\\')).toBe('\\.\\*\\+\\?\\^\\$\\{\\}\\(\\)\\|\\[\\]\\\\');
+        it('should escape regex metacharacters except ()[] which are handled by processPattern', () => {
+            // ()[] are NOT escaped here - processPattern handles them via escapeTemplateBrackets
+            expect(escapeWordsOutsideTokens('.*+?^${}()|[]\\')).toBe('\\.\\*\\+\\?\\^\\$\\{\\}()\\|[]\\\\');
+        });
+
+        it('should leave literal brackets for processPattern to escape', () => {
+            expect(escapeWordsOutsideTokens('(literal)')).toBe('(literal)');
+            expect(escapeWordsOutsideTokens('[bracket]')).toBe('[bracket]');
         });
 
         it('should handle token with capture name', () => {
-            const { escapeWordsOutsideTokens } = require('./breakpoint-utils.js');
             expect(escapeWordsOutsideTokens('{{naql:name}}.test')).toBe('{{naql:name}}\\.test');
         });
     });
@@ -318,7 +319,7 @@ describe('breakpoint-utils', () => {
             const result = expandBreakpoints([{ words: ['', 'valid', '  '] }], identityProcessor);
             const source = result[0].regex?.source ?? '';
             expect(source).toContain('valid');
-            expect(source).not.toMatch(/\(\?\:\)|\(\?\:\|/); // No empty alternations
+            expect(source).not.toMatch(/\(\?:\)|\(\?:\|/); // No empty alternations
         });
 
         it('should escape metacharacters in words', () => {
@@ -333,18 +334,27 @@ describe('breakpoint-utils', () => {
             expect(result[0].regex?.source).toContain('testY');
         });
 
-        it('should handle empty words array', () => {
+        it('should filter out empty words arrays (not treat as page-boundary fallback)', () => {
             const result = expandBreakpoints([{ words: [] }], identityProcessor);
-            expect(result[0].regex).toBeNull();
+            // Empty words = no-op, filtered out entirely
+            // This is NOT the same as '' pattern which is page-boundary fallback
+            expect(result).toHaveLength(0);
+        });
+
+        it('should keep page-boundary fallback distinct from empty words', () => {
+            const result = expandBreakpoints(['', { words: [] }], identityProcessor);
+            // '' is kept as page-boundary fallback, words: [] is filtered out
+            expect(result).toHaveLength(1);
+            expect(result[0].regex).toBeNull(); // page-boundary has null regex
         });
 
         it('should respect split:after override for words', () => {
-            const result = expandBreakpoints([{ words: ['والله أعلم'], split: 'after' }], identityProcessor);
+            const result = expandBreakpoints([{ split: 'after', words: ['والله أعلم'] }], identityProcessor);
             expect(result[0].splitAt).toBe(false);
         });
 
         it('should preserve min/max constraints for words', () => {
-            const result = expandBreakpoints([{ words: ['test'], min: 10, max: 100 }], identityProcessor);
+            const result = expandBreakpoints([{ max: 100, min: 10, words: ['test'] }], identityProcessor);
             expect(result[0].rule.min).toBe(10);
             expect(result[0].rule.max).toBe(100);
         });
@@ -702,7 +712,6 @@ describe('breakpoint-utils', () => {
             const segmentContent = 'Page ten content here.\nPage twenty content.\nPage thirty.';
             const cumulativeOffsets = [0, 23, 44, 56]; // includes separators
 
-            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
             const boundaries = buildBoundaryPositions(
                 segmentContent,
                 0,
@@ -733,7 +742,6 @@ describe('breakpoint-utils', () => {
             const segmentContent = 'Start content here.\nEnd content here.';
             const cumulativeOffsets = [0, 20, 36, 54];
 
-            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
             const boundaries = buildBoundaryPositions(
                 segmentContent,
                 0,
@@ -759,7 +767,6 @@ describe('breakpoint-utils', () => {
             const segmentContent = 'Page ten content.\n   \n  \nPage thirty content.';
             const cumulativeOffsets = [0, 18, 25, 46];
 
-            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
             const boundaries = buildBoundaryPositions(
                 segmentContent,
                 0,

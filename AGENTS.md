@@ -557,9 +557,21 @@ bunx biome lint .
 
 34. **`preprocess` option applies transforms before rules**: The `preprocess` array in `SegmentationOptions` applies text transforms to each page's content BEFORE `buildPageMap()` is called. This ensures patterns match on the normalized text. Transforms are: `removeZeroWidth`, `condenseEllipsis`, `fixTrailingWaw`. Each can have `min`/`max` page constraints.
 
-35. **`words` field simplifies word-based breakpoints**: Instead of manually writing `\s+(?:word1|word2|...)` alternations, use `words: ['word1', 'word2']`. The field auto-escapes metacharacters (except inside `{{tokens}}`), sorts by length descending, deduplicates, and defaults to `split: 'at'`. Cannot be combined with `pattern` or `regex`.
+35. **`words` field simplifies word-based breakpoints**: Instead of manually writing `\s+(?:word1|word2|...)` alternations, use `words: ['word1', 'word2']`. The field auto-escapes metacharacters (except `()[]` which are handled by `processPattern`), sorts by length descending, deduplicates, and defaults to `split: 'at'`. Cannot be combined with `pattern` or `regex`. **Empty arrays are filtered out** (no-op), NOT treated as page-boundary fallback like `''`.
 
 36. **`{{newline}}` token for readability**: Instead of `\\n` in breakpoint patterns, use `{{newline}}`. This expands to `\n` and is more readable in JSON configuration files.
+
+37. **Never use decorative separator comments**: Do NOT write comments like `// ============================================================================` or similar ASCII art separators. These waste tokens, add no value, and pollute the codebase. Use simple single-line comments or JSDoc instead.
+
+38. **Never use `require()` in test files**: Always use ES module `import` statements at the top of test files. Do NOT use inline `require()` calls inside test blocks. This ensures consistent module resolution and avoids mixing CommonJS and ESM patterns.
+
+39. **Avoid double-escaping in layered pattern processing**: When patterns pass through multiple processing stages (e.g., `escapeWordsOutsideTokens` → `processPattern`), ensure each character class is escaped exactly once. The `words` field initially had a bug where `()[]` were escaped by `escapeWordsOutsideTokens` and then again by `processPattern`'s `escapeTemplateBrackets`. **Fix**: `escapeWordsOutsideTokens` now escapes metacharacters EXCEPT `()[]`, letting `processPattern` handle those.
+
+40. **Empty arrays vs empty strings have different semantics**: `words: []` should be a no-op (filtered out), not equivalent to `pattern: ''` (page-boundary fallback). When designing APIs with arrays, explicitly decide and document what empty array means vs null/undefined vs explicit empty value.
+
+41. **Whitespace checks should use `/\s/` not `=== ' '`**: When checking "is this character whitespace?" use `/\s/.test(char)` to catch spaces, tabs, newlines, and other unicode whitespace. The `removeZeroWidth` space mode initially only checked `=== ' '`, causing unwanted spaces after newlines.
+
+42. **Use `assertNever` for exhaustive switches**: When switching on union types (like `PreprocessTransform`), add a `default` case that calls `assertNever(x: never)` which throws. TypeScript will error at compile time if a new union member is added but not handled.
 
 ### Process Template (Multi-agent design review, TDD-first)
 

@@ -434,6 +434,16 @@ For each step:
 - "Unicode safety needed" - often the user's pattern defines boundaries
 - "Fast path doesn't handle X" - often the fast path doesn't apply to X
 - "Breaking change" - often an edge case that was never officially supported
+- "Missing feature X" - check if it was intentionally removed/deferred from scope
+- "Empty array should throw" - semantics of empty arrays vary; check if no-op is intentional
+
+### Synthesis Best Practices
+1. **Count consensus**: Issues flagged by 3+ reviewers warrant immediate attention
+2. **Verify before fixing**: Check actual code - reviewers often misread layered abstractions
+3. **Check scope**: Some "missing" features were intentionally removed from plan
+4. **Look for root cause**: Multiple "double-escaping" reports → single fix in escaping pipeline
+5. **Distinguish severity**: "Critical" from reviewers ≠ actually critical; verify impact
+6. **Document deferred items**: Create clear "Won't Fix" with rationale for future reference
 
 ### Preparing Context for Reviewers
 1. **Include type definitions** - Reviewers need to see interfaces and contracts
@@ -455,3 +465,58 @@ For each step:
 - Not including type definitions - Reviewers can't understand API
 - Asking for "tests" without categories - Get random tests instead of systematic coverage
 - Not specifying response format - Hard to synthesize inconsistent responses
+
+---
+
+## 8) Post-Implementation Review
+
+After completing the implementation, conduct a post-implementation review with AI agents.
+
+**See**: [`docs/post-implementation-review-prompt.md`](post-implementation-review-prompt.md) for the full template and instructions.
+
+### Quick Reference: Generating a Diff
+
+```bash
+# Output diff to file for AI agents
+git diff main > review-diff.txt
+
+# For large diffs, split by module
+git diff main -- src/types/ > diff-types.txt
+git diff main -- src/segmentation/ > diff-segmentation.txt
+```
+
+### Creating a Feature-Specific Review Request
+
+1. Copy the template from `docs/post-implementation-review-prompt.md`
+2. Save to `docs/feature/<feature>/post-impl-review-request.md`
+3. Fill in the implementation summary and paste the diff
+4. Send to AI agents for review
+
+---
+
+## 9) Code Style Guidelines
+
+### Avoid Token-Wasting Comments
+
+Do NOT use decorative separator comments like these:
+
+```typescript
+// ============================================================================
+// Section Name
+// ============================================================================
+```
+
+These waste tokens and provide no value. Use JSDoc comments or simple single-line headers instead:
+
+```typescript
+// Section Name
+```
+
+Or better yet, if the file is well-organized, no section comments are needed at all.
+
+### Other Guidelines
+
+- Prefer `type` over `interface` in TypeScript
+- Use explicit return types for exported functions
+- Keep functions under 50-80 lines
+- Extract helpers to reduce cognitive complexity (max 15)

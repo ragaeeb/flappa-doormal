@@ -1,5 +1,13 @@
 import type { PageRangeConstraint, PreprocessTransform } from '../types/index.js';
 
+/** Helper for exhaustive switch checking - TypeScript will error if a case is missed */
+const assertNever = (x: never): never => {
+    throw new Error(`Unknown preprocess transform type: ${JSON.stringify(x)}`);
+};
+
+/** Check if a character is whitespace (space, newline, tab, etc.) */
+const isWhitespace = (char: string): boolean => /\s/.test(char);
+
 /**
  * Check if a character code is a zero-width control character.
  *
@@ -24,21 +32,23 @@ export const isZeroWidth = (code: number): boolean =>
  */
 export const removeZeroWidth = (text: string, mode: 'strip' | 'space' = 'strip'): string => {
     if (mode === 'space') {
-        let result = '';
-        let lastWasSpace = true; // Treat start as "after space" to avoid leading space
+        // Use array builder for O(n) performance instead of string concatenation
+        const parts: string[] = [];
+        let lastWasWhitespace = true; // Treat start as "after whitespace" to avoid leading space
         for (let i = 0; i < text.length; i++) {
             const code = text.charCodeAt(i);
             if (isZeroWidth(code)) {
-                if (!lastWasSpace && result.length > 0) {
-                    result += ' ';
-                    lastWasSpace = true;
+                if (!lastWasWhitespace && parts.length > 0) {
+                    parts.push(' ');
+                    lastWasWhitespace = true;
                 }
             } else {
-                result += text[i];
-                lastWasSpace = text[i] === ' ';
+                const char = text[i];
+                parts.push(char);
+                lastWasWhitespace = isWhitespace(char);
             }
         }
-        return result;
+        return parts.join('');
     }
     return text.replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\uFEFF]/g, '');
 };
@@ -68,8 +78,12 @@ export const fixTrailingWaw = (text: string): string => text.replace(/ و /g, ' 
  * Check if a page ID is within a constraint range.
  */
 const isInRange = (pageId: number, constraint: PageRangeConstraint): boolean => {
-    if (constraint.min !== undefined && pageId < constraint.min) return false;
-    if (constraint.max !== undefined && pageId > constraint.max) return false;
+    if (constraint.min !== undefined && pageId < constraint.min) {
+        return false;
+    }
+    if (constraint.max !== undefined && pageId > constraint.max) {
+        return false;
+    }
     return true;
 };
 
@@ -78,7 +92,12 @@ const isInRange = (pageId: number, constraint: PageRangeConstraint): boolean => 
  */
 const normalizeTransform = (
     transform: PreprocessTransform,
-): { type: 'removeZeroWidth' | 'condenseEllipsis' | 'fixTrailingWaw'; mode?: 'strip' | 'space'; min?: number; max?: number } => {
+): {
+    type: 'removeZeroWidth' | 'condenseEllipsis' | 'fixTrailingWaw';
+    mode?: 'strip' | 'space';
+    min?: number;
+    max?: number;
+} => {
     if (typeof transform === 'string') {
         return { type: transform };
     }
@@ -96,18 +115,16 @@ const normalizeTransform = (
  * @param transforms - Array of transforms to apply
  * @returns Transformed content
  */
-export const applyPreprocessToPage = (
-    content: string,
-    pageId: number,
-    transforms: PreprocessTransform[],
-): string => {
+export const applyPreprocessToPage = (content: string, pageId: number, transforms: PreprocessTransform[]): string => {
     let result = content;
 
     for (const transform of transforms) {
         const rule = normalizeTransform(transform);
 
         // Check page constraints
-        if (!isInRange(pageId, rule)) continue;
+        if (!isInRange(pageId, rule)) {
+            continue;
+        }
 
         // Apply transform
         switch (rule.type) {
@@ -120,6 +137,9 @@ export const applyPreprocessToPage = (
             case 'fixTrailingWaw':
                 result = fixTrailingWaw(result);
                 break;
+            default:
+                // TypeScript will error if a new transform type is added but not handled
+                assertNever(rule.type);
         }
     }
 
