@@ -2628,23 +2628,6 @@ describe('segmenter', () => {
         ]);
     });
 
-    it('should apply SegmentationOptions.replace before matching rules (integration)', () => {
-        const pages: Page[] = [{ content: '١- نص', id: 1 }];
-
-        const rules: SplitRule[] = [{ lineStartsAfter: ['{{raqms:num}} {{dash}} '], split: 'at' }];
-
-        // Without replace: no match (missing spaces around dash), so marker isn't stripped and no meta is captured.
-        const noReplace = segmentPages(pages, { rules });
-        expect(noReplace).toEqual([{ content: '١- نص', from: 1 }]);
-
-        // With replace: normalize "١-" -> "١ - " so the rule matches and captures num.
-        const withReplace = segmentPages(pages, {
-            replace: [{ regex: '([\\u0660-\\u0669]+)\\s*[-–—ـ]\\s*', replacement: '$1 - ' }],
-            rules,
-        });
-        expect(withReplace).toEqual([{ content: 'نص', from: 1, meta: { num: '١' } }]);
-    });
-
     describe('maxContentLength safe break', () => {
         it('should not split in the middle of a word when maxContentLength forces a break', () => {
             // Single page with Arabic content without punctuation (longer than 100 chars)

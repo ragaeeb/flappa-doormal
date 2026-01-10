@@ -39,27 +39,6 @@ export interface Logger {
 }
 
 /**
- * - Default regex flags: `gu` (global + unicode)
- * - If `flags` is provided, it is validated and merged with required flags:
- *   `g` and `u` are always enforced.
- *
- * `pageIds` controls which pages a rule applies to:
- * - `undefined`: apply to all pages
- * - `[]`: apply to no pages (rule is skipped)
- * - `[id1, id2, ...]`: apply only to those pages
- */
-export type Replacement = {
-    /** Raw regex source string (no token expansion). Compiled with `u` (and always `g`). */
-    regex: string;
-    /** Replacement string (passed to `String.prototype.replace`). */
-    replacement: string;
-    /** Optional regex flags; `g` and `u` are always enforced. */
-    flags?: string;
-    /** Optional list of page IDs to apply this replacement to. Empty array means skip. */
-    pageIds?: number[];
-};
-
-/**
  * Segmentation options controlling how pages are split.
  *
  * @example
@@ -92,13 +71,6 @@ export type Replacement = {
  * };
  */
 export type SegmentationOptions = {
-    /**
-     * Optional pre-processing replacements applied to page content BEFORE segmentation.
-     *
-     * Replacements are applied per-page (not on concatenated content), in array order.
-     */
-    replace?: Replacement[];
-
     /**
      * Rules applied in order to find split points.
      *

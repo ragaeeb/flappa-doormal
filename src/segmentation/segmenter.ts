@@ -1,4 +1,3 @@
-import { applyReplacements } from '@/preprocessing/replace.js';
 import type { Page, Segment } from '@/types';
 import type { Logger, SegmentationOptions } from '@/types/options.js';
 import type { SplitRule } from '@/types/rules.js';
@@ -325,8 +324,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
         ruleCount: rules.length,
     });
 
-    const processedPages = options.replace ? applyReplacements(pages, options.replace) : pages;
-    const { content: matchContent, normalizedPages: normalizedContent, pageMap } = buildPageMap(processedPages);
+    const { content: matchContent, normalizedPages: normalizedContent, pageMap } = buildPageMap(pages);
 
     logger?.debug?.('[segmenter] content built', { pageIds: pageMap.pageIds, totalContentLength: matchContent.length });
 
@@ -341,13 +339,13 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
     let segments = buildSegments(unique, matchContent, pageMap, rules, pageJoiner);
     logger?.debug?.('[segmenter] structural segments built', { segmentCount: segments.length });
 
-    segments = ensureFallbackSegment(segments, processedPages, normalizedContent, pageJoiner);
+    segments = ensureFallbackSegment(segments, pages, normalizedContent, pageJoiner);
 
     if (hasLimits) {
         logger?.debug?.('[segmenter] applying breakpoints to oversized segments');
         const result = applyBreakpoints(
             segments,
-            processedPages,
+            pages,
             normalizedContent,
             maxPages,
             breakpoints,

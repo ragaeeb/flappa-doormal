@@ -453,46 +453,44 @@ bunx biome lint .
 
 1. **`lineStartsAfter` vs `lineStartsWith` is not “cosmetic”**: `lineStartsAfter` changes output by stripping the matched marker via an internal `contentStartOffset` during segment construction. If a client used it by accident, you cannot reconstruct the exact stripped prefix from output alone without referencing the original pages and re-matching the marker.
 
-2. **Recovery must mirror segmentation’s preprocessing**: If `SegmentationOptions.replace` was used, recovery must apply the same replacements (see `src/preprocessing/replace.ts`) before attempting anchoring or rerun alignment, otherwise substring matching and page joins will drift.
-
-3. **Page joining differs between matching and output**:
+2. **Page joining differs between matching and output**:
    - Matching always happens on pages concatenated with `\\n` separators.
    - Output segments may normalize page boundaries (`pageJoiner: 'space' | 'newline'`) and breakpoints post-processing uses its own join normalization utilities.
    Recovery code must be explicit about which representation it’s searching.
 
-4. **Breakpoints can produce “pieces” that were never marker-stripped**: When `maxPages` + `breakpoints` are enabled, only the piece that starts at the original structural boundary could have lost a marker due to `lineStartsAfter`. Mid-segment breakpoint pieces should not be “recovered” unless you can anchor them confidently.
+3. **Breakpoints can produce “pieces” that were never marker-stripped**: When `maxPages` + `breakpoints` are enabled, only the piece that starts at the original structural boundary could have lost a marker due to `lineStartsAfter`. Mid-segment breakpoint pieces should not be “recovered” unless you can anchor them confidently.
 
-5. **Fuzzy defaults are easy to miss**: Some tokens auto-enable fuzzy matching unless `fuzzy: false` is set (`bab`, `basmalah`, `fasl`, `kitab`, `naql`). If you are validating markers or re-matching prefixes, use the same compilation path as segmentation (`buildRuleRegex` / `processPattern`) so diacritics and token expansion behave identically.
+4. **Fuzzy defaults are easy to miss**: Some tokens auto-enable fuzzy matching unless `fuzzy: false` is set (`bab`, `basmalah`, `fasl`, `kitab`, `naql`). If you are validating markers or re-matching prefixes, use the same compilation path as segmentation (`buildRuleRegex` / `processPattern`) so diacritics and token expansion behave identically.
 
-6. **Auto-escaping applies to template-like patterns**: `lineStartsWith`, `lineStartsAfter`, `lineEndsWith`, and `template` auto-escape `()[]` outside `{{tokens}}`. Raw `regex` does not. If you compare patterns by string equality, be careful about escaping and whitespace.
+5. **Auto-escaping applies to template-like patterns**: `lineStartsWith`, `lineStartsAfter`, `lineEndsWith`, and `template` auto-escape `()[]` outside `{{tokens}}`. Raw `regex` does not. If you compare patterns by string equality, be careful about escaping and whitespace.
 
-7. **TypeScript union pitfalls with `SplitRule`**: `SplitRule` is a union where only one pattern type should exist. Avoid mutating rules in-place with `delete` on fields (TS often narrows unions and then complains). Prefer rebuilding converted rules via destructuring (e.g. `{ lineStartsAfter, ...rest }` then create `{...rest, lineStartsWith: lineStartsAfter}`).
+6. **TypeScript union pitfalls with `SplitRule`**: `SplitRule` is a union where only one pattern type should exist. Avoid mutating rules in-place with `delete` on fields (TS often narrows unions and then complains). Prefer rebuilding converted rules via destructuring (e.g. `{ lineStartsAfter, ...rest }` then create `{...rest, lineStartsWith: lineStartsAfter}`).
 
-8. **Biome lint constraints shape implementation**: The repo enforces low function complexity. Expect to extract helpers (alignment, selector resolution, anchoring) to keep Biome happy. Also, Biome can flag regex character-class usage as misleading; prefer alternation (e.g. `(?:\\u200C|\\u200D|\\uFEFF)`) when removing specific codepoints.
+7. **Biome lint constraints shape implementation**: The repo enforces low function complexity. Expect to extract helpers (alignment, selector resolution, anchoring) to keep Biome happy. Also, Biome can flag regex character-class usage as misleading; prefer alternation (e.g. `(?:\\u200C|\\u200D|\\uFEFF)`) when removing specific codepoints.
 
-9. **When debugging recovery, start here**:
+8. **When debugging recovery, start here**:
    - `src/segmentation/segmenter.ts` (how content is sliced/trimmed and how `from/to` are computed)
    - `src/segmentation/rule-regex.ts` + `src/segmentation/tokens.ts` (token expansion + fuzzy behavior)
    - `src/preprocessing/replace.ts` (preprocessing parity)
    - `src/recovery.ts` (recovery implementation)
 
-10. **Prefer library utilities for UI tasks**: Instead of re-implementing rule merging, validation, or token mapping in client code, use `optimizeRules`, `validateRules`/`formatValidationReport`, and `applyTokenMappings`. They handle edge cases (like duplicate patterns, regex safety, or diacritic handling) that ad-hoc implementations might miss.
+9. **Prefer library utilities for UI tasks**: Instead of re-implementing rule merging, validation, or token mapping in client code, use `optimizeRules`, `validateRules`/`formatValidationReport`, and `applyTokenMappings`. They handle edge cases (like duplicate patterns, regex safety, or diacritic handling) that ad-hoc implementations might miss.
 
-11. **Safety Fallback (Search-back)**: When forced to split at a hard character limit, searching backward for whitespace/punctuation (`[\s\n.,;!?؛،۔]`) prevents word-chopping and improves readability significantly.
+10. **Safety Fallback (Search-back)**: When forced to split at a hard character limit, searching backward for whitespace/punctuation (`[\s\n.,;!?؛،۔]`) prevents word-chopping and improves readability significantly.
 
-12. **Unicode Boundary Safety (Surrogates + Graphemes)**: Multi-byte characters (like emojis) can be corrupted if split in the middle of a surrogate pair. Similarly, Arabic diacritics (combining marks), ZWJ/ZWNJ, and variation selectors can be orphaned if a hard split lands in the middle of a grapheme cluster. Use `adjustForUnicodeBoundary` when forced to hard-split near a limit.
+11. **Unicode Boundary Safety (Surrogates + Graphemes)**: Multi-byte characters (like emojis) can be corrupted if split in the middle of a surrogate pair. Similarly, Arabic diacritics (combining marks), ZWJ/ZWNJ, and variation selectors can be orphaned if a hard split lands in the middle of a grapheme cluster. Use `adjustForUnicodeBoundary` when forced to hard-split near a limit.
 
-13. **Recursion/Iteration Safety**: Using a progress-based guard (comparing `cursorPos` before and after loop iteration) is safer than fixed iteration limits for supporting arbitrary-sized content without truncation risks.
+12. **Recursion/Iteration Safety**: Using a progress-based guard (comparing `cursorPos` before and after loop iteration) is safer than fixed iteration limits for supporting arbitrary-sized content without truncation risks.
 
-14. **Accidental File Overwrites**: Be extremely careful when using tools like `replace_file_content` with large ranges. Verify file integrity frequently (e.g., `git diff`) to catch accidental deletions of existing code or tests. Merging new tests into existing files is a high-risk operation for AI agents.
+13. **Accidental File Overwrites**: Be extremely careful when using tools like `replace_file_content` with large ranges. Verify file integrity frequently (e.g., `git diff`) to catch accidental deletions of existing code or tests. Merging new tests into existing files is a high-risk operation for AI agents.
 
-15. **Invisible Unicode Marks Break Regex Anchors**: Arabic text often contains invisible formatting marks like Left-to-Right Mark (`U+200E`), Right-to-Left Mark (`U+200F`), Arabic Letter Mark (`U+061C`), Zero-Width Space (`U+200B`), Zero-Width Non-Joiner (`U+200C`), Zero-Width Joiner (`U+200D`), or BOM (`U+FEFF`). These can appear at line starts after `\n` but before visible characters, breaking `^` anchored patterns. Solution: include an optional zero-width character class prefix in line-start patterns: `^[\u200E\u200F\u061C\u200B\u200C\u200D\uFEFF]*(?:pattern)`. The library now handles this automatically in `buildLineStartsWithRegexSource` and `buildLineStartsAfterRegexSource`.
+14. **Invisible Unicode Marks Break Regex Anchors**: Arabic text often contains invisible formatting marks like Left-to-Right Mark (`U+200E`), Right-to-Left Mark (`U+200F`), Arabic Letter Mark (`U+061C`), Zero-Width Space (`U+200B`), Zero-Width Non-Joiner (`U+200C`), Zero-Width Joiner (`U+200D`), or BOM (`U+FEFF`). These can appear at line starts after `\n` but before visible characters, breaking `^` anchored patterns. Solution: include an optional zero-width character class prefix in line-start patterns: `^[\u200E\u200F\u061C\u200B\u200C\u200D\uFEFF]*(?:pattern)`. The library now handles this automatically in `buildLineStartsWithRegexSource` and `buildLineStartsAfterRegexSource`.
 
-16. **Large Segment Performance & Debugging Strategy**: When processing large books (1000+ pages), avoid O(n²) algorithms. The library uses a fast-path threshold (1000 pages) to switch from accurate string-search boundary detection to cumulative-offset-based slicing. Even on the iterative path (e.g. debug mode), we **slice only the active window (+padding)** per iteration (never `fullContent.slice(cursorPos)`), to avoid quadratic allocation/GC churn. To diagnose performance bottlenecks: (1) Look for logs with "Using iterative path" or "Using accurate string-search path" with large `pageCount` values, (2) Check `iterations` count in completion logs, (3) Strategic logs are placed at operation boundaries (start/end) NOT inside tight loops to avoid log-induced performance regression.
+15. **Large Segment Performance & Debugging Strategy**: When processing large books (1000+ pages), avoid O(n²) algorithms. The library uses a fast-path threshold (1000 pages) to switch from accurate string-search boundary detection to cumulative-offset-based slicing. Even on the iterative path (e.g. debug mode), we **slice only the active window (+padding)** per iteration (never `fullContent.slice(cursorPos)`), to avoid quadratic allocation/GC churn. To diagnose performance bottlenecks: (1) Look for logs with "Using iterative path" or "Using accurate string-search path" with large `pageCount` values, (2) Check `iterations` count in completion logs, (3) Strategic logs are placed at operation boundaries (start/end) NOT inside tight loops to avoid log-induced performance regression.
 
-17. **`maxPages=0` is a hard invariant**: When `maxPages=0`, breakpoint windows must never scan beyond the current page boundary. Relying purely on boundary detection (string search) can fail near page ends for long Arabic text + space joiners, letting the window “see” into the next page and creating multi-page segments. The safe fix is to clamp the breakpoint window to the current page’s end using `boundaryPositions` in breakpoint processing.
+16. **`maxPages=0` is a hard invariant**: When `maxPages=0`, breakpoint windows must never scan beyond the current page boundary. Relying purely on boundary detection (string search) can fail near page ends for long Arabic text + space joiners, letting the window “see” into the next page and creating multi-page segments. The safe fix is to clamp the breakpoint window to the current page’s end using `boundaryPositions` in breakpoint processing.
 
-18. **`''` breakpoint semantics depend on whether the window is page-bounded vs length-bounded**: `''` means “page boundary fallback”, but it’s intentionally **mode-dependent**:
+17. **`''` breakpoint semantics depend on whether the window is page-bounded vs length-bounded**: `''` means “page boundary fallback”, but it’s intentionally **mode-dependent**:
 
    - **Page-bounded window (maxPages-driven)**: `''` should “swallow the remainder of the current page” (i.e. break at the **next page boundary**, not at an arbitrary character limit). This prevents accidentally consuming part of the next page when no other breakpoint patterns match.
    - **Length-bounded window (maxContentLength-driven)**: `''` should **not** force an early page-boundary break. In this mode we want the best split *near the length limit* (safe-break fallback → Unicode-safe hard split) even if that means a piece can cross a page boundary.
@@ -508,17 +506,17 @@ bunx biome lint .
    }
    ```
 
-19. **Beware `.only` in test files**: A single `it.only(...)` can mask unrelated failing fixtures for a long time. When debugging, remove `.only` as soon as you have a focused reproduction, and re-run the full suite to catch latent failures.
+18. **Beware `.only` in test files**: A single `it.only(...)` can mask unrelated failing fixtures for a long time. When debugging, remove `.only` as soon as you have a focused reproduction, and re-run the full suite to catch latent failures.
 
-20. **Tooling gotcha: IDE diagnostics vs actual parser**: If the editor shows parse errors but `bun test` and `bunx biome check` pass, suspect unsaved local edits or stale diagnostics rather than codebase syntax. Always validate with a direct `bunx biome check <file>` before making sweeping “syntax fix” edits.
+19. **Tooling gotcha: IDE diagnostics vs actual parser**: If the editor shows parse errors but `bun test` and `bunx biome check` pass, suspect unsaved local edits or stale diagnostics rather than codebase syntax. Always validate with a direct `bunx biome check <file>` before making sweeping “syntax fix” edits.
 
-21. **Content-based page detection fails with overlapping content**: The `computeNextFromIdx` function uses prefix matching to detect page transitions. When page 0 ends with text identical to page 1's prefix, it incorrectly advances `currentFromIdx`. **Fix**: When `maxPages=0`, override content-based detection with position-based detection via `findPageIndexForPosition(cursorPos, boundaryPositions, fromIdx)`. Always trust cumulative offsets over content heuristics for strict page isolation.
+20. **Content-based page detection fails with overlapping content**: The `computeNextFromIdx` function uses prefix matching to detect page transitions. When page 0 ends with text identical to page 1's prefix, it incorrectly advances `currentFromIdx`. **Fix**: When `maxPages=0`, override content-based detection with position-based detection via `findPageIndexForPosition(cursorPos, boundaryPositions, fromIdx)`. Always trust cumulative offsets over content heuristics for strict page isolation.
 
-22. **Test edge cases with data that TRIGGERS the bug path**: Simple test data often bypasses problematic code paths. Ensure tests: (a) use `maxContentLength` to force sub-page splitting, (b) include enough content to exceed window sizes, (c) create overlapping/duplicate text at page boundaries, (d) verify that segments are actually split (not just checking no crashes).
+21. **Test edge cases with data that TRIGGERS the bug path**: Simple test data often bypasses problematic code paths. Ensure tests: (a) use `maxContentLength` to force sub-page splitting, (b) include enough content to exceed window sizes, (c) create overlapping/duplicate text at page boundaries, (d) verify that segments are actually split (not just checking no crashes).
 
-23. **Debug breakpoint processing with the logger**: Pass a `logger` object with `debug` and `trace` methods to `segmentPages()`. Key logs: `boundaryPositions built` (page boundary byte offsets), `iteration=N` (shows `currentFromIdx`, `cursorPos`, `windowEndPosition` per loop), `Complete` (final segment count).
+22. **Debug breakpoint processing with the logger**: Pass a `logger` object with `debug` and `trace` methods to `segmentPages()`. Key logs: `boundaryPositions built` (page boundary byte offsets), `iteration=N` (shows `currentFromIdx`, `cursorPos`, `windowEndPosition` per loop), `Complete` (final segment count).
 
-24. **Navigating `breakpoint-processor.ts`**: Key functions in (approximate) execution order:
+23. **Navigating `breakpoint-processor.ts`**: Key functions in (approximate) execution order:
 
    - `applyBreakpoints()` (entry point)
    - `processOversizedSegment()` (main loop)
@@ -530,15 +528,15 @@ bunx biome lint .
        - `advanceCursorAndIndex()` (progress)
        - `computeNextFromIdx()` (heuristic) **or** position-based override when `maxPages=0` (see #21)
 
-25. **Page attribution can drift in large-document breakpoint processing**: For ≥`FAST_PATH_THRESHOLD` segments, boundary positions may be derived from cumulative offsets (fast path). If upstream content is modified (e.g. marker stripping or accidental leading-trim), binary-search attribution can classify a piece as starting **before** `currentFromIdx`, inflating `(to - from)` and violating `maxPages`. **Fix**: clamp `actualStartIdx >= currentFromIdx` and re-apply the `maxPages` window using the same ID-span logic as `computeWindowEndIdx(...)` before creating the piece segment.
+24. **Page attribution can drift in large-document breakpoint processing**: For ≥`FAST_PATH_THRESHOLD` segments, boundary positions may be derived from cumulative offsets (fast path). If upstream content is modified (e.g. marker stripping or accidental leading-trim), binary-search attribution can classify a piece as starting **before** `currentFromIdx`, inflating `(to - from)` and violating `maxPages`. **Fix**: clamp `actualStartIdx >= currentFromIdx` and re-apply the `maxPages` window using the same ID-span logic as `computeWindowEndIdx(...)` before creating the piece segment.
 
-26. **Offset fast path must respect page-ID span semantics**: `maxPages` in this library is enforced as an **ID span** invariant (`(to ?? from) - from <= maxPages`). For large segments, the offset-based fast path must choose `segEnd` using the same ID-window logic as `computeWindowEndIdx(...)` (not “N pages by index”), otherwise gaps (e.g. `2216 → 2218`) produce illegal spans.
+25. **Offset fast path must respect page-ID span semantics**: `maxPages` in this library is enforced as an **ID span** invariant (`(to ?? from) - from <= maxPages`). For large segments, the offset-based fast path must choose `segEnd` using the same ID-window logic as `computeWindowEndIdx(...)` (not “N pages by index”), otherwise gaps (e.g. `2216 → 2218`) produce illegal spans.
 
-27. **Never `trimStart()` huge fallback content**: `ensureFallbackSegment()` constructs “all pages as one segment” when there are no structural split rules. If this giant content is `trimStart()`’d, cumulative offsets and derived boundary positions become inconsistent, which can lead to incorrect `from/to` attribution and `maxPages` violations that only appear on very large books.
+26. **Never `trimStart()` huge fallback content**: `ensureFallbackSegment()` constructs “all pages as one segment” when there are no structural split rules. If this giant content is `trimStart()`’d, cumulative offsets and derived boundary positions become inconsistent, which can lead to incorrect `from/to` attribution and `maxPages` violations that only appear on very large books.
 
-28. **Always test both sides of the fast-path threshold**: Several breakpoint bugs only reproduce at or above `FAST_PATH_THRESHOLD` (1000). Add regressions at `threshold-1` and `threshold` to avoid “works in small unit tests, fails on full books” surprises.
+27. **Always test both sides of the fast-path threshold**: Several breakpoint bugs only reproduce at or above `FAST_PATH_THRESHOLD` (1000). Add regressions at `threshold-1` and `threshold` to avoid “works in small unit tests, fails on full books” surprises.
 
-29. **Breakpoint `split` behavior**: The `split: 'at' | 'after'` option for breakpoints controls where the split happens relative to the matched text:
+28. **Breakpoint `split` behavior**: The `split: 'at' | 'after'` option for breakpoints controls where the split happens relative to the matched text:
    - `'after'` (default): Match is included in the previous segment
    - `'at'`: Match starts the next segment
    Key implementation details in `findPatternBreakPosition`:
@@ -547,15 +545,15 @@ bunx biome lint .
    - Zero-length matches (lookaheads) are always skipped to prevent infinite loops
    - Empty pattern `''` forces `splitAt=false` since page boundaries have no matched text
 
-30. **Unicode safety is the user's responsibility for patterns**: Unlike `findSafeBreakPosition` (which adjusts for grapheme boundaries), pattern-based breaks use the exact position where the user's regex matched. If a pattern matches mid-grapheme, that's a pattern authoring error, not a library bug. The library should NOT silently adjust pattern match positions.
+29. **Unicode safety is the user's responsibility for patterns**: Unlike `findSafeBreakPosition` (which adjusts for grapheme boundaries), pattern-based breaks use the exact position where the user's regex matched. If a pattern matches mid-grapheme, that's a pattern authoring error, not a library bug. The library should NOT silently adjust pattern match positions.
 
-31. **Fast path doesn't affect split behavior**: The offset-based fast path only applies to empty pattern `''` breakpoints (page boundary fallback), and empty patterns force `splitAt=false`. Pattern-based breakpoints with `split:'at'` never engage the fast path.
+30. **Fast path doesn't affect split behavior**: The offset-based fast path only applies to empty pattern `''` breakpoints (page boundary fallback), and empty patterns force `splitAt=false`. Pattern-based breakpoints with `split:'at'` never engage the fast path.
 
-32. **Whitespace trimming affects split:'at' output**: `createSegment()` trims segment content. With `split:'at'`, if the matched text is whitespace-only, it will be trimmed from the start of the next segment. This is usually desirable for delimiter patterns.
+31. **Whitespace trimming affects split:'at' output**: `createSegment()` trims segment content. With `split:'at'`, if the matched text is whitespace-only, it will be trimmed from the start of the next segment. This is usually desirable for delimiter patterns.
 
-33. **`prefer` semantics with `split:'at'`**: With `prefer:'longer'` + `split:'at'`, the algorithm selects the LAST valid match, maximizing content in the previous segment. This is correct but can be counterintuitive since the resulting previous segment might appear "shorter" than with `split:'after'`.
+32. **`prefer` semantics with `split:'at'`**: With `prefer:'longer'` + `split:'at'`, the algorithm selects the LAST valid match, maximizing content in the previous segment. This is correct but can be counterintuitive since the resulting previous segment might appear "shorter" than with `split:'after'`.
 
-34. **Multi-agent review synthesis**: Getting implementation reviews from multiple AI models (Claude, GPT, Grok, Gemini) and synthesizing their feedback helps catch issues a single reviewer might miss. Key insight: when reviewers disagree on "critical" issues, investigate the codebase to verify claims before implementing fixes. Some "critical" issues are based on incorrect assumptions about how fast paths or downstream functions work.
+33. **Multi-agent review synthesis**: Getting implementation reviews from multiple AI models (Claude, GPT, Grok, Gemini) and synthesizing their feedback helps catch issues a single reviewer might miss. Key insight: when reviewers disagree on "critical" issues, investigate the codebase to verify claims before implementing fixes. Some "critical" issues are based on incorrect assumptions about how fast paths or downstream functions work.
 
 ### Process Template (Multi-agent design review, TDD-first)
 

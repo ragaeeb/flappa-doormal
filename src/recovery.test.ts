@@ -42,26 +42,6 @@ describe('marker recovery (rerun-only MVP)', () => {
         expect(recovered.report.summary.recovered).toBe(1);
     });
 
-    it('handles options.replace by rerunning with the same options', () => {
-        const pages: Page[] = [{ content: 'وروى   أحمد', id: 1 }];
-        const options: SegmentationOptions = {
-            replace: [{ regex: ' +', replacement: ' ' }],
-            rules: [{ lineStartsAfter: ['وروى '] }],
-        };
-
-        const segments = segmentPages(pages, options);
-        expect(segments).toHaveLength(1);
-        // After marker stripping + trim, content should be "أحمد" with normalized spaces
-        expect(segments[0].content).toBe('أحمد');
-
-        const recovered = recoverMistakenLineStartsAfterMarkers(pages, segments, options, {
-            indices: [0],
-            type: 'rule_indices',
-        });
-
-        expect(recovered.segments[0].content).toBe('وروى أحمد');
-    });
-
     it('works with breakpoints: only the piece that begins at the structural boundary gains the marker', () => {
         const pages: Page[] = [
             { content: 'وروى أحمد\nنص طويل', id: 1 },

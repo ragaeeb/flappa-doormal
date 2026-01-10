@@ -10,7 +10,8 @@
 // OPTIMIZATION: Fast-path when no \r present (common case for Unix/Mac content)
 export const normalizeLineEndings = (content: string) => {
     return content.includes('\r') ? content.replace(/\r\n?/g, '\n') : content;
-}; // Auto-escaping for template patterns
+};
+
 /**
  * Escapes regex metacharacters (parentheses and brackets) in template patterns,
  * but preserves content inside `{{...}}` token delimiters.
@@ -34,8 +35,9 @@ export const normalizeLineEndings = (content: string) => {
  * escapeTemplateBrackets('{{harf}}')
  * // → '{{harf}}' (unchanged - no brackets outside tokens)
  */
-export const escapeTemplateBrackets = (pattern: string) =>
-    pattern.replace(/(\{\{[^}]*\}\})|([()[\]])/g, (_match, token, bracket) => token || `\\${bracket}`);
+export const escapeTemplateBrackets = (pattern: string) => {
+    return pattern.replace(/(\{\{[^}]*\}\})|([()[\]])/g, (_match, token, bracket) => token || `\\${bracket}`);
+};
 
 /**
  * Character class matching all Arabic diacritics (Tashkeel/Harakat).
@@ -94,12 +96,13 @@ const getEquivClass = (ch: string) => {
     return group ? `[${group.map(escapeRegex).join('')}]` : escapeRegex(ch);
 };
 
-const normalizeArabicLight = (str: string) =>
-    str
+const normalizeArabicLight = (str: string) => {
+    return str
         .normalize('NFC')
         .replace(/[\u200C\u200D]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
+};
 
 export const makeDiacriticInsensitive = (text: string) => {
     const diacriticsMatcher = `${DIACRITICS_CLASS}*`;
@@ -128,6 +131,7 @@ const isJoiner = (char: string | undefined) => char === '\u200C' || char === '\u
  */
 export const adjustForUnicodeBoundary = (content: string, position: number) => {
     let adjusted = position;
+
     while (adjusted > 0) {
         // 1. Ensure we don't split a surrogate pair
         // (High surrogate at adjusted-1, Low surrogate at adjusted)
@@ -147,6 +151,7 @@ export const adjustForUnicodeBoundary = (content: string, position: number) => {
             adjusted -= 1;
             continue;
         }
+
         break;
     }
     return adjusted;
