@@ -93,8 +93,10 @@ You are reviewing a completed implementation for the "flappa-doormal" TypeScript
    - **Fix**: Specific recommendation
 
 3. **Missing Tests** (table):
+
    | # | Test Name | Why Needed |
    |---|-----------|------------|
+
 
 4. **Performance Concerns** (if any)
 

@@ -4082,8 +4082,8 @@ describe('segmenter', () => {
             ];
 
             const result = segmentPages(pages, {
-                rules: [],
                 preprocess: ['removeZeroWidth'],
+                rules: [],
             });
 
             expect(result.length).toBe(1);
@@ -4121,8 +4121,8 @@ describe('segmenter', () => {
             ];
 
             const result = segmentPages(pages, {
-                rules: [],
                 preprocess: ['fixTrailingWaw'],
+                rules: [],
             });
 
             expect(result.length).toBe(1);
@@ -4139,8 +4139,8 @@ describe('segmenter', () => {
             ];
 
             const result = segmentPages(pages, {
-                rules: [],
                 preprocess: ['removeZeroWidth', 'condenseEllipsis', 'fixTrailingWaw'],
+                rules: [],
             });
 
             expect(result.length).toBe(1);
@@ -4153,13 +4153,13 @@ describe('segmenter', () => {
 
         it('should respect min constraint on preprocess transform', () => {
             const pages: Page[] = [
-                { id: 1, content: 'text...' },
-                { id: 10, content: 'more...' },
+                { content: 'text...', id: 1 },
+                { content: 'more...', id: 10 },
             ];
 
             const result = segmentPages(pages, {
+                preprocess: [{ min: 5, type: 'condenseEllipsis' }],
                 rules: [],
-                preprocess: [{ type: 'condenseEllipsis', min: 5 }],
             });
 
             // Page 1 (id < min 5): not transformed
@@ -4171,13 +4171,13 @@ describe('segmenter', () => {
 
         it('should respect max constraint on preprocess transform', () => {
             const pages: Page[] = [
-                { id: 1, content: 'text...' },
-                { id: 10, content: 'more...' },
+                { content: 'text...', id: 1 },
+                { content: 'more...', id: 10 },
             ];
 
             const result = segmentPages(pages, {
+                preprocess: [{ max: 5, type: 'condenseEllipsis' }],
                 rules: [],
-                preprocess: [{ type: 'condenseEllipsis', max: 5 }],
             });
 
             // Page 1 (id <= max 5): transformed
@@ -4196,8 +4196,8 @@ describe('segmenter', () => {
             ];
 
             const result = segmentPages(pages, {
+                preprocess: [{ mode: 'space', type: 'removeZeroWidth' }],
                 rules: [],
-                preprocess: [{ type: 'removeZeroWidth', mode: 'space' }],
             });
 
             expect(result.length).toBe(1);
@@ -4214,8 +4214,8 @@ describe('segmenter', () => {
             ];
 
             const result = segmentPages(pages, {
-                rules: [{ lineStartsWith: ['## '], split: 'at' }],
                 preprocess: ['fixTrailingWaw'],
+                rules: [{ lineStartsWith: ['## '], split: 'at' }],
             });
 
             expect(result.length).toBe(1);
@@ -4251,8 +4251,8 @@ describe('segmenter', () => {
             ];
 
             const result = segmentPages(pages, {
-                rules: [],
                 preprocess: [],
+                rules: [],
             });
 
             expect(result.length).toBe(1);
@@ -4306,7 +4306,7 @@ describe('segmenter', () => {
             ];
 
             const result = segmentPages(pages, {
-                breakpoints: [{ words: ['والله أعلم'], split: 'after' }],
+                breakpoints: [{ split: 'after', words: ['والله أعلم'] }],
                 maxContentLength: 50,
             });
 
@@ -4351,13 +4351,13 @@ describe('segmenter', () => {
 
         it('should respect min/max constraints on words', () => {
             const pages: Page[] = [
-                { id: 1, content: 'First page with word فهذا and more content here to exceed limit.' },
-                { id: 10, content: 'Second page with word فهذا and more content here to exceed limit.' },
+                { content: 'First page with word فهذا and more content here to exceed limit.', id: 1 },
+                { content: 'Second page with word فهذا and more content here to exceed limit.', id: 10 },
             ];
 
             const result = segmentPages(pages, {
                 breakpoints: [
-                    { words: ['فهذا'], min: 5 }, // Only applies from page 5+
+                    { min: 5, words: ['فهذا'] }, // Only applies from page 5+
                     '', // Fallback
                 ],
                 maxPages: 0,
@@ -4385,6 +4385,9 @@ describe('segmenter', () => {
             expect(result.length).toBeGreaterThanOrEqual(2);
             // First segment should end before "a.*b"
             expect(result[0].content).not.toContain('a.*b');
+
+            // Next segment should start with the literal text (not a regex-expanded match)
+            expect(result[1].content).toStartWith('a.*b');
         });
 
         it('should match literal brackets in words (no double-escaping)', () => {
@@ -4404,6 +4407,7 @@ describe('segmenter', () => {
             expect(result.length).toBeGreaterThanOrEqual(2);
             // First segment should NOT contain "(important)" since we split at it
             expect(result[0].content).not.toContain('(important)');
+            expect(result[1].content).toStartWith('(important)');
         });
 
         it('should match literal square brackets in words', () => {
@@ -4422,6 +4426,7 @@ describe('segmenter', () => {
             // Should split at literal "[note]"
             expect(result.length).toBeGreaterThanOrEqual(2);
             expect(result[0].content).not.toContain('[note]');
+            expect(result[1].content).toStartWith('[note]');
         });
 
         it('should filter out empty words arrays (not treat as page-boundary)', () => {
@@ -4431,11 +4436,12 @@ describe('segmenter', () => {
             ];
 
             const result = segmentPages(pages, {
-                maxPages: 0, // Force single-page segments
                 // Empty words should be filtered out, leaving only '' as fallback
                 // If empty words WAS treated as page-boundary, we'd have 2 breakpoints
                 // but since it's filtered, only '' breakpoint applies
                 breakpoints: [{ words: [] }, ''],
+                debug: true,
+                maxPages: 0, // Force single-page segments
             });
 
             // Should produce 2 segments (one per page) from '' fallback
@@ -4444,6 +4450,9 @@ describe('segmenter', () => {
             expect(result[0].to).toBeUndefined();
             expect(result[1].from).toBe(2);
             expect(result[1].to).toBeUndefined();
+
+            // If empty words are truly filtered out, the remaining '' fallback is at index 0.
+            expect((result[0].meta as any)?._flappa?.breakpoint?.index).toBe(0);
         });
     });
 });

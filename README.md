@@ -1240,13 +1240,10 @@ const pages: Page[] = [
 ];
 
 const options: SegmentationOptions = {
-  // Optional preprocessing step: regex replacements applied per-page BEFORE segmentation.
-  // Useful for normalizing OCR/typos/spacing so rules match consistently.
-  //
-  // Notes:
-  // - `flags` defaults to 'gu'. If provided, `g` and `u` are always enforced.
-  // - `pageIds: []` means "apply to no pages" (skip that rule).
-  // - Remember JSON escaping: to match a literal '.', use regex: "\\\\." in JSON.
+  // Optional preprocessing transforms (run before pattern matching)
+  // See "7.1 Preprocessing" section for details
+  preprocess: ['removeZeroWidth', 'condenseEllipsis'],
+  
   rules: [
     { lineStartsWith: ['## '], split: 'at' }
   ],

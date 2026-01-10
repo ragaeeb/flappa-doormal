@@ -209,12 +209,22 @@ The `breakpoints` option provides a post-processing mechanism for limiting segme
 ```typescript
 interface SegmentationOptions {
   rules: SplitRule[];
-  // Optional preprocessing step: regex replacements applied per-page BEFORE segmentation
-  replace?: Array<{ regex: string; replacement: string; flags?: string; pageIds?: number[] }>;
+  // Optional preprocessing: named transforms applied per-page BEFORE buildPageMap()
+  preprocess?: PreprocessTransform[];
   maxPages?: number;           // Maximum pages a segment can span
+  maxContentLength?: number;   // Maximum characters per segment (min: 50)
   breakpoints?: Breakpoint[];  // Ordered array of patterns (supports token expansion)
   prefer?: 'longer' | 'shorter'; // Select last or first match within window
 }
+
+// Preprocessing transforms (run before pattern matching)
+type PreprocessTransform =
+  | 'removeZeroWidth'    // Strip invisible Unicode controls
+  | 'condenseEllipsis'   // "..." → "…"
+  | 'fixTrailingWaw'     // " و " → " و"
+  | { type: 'removeZeroWidth'; mode?: 'strip' | 'space'; min?: number; max?: number }
+  | { type: 'condenseEllipsis'; min?: number; max?: number }
+  | { type: 'fixTrailingWaw'; min?: number; max?: number };
 
 // Breakpoint can be a string or object with split control
 type Breakpoint = string | BreakpointRule;
@@ -471,7 +481,7 @@ bunx biome lint .
 8. **When debugging recovery, start here**:
    - `src/segmentation/segmenter.ts` (how content is sliced/trimmed and how `from/to` are computed)
    - `src/segmentation/rule-regex.ts` + `src/segmentation/tokens.ts` (token expansion + fuzzy behavior)
-   - `src/preprocessing/replace.ts` (preprocessing parity)
+   - `src/preprocessing/transforms.ts` (preprocessing transforms: removeZeroWidth, condenseEllipsis, fixTrailingWaw)
    - `src/recovery.ts` (recovery implementation)
 
 9. **Prefer library utilities for UI tasks**: Instead of re-implementing rule merging, validation, or token mapping in client code, use `optimizeRules`, `validateRules`/`formatValidationReport`, and `applyTokenMappings`. They handle edge cases (like duplicate patterns, regex safety, or diacritic handling) that ad-hoc implementations might miss.
