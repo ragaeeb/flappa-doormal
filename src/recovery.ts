@@ -1,7 +1,6 @@
 import type { Page, Segment } from '@/types/index.js';
 import type { SegmentationOptions } from '@/types/options.js';
 import type { SplitRule } from '@/types/rules.js';
-import { applyReplacements } from './preprocessing/replace.js';
 import { buildRuleRegex } from './segmentation/rule-regex.js';
 import { segmentPages } from './segmentation/segmenter.js';
 import { normalizeLineEndings } from './utils/textUtils.js';
@@ -459,14 +458,13 @@ const runStage1IfEnabled = (
         return { recoveredAtIndex, recoveredDetailAtIndex };
     }
 
-    const processedPages = options.replace ? applyReplacements(pages, options.replace) : pages;
-    const pageIdToIndex = buildPageIdToIndex(processedPages);
+    const pageIdToIndex = buildPageIdToIndex(pages);
     const pageJoiner = options.pageJoiner ?? 'space';
     const compiledMistaken = compileMistakenRulesAsStartsWith(options, selectedRuleIndices);
 
     for (let i = 0; i < segments.length; i++) {
         const orig = segments[i];
-        const r = tryBestEffortRecoverOneSegment(orig, processedPages, pageIdToIndex, compiledMistaken, pageJoiner);
+        const r = tryBestEffortRecoverOneSegment(orig, pages, pageIdToIndex, compiledMistaken, pageJoiner);
         if (r.kind !== 'recovered') {
             continue;
         }

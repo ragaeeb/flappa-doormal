@@ -760,6 +760,30 @@ export const findPatternBreakPosition = (
  * Handles page boundary breakpoint (empty pattern).
  * Returns break position or -1 if no valid position found.
  */
+const findStartOfNextPageInWindow = (
+    remainingContent: string,
+    currentFromIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    targetPos: number,
+) => {
+    const targetNextPageIdx = currentFromIdx + 1;
+
+    // Progressively try to find the boundary if detection fails (conservative fallback).
+    for (let nextIdx = targetNextPageIdx; nextIdx > currentFromIdx; nextIdx--) {
+        if (nextIdx <= toIdx) {
+            const nextPageData = normalizedPages.get(pageIds[nextIdx]);
+            if (nextPageData) {
+                const boundaryPos = findNextPagePosition(remainingContent, nextPageData);
+                if (boundaryPos > 0 && boundaryPos <= targetPos) {
+                    return boundaryPos;
+                }
+            }
+        }
+    }
+    return -1;
+};
 const handlePageBoundaryBreak = (
     remainingContent: string,
     currentFromIdx: number,
@@ -778,7 +802,7 @@ const handlePageBoundaryBreak = (
     // we don't accidentally swallow the next page when no pattern matches.
     const targetPos = Math.min(windowEndPosition, remainingContent.length);
 
-    // If the window is currently bounded by maxContentLength, do NOT force an early break at a page boundary.
+    // If the window is currently bounded by maxContentLength, do NOT force an early page-boundary break.
     // In length-bounded mode, we want the best possible split *near* the length limit (using safe-break fallbacks),
     // even if that spans a page boundary.
     const isLengthBounded = maxContentLength !== undefined && windowEndPosition === maxContentLength;
@@ -787,19 +811,16 @@ const handlePageBoundaryBreak = (
         // Page-bounded window semantics: swallow the remainder of the CURRENT page.
         // Even if the maxPages window could include additional pages, an empty breakpoint ('')
         // must not consume into the next page when no real breakpoint patterns matched.
-        const targetNextPageIdx = currentFromIdx + 1;
-
-        // Progressively try to find the boundary if detection fails (conservative fallback).
-        for (let nextIdx = targetNextPageIdx; nextIdx > currentFromIdx; nextIdx--) {
-            if (nextIdx <= toIdx) {
-                const nextPageData = normalizedPages.get(pageIds[nextIdx]);
-                if (nextPageData) {
-                    const boundaryPos = findNextPagePosition(remainingContent, nextPageData);
-                    if (boundaryPos > 0 && boundaryPos <= targetPos) {
-                        return boundaryPos;
-                    }
-                }
-            }
+        const boundaryPos = findStartOfNextPageInWindow(
+            remainingContent,
+            currentFromIdx,
+            toIdx,
+            pageIds,
+            normalizedPages,
+            targetPos,
+        );
+        if (boundaryPos > 0) {
+            return { pos: boundaryPos };
         }
     }
 
@@ -808,11 +829,76 @@ const handlePageBoundaryBreak = (
     if (targetPos < remainingContent.length) {
         const safePos = findSafeBreakPosition(remainingContent, targetPos);
         if (safePos !== -1) {
-            return safePos;
+            return {
+                pos: safePos,
+                splitReason: isLengthBounded ? ('whitespace' as const) : undefined,
+            };
         }
-        return adjustForUnicodeBoundary(remainingContent, targetPos);
+        return {
+            pos: adjustForUnicodeBoundary(remainingContent, targetPos),
+            splitReason: isLengthBounded ? ('unicode_boundary' as const) : undefined,
+        };
     }
-    return targetPos;
+    return { pos: targetPos };
+};
+
+const checkBreakpointMatch = (
+    i: number,
+    remainingContent: string,
+    currentFromIdx: number,
+    toIdx: number,
+    windowEndIdx: number,
+    windowEndPosition: number,
+    ctx: BreakpointContext,
+    maxContentLength?: number,
+) => {
+    const { pageIds, normalizedPages, expandedBreakpoints, prefer } = ctx;
+    const bpCtx = expandedBreakpoints[i];
+    const { rule, regex, excludeSet, skipWhenRegex } = bpCtx;
+
+    // Check if this breakpoint applies to the current segment's starting page
+    if (!isInBreakpointRange(pageIds[currentFromIdx], rule)) {
+        return null;
+    }
+
+    // Check if ANY page in the current WINDOW is excluded (not the entire segment)
+    if (hasExcludedPageInRange(excludeSet, pageIds, currentFromIdx, windowEndIdx)) {
+        return null;
+    }
+
+    // Check if content matches skipWhen pattern (pre-compiled)
+    if (skipWhenRegex?.test(remainingContent)) {
+        return null;
+    }
+
+    // Handle page boundary (empty pattern)
+    if (regex === null) {
+        const result = handlePageBoundaryBreak(
+            remainingContent,
+            currentFromIdx,
+            windowEndPosition,
+            maxContentLength,
+            toIdx,
+            pageIds,
+            normalizedPages,
+        );
+        return {
+            breakPos: result.pos,
+            breakpointIndex: i,
+            contentLengthSplit:
+                result.splitReason && maxContentLength ? { maxContentLength, reason: result.splitReason } : undefined,
+            rule,
+        };
+    }
+
+    // Find matches within window
+    const windowContent = remainingContent.slice(0, Math.min(windowEndPosition, remainingContent.length));
+    const breakPos = findPatternBreakPosition(windowContent, regex, prefer, bpCtx.splitAt);
+    if (breakPos > 0) {
+        return { breakPos, breakpointIndex: i, rule };
+    }
+
+    return null;
 };
 
 /**
@@ -835,47 +921,21 @@ export const findBreakPosition = (
     ctx: BreakpointContext,
     maxContentLength?: number,
 ) => {
-    const { pageIds, normalizedPages, expandedBreakpoints, prefer } = ctx;
+    const { expandedBreakpoints } = ctx;
 
     for (let i = 0; i < expandedBreakpoints.length; i++) {
-        const { rule, regex, excludeSet, skipWhenRegex } = expandedBreakpoints[i];
-        // Check if this breakpoint applies to the current segment's starting page
-        if (!isInBreakpointRange(pageIds[currentFromIdx], rule)) {
-            continue;
-        }
-
-        // Check if ANY page in the current WINDOW is excluded (not the entire segment)
-        if (hasExcludedPageInRange(excludeSet, pageIds, currentFromIdx, windowEndIdx)) {
-            continue;
-        }
-
-        // Check if content matches skipWhen pattern (pre-compiled)
-        if (skipWhenRegex?.test(remainingContent)) {
-            continue;
-        }
-
-        // Handle page boundary (empty pattern)
-        if (regex === null) {
-            return {
-                breakPos: handlePageBoundaryBreak(
-                    remainingContent,
-                    currentFromIdx,
-                    windowEndPosition,
-                    maxContentLength,
-                    toIdx,
-                    pageIds,
-                    normalizedPages,
-                ),
-                breakpointIndex: i,
-                rule,
-            };
-        }
-
-        // Find matches within window
-        const windowContent = remainingContent.slice(0, Math.min(windowEndPosition, remainingContent.length));
-        const breakPos = findPatternBreakPosition(windowContent, regex, prefer, expandedBreakpoints[i].splitAt);
-        if (breakPos > 0) {
-            return { breakPos, breakpointIndex: i, rule };
+        const match = checkBreakpointMatch(
+            i,
+            remainingContent,
+            currentFromIdx,
+            toIdx,
+            windowEndIdx,
+            windowEndPosition,
+            ctx,
+            maxContentLength,
+        );
+        if (match) {
+            return match;
         }
     }
 

@@ -203,6 +203,7 @@ const findBreakOffsetForWindow = (
             breakOffset: patternMatch.breakPos,
             breakpointIndex: patternMatch.breakpointIndex,
             breakpointRule: patternMatch.rule,
+            contentLengthSplit: patternMatch.contentLengthSplit,
         };
     }
 

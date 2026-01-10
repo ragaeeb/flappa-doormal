@@ -1,0 +1,69 @@
+name: Performance Check
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'bun.lockb'
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+          
+      - name: Install dependencies
+        run: bun install
+        
+      - name: Run Performance Tests
+        shell: bash
+        run: |
+          # Run with NO_COLOR=1 to get plain text output for easier parsing
+          # Pipe both stdout and stderr because bun test often writes to stderr
+          NO_COLOR=1 bun run test:perf > perf_output.txt 2>&1 || true
+          
+          # cat the output for the logs
+          cat perf_output.txt
+
+      - name: Generate Report
+        shell: bash
+        run: |
+          echo "### ⚡ Performance Report" > report.md
+          echo "" >> report.md
+          echo "| Test Case | Duration |" >> report.md
+          echo "| :--- | ---: |" >> report.md
+          
+          # Parse lines like: "✓ ..." or "(pass) ..."
+          grep -E "✓|\(pass\)" perf_output.txt | while read -r line; do
+             # Step 1: Extract duration (always in last [])
+             DURATION=$(echo "$line" | sed -E 's/.*\[(.*)\]$/\1/')
+             
+             # Step 2: Extract name (remove duration suffix, then remove leading status)
+             TEMP=$(echo "$line" | sed -E 's/ \[.*\]$//')
+             # Remove leading "✓ " or "(pass) "
+             NAME=$(echo "$TEMP" | sed -E 's/^[[:space:]]*(✓|\(pass\))[[:space:]]*//')
+            
+            echo "| $NAME | $DURATION |" >> report.md
+          done
+          
+          echo "" >> report.md
+          
+          # Grab the summary line (e.g., "Ran 26 tests across 1 file. [2.41s]")
+          SUMMARY=$(grep "Ran .* tests across" perf_output.txt || echo "")
+          if [ -n "$SUMMARY" ]; then
+             echo "**Summary:** $SUMMARY" >> report.md
+          fi
+
+      - name: Comment on PR
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: performance-report
+          path: report.md

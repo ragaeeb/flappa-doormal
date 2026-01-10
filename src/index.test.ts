@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import { convertContentToMarkdown } from 'shamela';
-import { type Page, type Replacement, type Segment, type SegmentationOptions, segmentPages } from './index';
+import { type Page, type Segment, type SegmentationOptions, segmentPages } from './index';
 
 const mapPageToMarkdown = (p: Page) => ({ content: convertContentToMarkdown(p.content), id: p.id });
 
@@ -844,12 +844,9 @@ describe('index', () => {
     });
 
     it('should not match عَ with diacritics or followed by another character that is not a ramz', () => {
-        initPages(['٤٩٢٢ - عَن: قَيْس بن مُسْلِم الْمَذْحَجِيّ (١) ، شامي.\r• • •']);
-
-        const replace: Replacement[] = [{ regex: '\r• • •', replacement: '' }];
+        initPages(['٤٩٢٢ - عَن: قَيْس بن مُسْلِم الْمَذْحَجِيّ (١) ، شامي.']);
 
         const segments = segmentPages(pages, {
-            replace,
             rules: [
                 {
                     lineStartsAfter: ['{{raqms:num}} {{dash}} {{rumuz:rumuz}}:\\s*'],
@@ -864,7 +861,6 @@ describe('index', () => {
         options = {
             breakpoints: [''],
             maxPages: 0,
-            replace: [],
             rules: [],
         };
 
@@ -975,6 +971,34 @@ describe('index', () => {
             expect(segments[1].from).toBe(0);
             expect(segments[2].from).toBe(1);
             expect(segments[3].from).toBe(2);
+        });
+
+        it('should include contentLengthSplit metadata when standard breakpoint triggers on length limit', () => {
+            const content = 'word '.repeat(20); // 100 chars
+            const pages = [{ content, id: 1 }];
+            const options = {
+                breakpoints: [''], // page boundary fallback
+                debug: true,
+                maxContentLength: 50,
+                rules: [], // no structural rules
+            };
+
+            const segments = segmentPages(pages, options);
+
+            expect(segments.length).toBeGreaterThan(1);
+
+            // The first segment should have split due to length
+            const debugMeta = segments[0].meta?._flappa as any;
+
+            // Check specifically for the missing metadata
+            // "Make sure the test fails without your fix":
+            // Prior to the fix, handlePageBoundaryBreak returned a raw number,
+            // so `contentLengthSplit` was never populated in the return object from findBreakPosition,
+            // and thus never merged into _flappa.
+            expect(debugMeta.contentLengthSplit).toEqual({
+                maxContentLength: 50,
+                splitReason: 'whitespace',
+            });
         });
     });
 });
