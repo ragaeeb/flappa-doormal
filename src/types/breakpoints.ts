@@ -1,4 +1,4 @@
-import type { PageRange } from '.';
+import type { PageRangeConstraintWithExclude } from '.';
 
 /**
  * A breakpoint pattern with optional page constraints.
@@ -9,13 +9,17 @@ import type { PageRange } from '.';
  *
  * @example
  * // Only apply punctuation-based breaking from page 10 onwards
- * { pattern: '{{tarqim}}\\s*', min: 10 }
+ * { pattern: '{{tarqim}}', min: 10 }
  *
  * @example
  * // Apply to specific page range (pages 10-50)
- * { pattern: '{{tarqim}}\\s*', min: 10, max: 50 }
+ * { pattern: '{{tarqim}}', min: 10, max: 50 }
+ *
+ * @example
+ * // Break at specific words (auto whitespace boundary, split:'at' default)
+ * { words: ['فهذا', 'ثم', 'أقول'], min: 100 }
  */
-export type BreakpointRule = {
+export type BreakpointRule = PageRangeConstraintWithExclude & {
     /**
      * Regex pattern for breaking (supports token expansion).
      * Empty string `''` means fall back to page boundary.
@@ -24,6 +28,8 @@ export type BreakpointRule = {
      * For raw regex with full control, use `regex` instead.
      *
      * If both `pattern` and `regex` are specified, `regex` takes precedence.
+     *
+     * **Mutually exclusive** with `words`.
      */
     pattern?: string;
 
@@ -35,11 +41,43 @@ export type BreakpointRule = {
      *
      * If both `pattern` and `regex` are specified, `regex` takes precedence.
      *
+     * **Mutually exclusive** with `words`.
+     *
      * @example
      * // Non-capturing alternation (won't work in pattern due to auto-escaping)
      * { regex: '\\s+(?:ولهذا|وكذلك|فلذلك)', split: 'at' }
      */
     regex?: string;
+
+    /**
+     * Array of words/phrases to break on with automatic whitespace boundary.
+     *
+     * Each word is:
+     * - Trimmed of whitespace
+     * - Escaped for regex metacharacters (except inside `{{tokens}}`)
+     * - Token-expanded
+     * - Wrapped in non-capturing group for alternation
+     * - Sorted by length descending (longest match first)
+     *
+     * Generates regex: `\s+(?:word1|word2|...)`
+     *
+     * **Mutually exclusive** with `pattern` and `regex`.
+     *
+     * @default split: 'at' (when words is specified)
+     *
+     * @example
+     * // Simple words
+     * { words: ['فهذا', 'ثم', 'أقول'], min: 100 }
+     *
+     * @example
+     * // With tokens
+     * { words: ['{{naql}}', 'وكذلك'] }
+     *
+     * @example
+     * // Override split behavior
+     * { words: ['والله أعلم'], split: 'after' }
+     */
+    words?: string[];
 
     /**
      * Where to split relative to the match.
@@ -49,41 +87,9 @@ export type BreakpointRule = {
      * **Note**: For empty pattern `''`, `split` is ignored (page boundary).
      * Invalid values are treated as `'after'`.
      *
-     * @default 'after'
+     * @default 'after' (or 'at' when using `words`)
      */
     split?: 'at' | 'after';
-
-    /**
-     * Minimum page ID for this breakpoint to apply.
-     * Segments starting before this page skip this pattern.
-     */
-    min?: number;
-
-    /**
-     * Maximum page ID for this breakpoint to apply.
-     * Segments starting after this page skip this pattern.
-     */
-    max?: number;
-
-    /**
-     * Specific pages or page ranges to exclude from this breakpoint.
-     *
-     * Use this to skip the breakpoint for specific pages without needing
-     * to repeat the breakpoint with different min/max values.
-     *
-     * @example
-     * // Exclude specific pages
-     * { pattern: '\\.\\s*', exclude: [1, 2, 5] }
-     *
-     * @example
-     * // Exclude page ranges (front matter pages 1-10)
-     * { pattern: '{{tarqim}}\\s*', exclude: [[1, 10]] }
-     *
-     * @example
-     * // Mix single pages and ranges
-     * { pattern: '\\.\\s*', exclude: [1, [5, 10], 50] }
-     */
-    exclude?: PageRange[];
 
     /**
      * Skip this breakpoint if the segment content matches this pattern.
@@ -97,11 +103,11 @@ export type BreakpointRule = {
      *
      * @example
      * // Skip punctuation breakpoint for short content (likely titles)
-     * { pattern: '{{tarqim}}\\s*', skipWhen: '^.{1,20}$' }
+     * { pattern: '{{tarqim}}', skipWhen: '^.{1,20}$' }
      *
      * @example
      * // Skip for content containing "kitab" (book) marker
-     * { pattern: '\\.\\s*', skipWhen: '{{kitab}}' }
+     * { pattern: '\\.', skipWhen: '{{kitab}}' }
      */
     skipWhen?: string;
 };

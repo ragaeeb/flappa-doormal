@@ -13,6 +13,7 @@ import {
     buildBoundaryPositions,
     buildExcludeSet,
     createSegment,
+    escapeWordsOutsideTokens,
     estimateStartOffsetInCurrentPage,
     expandBreakpoints,
     findBreakpointWindowEndPosition,
@@ -57,6 +58,60 @@ describe('breakpoint-utils', () => {
             const rule = { pattern: 'X', split: 'invalid' as any };
             const result = normalizeBreakpoint(rule);
             expect(result).toMatchObject({ pattern: 'X', split: 'after' });
+        });
+
+        it('should default split to at when words is specified', () => {
+            const rule = { words: ['فهذا', 'ثم'] };
+            const result = normalizeBreakpoint(rule);
+            expect(result).toMatchObject({ split: 'at', words: ['فهذا', 'ثم'] });
+        });
+
+        it('should allow split:after override for words', () => {
+            const rule = { split: 'after' as const, words: ['والله أعلم'] };
+            const result = normalizeBreakpoint(rule);
+            expect(result).toMatchObject({ split: 'after', words: ['والله أعلم'] });
+        });
+
+        it('should throw when words combined with pattern', () => {
+            const rule = { pattern: 'X', words: ['test'] };
+            expect(() => normalizeBreakpoint(rule)).toThrow('cannot be combined');
+        });
+
+        it('should throw when words combined with regex', () => {
+            const rule = { regex: 'X', words: ['test'] };
+            expect(() => normalizeBreakpoint(rule)).toThrow('cannot be combined');
+        });
+    });
+
+    describe('escapeWordsOutsideTokens', () => {
+        it('should escape regex metacharacters', () => {
+            expect(escapeWordsOutsideTokens('a.*b')).toBe('a\\.\\*b');
+        });
+
+        it('should preserve {{token}} delimiters', () => {
+            expect(escapeWordsOutsideTokens('{{naql}}.test')).toBe('{{naql}}\\.test');
+        });
+
+        it('should handle multiple tokens', () => {
+            expect(escapeWordsOutsideTokens('{{naql}}.*{{bab}}')).toBe('{{naql}}\\.\\*{{bab}}');
+        });
+
+        it('should handle text without tokens', () => {
+            expect(escapeWordsOutsideTokens('simple text')).toBe('simple text');
+        });
+
+        it('should escape regex metacharacters except ()[] which are handled by processPattern', () => {
+            // ()[] are NOT escaped here - processPattern handles them via escapeTemplateBrackets
+            expect(escapeWordsOutsideTokens('.*+?^${}()|[]\\')).toBe('\\.\\*\\+\\?\\^\\$\\{\\}()\\|[]\\\\');
+        });
+
+        it('should leave literal brackets for processPattern to escape', () => {
+            expect(escapeWordsOutsideTokens('(literal)')).toBe('(literal)');
+            expect(escapeWordsOutsideTokens('[bracket]')).toBe('[bracket]');
+        });
+
+        it('should handle token with capture name', () => {
+            expect(escapeWordsOutsideTokens('{{naql:name}}.test')).toBe('{{naql:name}}\\.test');
         });
     });
 
@@ -229,6 +284,79 @@ describe('breakpoint-utils', () => {
             const processor = (p: string) => p.toUpperCase();
             const result = expandBreakpoints(['test'], processor);
             expect(result[0].regex?.source).toBe('TEST');
+        });
+
+        it('should generate regex from words field', () => {
+            const result = expandBreakpoints([{ words: ['فهذا', 'ثم'] }], identityProcessor);
+            expect(result).toHaveLength(1);
+            expect(result[0].splitAt).toBe(true); // words defaults to split:at
+            expect(result[0].regex).toBeInstanceOf(RegExp);
+            // Should generate alternation with whitespace prefix
+            expect(result[0].regex?.source).toContain('فهذا');
+            expect(result[0].regex?.source).toContain('ثم');
+            expect(result[0].regex?.source).toMatch(/^\\s\+/); // whitespace prefix
+        });
+
+        it('should sort words by length descending', () => {
+            const result = expandBreakpoints([{ words: ['ثم', 'ثم إن'] }], identityProcessor);
+            // Longer word should come first in alternation
+            const source = result[0].regex?.source ?? '';
+            const longPos = source.indexOf('ثم إن');
+            const shortPos = source.indexOf('(?:ثم)');
+            // "ثم إن" should appear before standalone "ثم"
+            expect(longPos).toBeLessThan(shortPos);
+        });
+
+        it('should deduplicate words', () => {
+            const result = expandBreakpoints([{ words: ['test', 'test', 'other'] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            // Count occurrences of "test" (should be 1)
+            const matches = source.match(/test/g);
+            expect(matches?.length).toBe(1);
+        });
+
+        it('should filter empty words', () => {
+            const result = expandBreakpoints([{ words: ['', 'valid', '  '] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            expect(source).toContain('valid');
+            expect(source).not.toMatch(/\(\?:\)|\(\?:\|/); // No empty alternations
+        });
+
+        it('should escape metacharacters in words', () => {
+            const result = expandBreakpoints([{ words: ['a.*b'] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            expect(source).toContain('a\\.\\*b');
+        });
+
+        it('should apply pattern processor to words', () => {
+            const processor = (p: string) => p.replace(/X/g, 'Y');
+            const result = expandBreakpoints([{ words: ['testX'] }], processor);
+            expect(result[0].regex?.source).toContain('testY');
+        });
+
+        it('should filter out empty words arrays (not treat as page-boundary fallback)', () => {
+            const result = expandBreakpoints([{ words: [] }], identityProcessor);
+            // Empty words = no-op, filtered out entirely
+            // This is NOT the same as '' pattern which is page-boundary fallback
+            expect(result).toHaveLength(0);
+        });
+
+        it('should keep page-boundary fallback distinct from empty words', () => {
+            const result = expandBreakpoints(['', { words: [] }], identityProcessor);
+            // '' is kept as page-boundary fallback, words: [] is filtered out
+            expect(result).toHaveLength(1);
+            expect(result[0].regex).toBeNull(); // page-boundary has null regex
+        });
+
+        it('should respect split:after override for words', () => {
+            const result = expandBreakpoints([{ split: 'after', words: ['والله أعلم'] }], identityProcessor);
+            expect(result[0].splitAt).toBe(false);
+        });
+
+        it('should preserve min/max constraints for words', () => {
+            const result = expandBreakpoints([{ max: 100, min: 10, words: ['test'] }], identityProcessor);
+            expect(result[0].rule.min).toBe(10);
+            expect(result[0].rule.max).toBe(100);
         });
     });
 
@@ -584,7 +712,6 @@ describe('breakpoint-utils', () => {
             const segmentContent = 'Page ten content here.\nPage twenty content.\nPage thirty.';
             const cumulativeOffsets = [0, 23, 44, 56]; // includes separators
 
-            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
             const boundaries = buildBoundaryPositions(
                 segmentContent,
                 0,
@@ -615,7 +742,6 @@ describe('breakpoint-utils', () => {
             const segmentContent = 'Start content here.\nEnd content here.';
             const cumulativeOffsets = [0, 20, 36, 54];
 
-            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
             const boundaries = buildBoundaryPositions(
                 segmentContent,
                 0,
@@ -641,7 +767,6 @@ describe('breakpoint-utils', () => {
             const segmentContent = 'Page ten content.\n   \n  \nPage thirty content.';
             const cumulativeOffsets = [0, 18, 25, 46];
 
-            const { buildBoundaryPositions } = require('./breakpoint-utils.js');
             const boundaries = buildBoundaryPositions(
                 segmentContent,
                 0,

@@ -49,7 +49,7 @@ src/
 ├── optimization/               # Rule optimization module
 │   └── optimize-rules.ts       # Specificity-based sorting and merging
 ├── preprocessing/              # Text normalization module
-│   └── replace.ts              # Idem-safe content replacements
+│   └── transforms.ts           # Built-in preprocess transforms (removeZeroWidth, condenseEllipsis, fixTrailingWaw)
 ├── utils/                      # Low-level helpers
 │   └── textUtils.ts            # Diacritics, Unicode, and bracket escaping
 ├── index.ts                    # Public barrel exports
@@ -209,12 +209,22 @@ The `breakpoints` option provides a post-processing mechanism for limiting segme
 ```typescript
 interface SegmentationOptions {
   rules: SplitRule[];
-  // Optional preprocessing step: regex replacements applied per-page BEFORE segmentation
-  replace?: Array<{ regex: string; replacement: string; flags?: string; pageIds?: number[] }>;
+  // Optional preprocessing: named transforms applied per-page BEFORE buildPageMap()
+  preprocess?: PreprocessTransform[];
   maxPages?: number;           // Maximum pages a segment can span
+  maxContentLength?: number;   // Maximum characters per segment (min: 50)
   breakpoints?: Breakpoint[];  // Ordered array of patterns (supports token expansion)
   prefer?: 'longer' | 'shorter'; // Select last or first match within window
 }
+
+// Preprocessing transforms (run before pattern matching)
+type PreprocessTransform =
+  | 'removeZeroWidth'    // Strip invisible Unicode controls
+  | 'condenseEllipsis'   // "..." → "…"
+  | 'fixTrailingWaw'     // " و " → " و"
+  | { type: 'removeZeroWidth'; mode?: 'strip' | 'space'; min?: number; max?: number }
+  | { type: 'condenseEllipsis'; min?: number; max?: number }
+  | { type: 'fixTrailingWaw'; min?: number; max?: number };
 
 // Breakpoint can be a string or object with split control
 type Breakpoint = string | BreakpointRule;
@@ -471,7 +481,7 @@ bunx biome lint .
 8. **When debugging recovery, start here**:
    - `src/segmentation/segmenter.ts` (how content is sliced/trimmed and how `from/to` are computed)
    - `src/segmentation/rule-regex.ts` + `src/segmentation/tokens.ts` (token expansion + fuzzy behavior)
-   - `src/preprocessing/replace.ts` (preprocessing parity)
+   - `src/preprocessing/transforms.ts` (preprocessing transforms: removeZeroWidth, condenseEllipsis, fixTrailingWaw)
    - `src/recovery.ts` (recovery implementation)
 
 9. **Prefer library utilities for UI tasks**: Instead of re-implementing rule merging, validation, or token mapping in client code, use `optimizeRules`, `validateRules`/`formatValidationReport`, and `applyTokenMappings`. They handle edge cases (like duplicate patterns, regex safety, or diacritic handling) that ad-hoc implementations might miss.
@@ -555,6 +565,24 @@ bunx biome lint .
 
 33. **Multi-agent review synthesis**: Getting implementation reviews from multiple AI models (Claude, GPT, Grok, Gemini) and synthesizing their feedback helps catch issues a single reviewer might miss. Key insight: when reviewers disagree on "critical" issues, investigate the codebase to verify claims before implementing fixes. Some "critical" issues are based on incorrect assumptions about how fast paths or downstream functions work.
 
+34. **`preprocess` option applies transforms before rules**: The `preprocess` array in `SegmentationOptions` applies text transforms to each page's content BEFORE `buildPageMap()` is called. This ensures patterns match on the normalized text. Transforms are: `removeZeroWidth`, `condenseEllipsis`, `fixTrailingWaw`. Each can have `min`/`max` page constraints.
+
+35. **`words` field simplifies word-based breakpoints**: Instead of manually writing `\s+(?:word1|word2|...)` alternations, use `words: ['word1', 'word2']`. The field auto-escapes metacharacters (except `()[]` which are handled by `processPattern`), sorts by length descending, deduplicates, and defaults to `split: 'at'`. Cannot be combined with `pattern` or `regex`. **Empty arrays are filtered out** (no-op), NOT treated as page-boundary fallback like `''`.
+
+36. **`{{newline}}` token for readability**: Instead of `\\n` in breakpoint patterns, use `{{newline}}`. This expands to `\n` and is more readable in JSON configuration files.
+
+37. **Never use decorative separator comments**: Do NOT write comments like `// ============================================================================` or similar ASCII art separators. These waste tokens, add no value, and pollute the codebase. Use simple single-line comments or JSDoc instead.
+
+38. **Never use `require()` in test files**: Always use ES module `import` statements at the top of test files. Do NOT use inline `require()` calls inside test blocks. This ensures consistent module resolution and avoids mixing CommonJS and ESM patterns.
+
+39. **Avoid double-escaping in layered pattern processing**: When patterns pass through multiple processing stages (e.g., `escapeWordsOutsideTokens` → `processPattern`), ensure each character class is escaped exactly once. The `words` field initially had a bug where `()[]` were escaped by `escapeWordsOutsideTokens` and then again by `processPattern`'s `escapeTemplateBrackets`. **Fix**: `escapeWordsOutsideTokens` now escapes metacharacters EXCEPT `()[]`, letting `processPattern` handle those.
+
+40. **Empty arrays vs empty strings have different semantics**: `words: []` should be a no-op (filtered out), not equivalent to `pattern: ''` (page-boundary fallback). When designing APIs with arrays, explicitly decide and document what empty array means vs null/undefined vs explicit empty value.
+
+41. **Whitespace checks should use `/\s/` not `=== ' '`**: When checking "is this character whitespace?" use `/\s/.test(char)` to catch spaces, tabs, newlines, and other unicode whitespace. The `removeZeroWidth` space mode initially only checked `=== ' '`, causing unwanted spaces after newlines.
+
+42. **Use `assertNever` for exhaustive switches**: When switching on union types (like `PreprocessTransform`), add a `default` case that calls `assertNever(x: never)` which throws. TypeScript will error at compile time if a new union member is added but not handled.
+
 ### Process Template (Multi-agent design review, TDD-first)
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:
@@ -591,6 +619,7 @@ If you want to repeat the “write a plan → get multiple AI critiques → synt
 | `{{harfs}}` | `Token.HARFS` | Spaced letters | د ت س |
 | `{{rumuz}}` | `Token.RUMUZ` | Source abbreviations | خت ٤ |
 | `{{bullet}}` | `Token.BULLET` | Bullet points | • * ° |
+| `{{newline}}` | `Token.NEWLINE` | Newline character | `\n` |
 | `{{numbered}}` | `Token.NUMBERED` | `{{raqms}} {{dash}} ` | ٧٥٦٣ - |
 
 ### Token Constants (Better DX)

@@ -1,4 +1,4 @@
-import type { PageRange } from './index.js';
+import type { PageRangeConstraintWithExclude } from './index.js';
 
 /**
  * Literal regex pattern rule - no token expansion or auto-escaping is applied.
@@ -235,50 +235,10 @@ type SplitBehavior = {
  *
  * Use constraints to limit which pages a rule applies to, and
  * metadata to attach arbitrary data to resulting segments.
+ *
+ * Extends `PageRangeConstraintWithExclude` for `min`, `max`, and `exclude` properties.
  */
-type RuleConstraints = {
-    /**
-     * Minimum page ID for this rule to apply.
-     *
-     * Matches on pages with `id < min` are ignored.
-     *
-     * @example
-     * // Only apply rule starting from page 10
-     * { min: 10, lineStartsWith: ['##'], split: 'before' }
-     */
-    min?: number;
-
-    /**
-     * Maximum page ID for this rule to apply.
-     *
-     * Matches on pages with `id > max` are ignored.
-     *
-     * @example
-     * // Only apply rule up to page 100
-     * { max: 100, lineStartsWith: ['##'], split: 'before' }
-     */
-    max?: number;
-
-    /**
-     * Specific pages or page ranges to exclude from this rule.
-     *
-     * Use this to skip the rule for specific pages without needing
-     * to repeat the rule with different min/max values.
-     *
-     * @example
-     * // Exclude specific pages
-     * { exclude: [1, 2, 5] }
-     *
-     * @example
-     * // Exclude page ranges
-     * { exclude: [[1, 10], [50, 100]] }
-     *
-     * @example
-     * // Mix single pages and ranges
-     * { exclude: [1, [5, 10], 50] }
-     */
-    exclude?: PageRange[];
-
+type RuleConstraints = PageRangeConstraintWithExclude & {
     /**
      * Arbitrary metadata attached to segments matching this rule.
      *

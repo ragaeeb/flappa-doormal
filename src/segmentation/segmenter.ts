@@ -1,6 +1,7 @@
 import type { Page, Segment } from '@/types';
 import type { Logger, SegmentationOptions } from '@/types/options.js';
 import type { SplitRule } from '@/types/rules.js';
+import { applyPreprocessToPage } from '@/preprocessing/transforms.js';
 import { normalizeLineEndings } from '@/utils/textUtils.js';
 import type { PageBoundary, PageMap, SplitPoint } from '../types/segmenter.js';
 import { applyBreakpoints } from './breakpoint-processor.js';
@@ -304,7 +305,15 @@ const convertPageBreaks = (
  * });
  */
 export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
-    const { rules = [], breakpoints = [], prefer = 'longer', pageJoiner = 'space', logger, maxContentLength } = options;
+    const {
+        rules = [],
+        breakpoints = [],
+        prefer = 'longer',
+        pageJoiner = 'space',
+        logger,
+        maxContentLength,
+        preprocess,
+    } = options;
 
     if (maxContentLength && maxContentLength < 50) {
         throw new Error(`maxContentLength must be at least 50 characters.`);
@@ -321,10 +330,20 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
         maxPages,
         pageCount: pages.length,
         prefer,
+        preprocessCount: preprocess?.length ?? 0,
         ruleCount: rules.length,
     });
 
-    const { content: matchContent, normalizedPages: normalizedContent, pageMap } = buildPageMap(pages);
+    // Apply preprocessing transforms to each page
+    const preprocessedPages: Page[] =
+        preprocess && preprocess.length > 0
+            ? pages.map((page) => ({
+                  ...page,
+                  content: applyPreprocessToPage(page.content, page.id, preprocess),
+              }))
+            : pages;
+
+    const { content: matchContent, normalizedPages: normalizedContent, pageMap } = buildPageMap(preprocessedPages);
 
     logger?.debug?.('[segmenter] content built', { pageIds: pageMap.pageIds, totalContentLength: matchContent.length });
 
@@ -339,13 +358,13 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
     let segments = buildSegments(unique, matchContent, pageMap, rules, pageJoiner);
     logger?.debug?.('[segmenter] structural segments built', { segmentCount: segments.length });
 
-    segments = ensureFallbackSegment(segments, pages, normalizedContent, pageJoiner);
+    segments = ensureFallbackSegment(segments, preprocessedPages, normalizedContent, pageJoiner);
 
     if (hasLimits) {
         logger?.debug?.('[segmenter] applying breakpoints to oversized segments');
         const result = applyBreakpoints(
             segments,
-            pages,
+            preprocessedPages,
             normalizedContent,
             maxPages,
             breakpoints,

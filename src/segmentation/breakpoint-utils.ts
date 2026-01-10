@@ -10,10 +10,42 @@ import {
 } from './breakpoint-constants.js';
 
 /**
+ * Escapes regex metacharacters outside of `{{token}}` delimiters.
+ *
+ * This allows words in the `words` field to contain tokens while treating
+ * most other characters as literals.
+ *
+ * Note: `()[]` are NOT escaped here because `processPattern` will handle them
+ * via `escapeTemplateBrackets`. This avoids double-escaping.
+ *
+ * @param word - Word string that may contain {{tokens}}
+ * @returns String with metacharacters escaped outside tokens (except ()[] which are escaped by processPattern)
+ *
+ * @example
+ * escapeWordsOutsideTokens('a.*b')
+ * // → 'a\\.\\*b'
+ *
+ * escapeWordsOutsideTokens('{{naql}}.test')
+ * // → '{{naql}}\\.test'
+ *
+ * escapeWordsOutsideTokens('(literal)')
+ * // → '(literal)' (not escaped here - processPattern handles it)
+ */
+export const escapeWordsOutsideTokens = (word: string): string =>
+    word
+        .split(/(\{\{[^}]+\}\})/g)
+        .map((part) => (part.startsWith('{{') && part.endsWith('}}') ? part : part.replace(/[.*+?^${}|\\]/g, '\\$&')))
+        .join('');
+
+/**
  * Normalizes a breakpoint to the object form.
  * Strings are converted to { pattern: str, split: 'after' } with no constraints.
  * Invalid `split` values are treated as `'after'` for backward compatibility.
  * If both `pattern` and `regex` are specified, `regex` takes precedence.
+ *
+ * When `words` is specified:
+ * - Defaults `split` to `'at'` (can be overridden)
+ * - Throws if combined with `pattern` or `regex`
  *
  * @param bp - Breakpoint as string or object
  * @returns Normalized BreakpointRule object with resolved pattern/regex
@@ -28,15 +60,25 @@ import {
  * normalizeBreakpoint({ pattern: 'X', split: 'at' })
  * // → { pattern: 'X', split: 'at' }
  *
- * normalizeBreakpoint({ regex: '(?:X|Y)', split: 'at' })
- * // → { regex: '(?:X|Y)', split: 'at' }
+ * normalizeBreakpoint({ words: ['فهذا', 'ثم'] })
+ * // → { words: ['فهذا', 'ثم'], split: 'at' }
  */
 export const normalizeBreakpoint = (bp: Breakpoint): BreakpointRule => {
     if (typeof bp === 'string') {
         return { pattern: bp, split: 'after' };
     }
-    // Validate split value - treat invalid as 'after' for backward compatibility
-    const split = bp.split === 'at' || bp.split === 'after' ? bp.split : 'after';
+
+    // Validate words mutual exclusivity
+    if (bp.words && (bp.pattern !== undefined || bp.regex !== undefined)) {
+        throw new Error('BreakpointRule: "words" cannot be combined with "pattern" or "regex"');
+    }
+
+    // Determine default split based on whether words is present
+    const defaultSplit = bp.words ? 'at' : 'after';
+
+    // Validate split value - treat invalid as default for backward compatibility
+    const split = bp.split === 'at' || bp.split === 'after' ? bp.split : defaultSplit;
+
     return { ...bp, split };
 };
 
@@ -176,49 +218,97 @@ export type PatternProcessor = (pattern: string) => string;
  * @param processPattern - Function to expand tokens in patterns (with bracket escaping)
  * @param processRawPattern - Function to expand tokens without bracket escaping (for regex field)
  */
+/**
+ * Builds regex source from words array.
+ * Words are escaped, processed, sorted by length, and joined with alternation.
+ */
+const buildWordsRegex = (words: string[], processPattern: PatternProcessor): string | null => {
+    const processed = words
+        .map((w) => w.trim())
+        .filter((w) => w.length > 0)
+        .map((w) => processPattern(escapeWordsOutsideTokens(w)));
+
+    const unique = [...new Set(processed)];
+    if (unique.length === 0) {
+        return null;
+    }
+
+    unique.sort((a, b) => b.length - a.length);
+    const alternatives = unique.map((w) => `(?:${w})`).join('|');
+    return `\\s+(?:${alternatives})`;
+};
+
+/** Compiles skipWhen pattern to regex, or null if not present. */
+const compileSkipWhenRegex = (rule: BreakpointRule, processPattern: PatternProcessor): RegExp | null => {
+    if (rule.skipWhen === undefined) {
+        return null;
+    }
+    const expandedSkip = processPattern(rule.skipWhen);
+    try {
+        return new RegExp(expandedSkip, 'mu');
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Invalid breakpoint skipWhen regex: ${rule.skipWhen}\n  Cause: ${message}`);
+    }
+};
+
+/** Compiles a regex from a pattern string, throws descriptive error on failure. */
+const compilePatternRegex = (pattern: string, fieldName: string): RegExp => {
+    try {
+        return new RegExp(pattern, 'gmu');
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Invalid breakpoint ${fieldName}: ${pattern}\n  Cause: ${message}`);
+    }
+};
+
+/** Expands a single breakpoint to its expanded form. */
+const expandSingleBreakpoint = (
+    bp: Breakpoint,
+    processPattern: PatternProcessor,
+    processRawPattern?: PatternProcessor,
+): ExpandedBreakpoint | null => {
+    const rule = normalizeBreakpoint(bp);
+    const excludeSet = buildExcludeSet(rule.exclude);
+    const skipWhenRegex = compileSkipWhenRegex(rule, processPattern);
+
+    // Handle words field
+    if (rule.words !== undefined) {
+        const wordsPattern = buildWordsRegex(rule.words, processPattern);
+        if (wordsPattern === null) {
+            // Empty words array = no-op breakpoint (filter out)
+            // This is NOT the same as '' which is page-boundary fallback
+            return null;
+        }
+        const regex = compilePatternRegex(wordsPattern, `words: ${rule.words.join(', ')}`);
+        return { excludeSet, regex, rule, skipWhenRegex, splitAt: rule.split === 'at' };
+    }
+
+    // Determine which pattern to use: regex takes precedence over pattern
+    const rawPattern = rule.regex ?? rule.pattern;
+
+    // Empty pattern = page boundary fallback
+    if (rawPattern === '' || rawPattern === undefined) {
+        return { excludeSet, regex: null, rule, skipWhenRegex, splitAt: false };
+    }
+
+    // Use raw processor if regex field is set and rawPatternProcessor is provided
+    const useRawProcessor = rule.regex !== undefined && processRawPattern;
+    const expanded = useRawProcessor ? processRawPattern(rawPattern) : processPattern(rawPattern);
+    const fieldUsed = rule.regex !== undefined ? 'regex' : 'pattern';
+    const regex = compilePatternRegex(expanded, fieldUsed);
+
+    return { excludeSet, regex, rule, skipWhenRegex, splitAt: rule.split === 'at' };
+};
+
 export const expandBreakpoints = (
     breakpoints: Breakpoint[],
     processPattern: PatternProcessor,
     processRawPattern?: PatternProcessor,
 ): ExpandedBreakpoint[] =>
-    breakpoints.map((bp) => {
-        const rule = normalizeBreakpoint(bp);
-        const excludeSet = buildExcludeSet(rule.exclude);
-        const skipWhenRegex =
-            rule.skipWhen !== undefined
-                ? (() => {
-                      const expandedSkip = processPattern(rule.skipWhen);
-                      try {
-                          return new RegExp(expandedSkip, 'mu');
-                      } catch (error) {
-                          const message = error instanceof Error ? error.message : String(error);
-                          throw new Error(`Invalid breakpoint skipWhen regex: ${rule.skipWhen}\n  Cause: ${message}`);
-                      }
-                  })()
-                : null;
-
-        // Determine which pattern to use: regex takes precedence over pattern
-        const rawPattern = rule.regex ?? rule.pattern;
-
-        // Empty pattern = page boundary fallback, split has no effect
-        if (rawPattern === '' || rawPattern === undefined) {
-            return { excludeSet, regex: null, rule, skipWhenRegex, splitAt: false };
-        }
-
-        // Use raw processor if regex field is set and rawPatternProcessor is provided
-        const useRawProcessor = rule.regex !== undefined && processRawPattern;
-        const expanded = useRawProcessor ? processRawPattern(rawPattern) : processPattern(rawPattern);
-
-        // splitAt = true means new segment starts WITH the match
-        const splitAt = rule.split === 'at';
-        try {
-            return { excludeSet, regex: new RegExp(expanded, 'gmu'), rule, skipWhenRegex, splitAt };
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            const fieldUsed = rule.regex !== undefined ? 'regex' : 'pattern';
-            throw new Error(`Invalid breakpoint ${fieldUsed}: ${rawPattern}\n  Cause: ${message}`);
-        }
-    });
+    breakpoints
+        .map((bp) => expandSingleBreakpoint(bp, processPattern, processRawPattern))
+        .filter((bp): bp is ExpandedBreakpoint => bp !== null);
 
 /** Normalized page data for efficient lookups */
 export type NormalizedPage = { content: string; length: number; index: number };
