@@ -583,6 +583,27 @@ bunx biome lint .
 
 42. **Use `assertNever` for exhaustive switches**: When switching on union types (like `PreprocessTransform`), add a `default` case that calls `assertNever(x: never)` which throws. TypeScript will error at compile time if a new union member is added but not handled.
 
+43. **`words` field matches partial words**: The `words` field generates `\s+(?:word1|word2)` which matches text *starting with* the word, not complete words. `words: ['ثم']` will match `ثمامة` (a name). **Solution**: Add trailing space for whole-word matching: `words: ['ثم ']`.
+
+44. **Breakpoints are only applied when content EXCEEDS limits**: Per the documented behavior, breakpoints split segments that exceed `maxPages` or `maxContentLength`. If content fits within both limits, breakpoints should NOT be applied. Tests that expect breakpoint splits on already-compliant content have incorrect expectations.
+
+45. **`maxPages=0` + `maxContentLength` interaction is subtle**: When both constraints are set:
+   - Check if remaining content on the CURRENT PAGE fits within `maxContentLength`
+   - If yes AND remaining content spans multiple pages: create segment for current page, advance to next page
+   - If no (content exceeds length): apply breakpoints as normal
+   - Bug symptom: adding a second page caused first page to be over-split into tiny fragments (e.g., 147, 229, 65 chars instead of ~1800 chars)
+   - Root cause: code checked ALL remaining content's span (crossing pages) instead of just current page's content
+
+46. **Minimal regression tests must trigger the bug path**: When fixing bugs, create tests that:
+   - Use realistic data sizes that exceed thresholds
+   - Include the specific constraint combination that triggered the bug (e.g., `maxPages=0` + `maxContentLength` + multiple pages)
+   - Assert on segment COUNT and LENGTHS, not just "no crashes"
+   - Would FAIL without the fix (tiny fragments) and PASS with it (normal segments)
+
+47. **Existing test expectations can be wrong**: When a fix causes existing tests to fail, investigate whether the test expectation matches documented behavior. The test `should not merge the pages when content overlaps between pages` expected 4 segments but the correct count is 3 (per documented semantics). Update tests to match correct behavior, don't revert fixes to match incorrect tests.
+
+48. **The "adding content changes behavior" smell**: If adding unrelated content (like a second page) dramatically changes how the first page is processed, suspect incorrect span/window calculations. The fix pattern: ensure window calculations are scoped to the CURRENT context (current page) not the ORIGINAL context (all remaining content).
+
 ### Process Template (Multi-agent design review, TDD-first)
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:

@@ -430,11 +430,15 @@ const processOffsetFastPath = (
 /**
  * Checks if the remaining content fits within paged/length limits.
  * If so, pushes the final segment and returns true.
+ *
+ * @param actualRemainingEndIdx - The actual end page index of the remaining content
+ *   (computed from boundaryPositions), NOT the original segment's toIdx. This is critical
+ *   for maxPages=0 scenarios where remaining content may end before toIdx.
  */
 const handleOversizedSegmentFit = (
     remainingContent: string,
     currentFromIdx: number,
-    toIdx: number,
+    actualRemainingEndIdx: number,
     pageIds: number[],
     expandedBreakpoints: Array<{ excludeSet: Set<number> }>,
     maxPages: number,
@@ -445,8 +449,13 @@ const handleOversizedSegmentFit = (
     lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null,
     result: Segment[],
 ) => {
-    const remainingSpan = computeRemainingSpan(currentFromIdx, toIdx, pageIds);
-    const remainingHasExclusions = hasAnyExclusionsInRange(expandedBreakpoints, pageIds, currentFromIdx, toIdx);
+    const remainingSpan = computeRemainingSpan(currentFromIdx, actualRemainingEndIdx, pageIds);
+    const remainingHasExclusions = hasAnyExclusionsInRange(
+        expandedBreakpoints,
+        pageIds,
+        currentFromIdx,
+        actualRemainingEndIdx,
+    );
 
     const fitsInPages = remainingSpan <= maxPages;
     const fitsInLength = !maxContentLength || remainingContent.length <= maxContentLength;
@@ -454,7 +463,14 @@ const handleOversizedSegmentFit = (
     if (fitsInPages && fitsInLength && !remainingHasExclusions) {
         const includeMeta = isFirstPiece || Boolean(debugMetaKey);
         const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, originalMeta, lastBreakpoint);
-        const finalSeg = createFinalSegment(remainingContent, currentFromIdx, toIdx, pageIds, meta, includeMeta);
+        const finalSeg = createFinalSegment(
+            remainingContent,
+            currentFromIdx,
+            actualRemainingEndIdx,
+            pageIds,
+            meta,
+            includeMeta,
+        );
         if (finalSeg) {
             result.push(finalSeg);
         }
@@ -760,6 +776,95 @@ const tryProcessOversizedSegmentFastPath = (
     );
 };
 
+type CurrentPageFitResult =
+    | {
+          handled: true;
+          newCursorPos: number;
+          newFromIdx: number;
+          newLastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null;
+      }
+    | { handled: false };
+
+/**
+ * For maxPages=0 with maxContentLength: if current page's remaining content fits,
+ * create a segment and advance to next page without applying breakpoints.
+ */
+const tryHandleCurrentPageFit = (
+    fullContent: string,
+    cursorPos: number,
+    currentFromIdx: number,
+    fromIdx: number,
+    actualRemainingEndIdx: number,
+    boundaryPositions: number[],
+    pageIds: number[],
+    expandedBreakpoints: ReturnType<typeof expandBreakpoints>,
+    maxPages: number,
+    maxContentLength: number | undefined,
+    isFirstPiece: boolean,
+    debugMetaKey: string | undefined,
+    segmentMeta: Record<string, unknown> | undefined,
+    lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null,
+    result: Segment[],
+): CurrentPageFitResult => {
+    // Only applies when maxPages=0 AND maxContentLength is set AND we span multiple pages
+    if (maxPages !== 0 || !maxContentLength || currentFromIdx >= actualRemainingEndIdx) {
+        return { handled: false };
+    }
+
+    const boundaryIdx = currentFromIdx - fromIdx + 1;
+    const currentPageEndPos = boundaryPositions[boundaryIdx] ?? fullContent.length;
+    const currentPageRemainingContent = fullContent.slice(cursorPos, currentPageEndPos).trim();
+
+    if (!currentPageRemainingContent) {
+        return { handled: false };
+    }
+
+    const currentPageFitsInLength = currentPageRemainingContent.length <= maxContentLength;
+    const currentPageHasExclusions = hasAnyExclusionsInRange(
+        expandedBreakpoints,
+        pageIds,
+        currentFromIdx,
+        currentFromIdx,
+    );
+
+    if (!currentPageFitsInLength || currentPageHasExclusions) {
+        return { handled: false };
+    }
+
+    // Find the page boundary breakpoint ('') for debug metadata
+    const pageBoundaryIdx = expandedBreakpoints.findIndex((bp) => bp.regex === null);
+    const pageBoundaryBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null =
+        pageBoundaryIdx >= 0
+            ? { breakpointIndex: pageBoundaryIdx, rule: { pattern: '' } as BreakpointRule }
+            : lastBreakpoint;
+
+    // Create segment for current page's remaining content
+    const includeMeta = isFirstPiece || Boolean(debugMetaKey);
+    const meta = getSegmentMetaWithDebug(isFirstPiece, debugMetaKey, segmentMeta, pageBoundaryBreakpoint);
+    const seg = createSegment(
+        currentPageRemainingContent,
+        pageIds[currentFromIdx],
+        undefined,
+        includeMeta ? meta : undefined,
+    );
+    if (seg) {
+        result.push(seg);
+    }
+
+    // Skip whitespace after page boundary
+    let newCursorPos = currentPageEndPos;
+    while (newCursorPos < fullContent.length && /\s/.test(fullContent[newCursorPos])) {
+        newCursorPos++;
+    }
+
+    return {
+        handled: true,
+        newCursorPos,
+        newFromIdx: currentFromIdx + 1,
+        newLastBreakpoint: pageBoundaryBreakpoint,
+    };
+};
+
 const processOversizedSegmentIterative = (
     segment: Segment,
     fromIdx: number,
@@ -837,11 +942,48 @@ const processOversizedSegmentIterative = (
             break;
         }
 
+        // Compute the actual remaining content (full remaining, not windowed) and its actual end page.
+        // This fixes the bug where remainingSpan was computed using toIdx even when remaining
+        // content only spans fewer pages.
+        const actualRemainingContent = fullContent.slice(cursorPos);
+        const actualEndPos = Math.max(cursorPos, fullContent.length - 1);
+        const actualRemainingEndIdx = Math.min(
+            findPageIndexForPosition(actualEndPos, boundaryPositions, fromIdx),
+            toIdx,
+        );
+
+        // Special handling for maxPages=0 WITH maxContentLength: check if remaining on CURRENT PAGE fits.
+        // If so, create a segment for current page content and CONTINUE to next page.
+        const currentPageFit = tryHandleCurrentPageFit(
+            fullContent,
+            cursorPos,
+            currentFromIdx,
+            fromIdx,
+            actualRemainingEndIdx,
+            boundaryPositions,
+            pageIds,
+            expandedBreakpoints,
+            maxPages,
+            maxContentLength,
+            isFirstPiece,
+            debugMetaKey,
+            segment.meta,
+            lastBreakpoint,
+            result,
+        );
+        if (currentPageFit.handled) {
+            cursorPos = currentPageFit.newCursorPos;
+            currentFromIdx = currentPageFit.newFromIdx;
+            lastBreakpoint = currentPageFit.newLastBreakpoint;
+            isFirstPiece = false;
+            continue;
+        }
+
         if (
             handleOversizedSegmentFit(
-                remainingContent,
+                actualRemainingContent,
                 currentFromIdx,
-                toIdx,
+                actualRemainingEndIdx,
                 pageIds,
                 expandedBreakpoints,
                 maxPages,

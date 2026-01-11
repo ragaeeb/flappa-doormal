@@ -657,6 +657,18 @@ For breaking on multiple words, the `words` field provides a simpler syntax with
 // Note: Empty `words: []` is filtered out (no-op), NOT treated as page-boundary fallback
 ```
 
+**⚠️ Partial Word Matching**: The `words` field matches text that *starts with* the word, not complete words only. For example, `words: ['ثم']` will also match `ثمامة` (a name starting with ثم).
+
+To match only complete words, add a **trailing space**:
+
+```typescript
+// ❌ Matches 'ثم' anywhere, including inside 'ثمامة'
+{ words: ['فهذا', 'ثم', 'أقول'] }
+
+// ✅ Matches only standalone words followed by space
+{ words: ['فهذا ', 'ثم ', 'أقول '] }
+```
+
 **Security note (ReDoS)**: Breakpoints (and raw `regex` rules) compile user-provided regular expressions. **Do not accept untrusted patterns** (e.g. from end users) without validation/sandboxing; some regexes can trigger catastrophic backtracking and hang the process.
 
 ### 12. Occurrence Filtering

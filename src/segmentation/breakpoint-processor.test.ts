@@ -360,5 +360,128 @@ describe('breakpoint-processor', () => {
                 }
             }
         });
+
+        it('should not over-split remaining content within current page when maxPages=0 and maxContentLength is set', () => {
+            // BUG FIX: When maxPages=0 and remaining content on the current page fits within maxContentLength,
+            // it should NOT keep splitting. The bug was that remainingSpan was computed using toIdx
+            // (the original segment's end page) instead of the ACTUAL end page of remaining content.
+            //
+            // This test verifies correct behavior:
+            // - Page 0 has 352 chars with whitespace at positions 150 and 301
+            // - maxContentLength=200 forces splitting at whitespace boundaries
+            // - Expected: 3 segments from page 0 (150, 150, 50), 1 from page 1 (100)
+            const page0Content = 'A'.repeat(150) + ' ' + 'B'.repeat(150) + ' ' + 'C'.repeat(50);
+            const page1Content = 'D'.repeat(100);
+            const pages = [
+                { content: page0Content, id: 0 },
+                { content: page1Content, id: 1 },
+            ];
+            const normalizedContent = [page0Content, page1Content];
+            const joined = normalizedContent.join(' ');
+            const segments: Segment[] = [{ content: joined, from: 0, to: 1 }];
+
+            const result = applyBreakpoints(
+                segments,
+                pages,
+                normalizedContent,
+                0, // maxPages=0: each segment must be from single page
+                [''], // page boundary fallback
+                'longer',
+                patternProcessor,
+                undefined,
+                'space',
+                undefined,
+                200, // maxContentLength=200: splits within page 0
+            );
+
+            const page0Segments = result.filter((s) => s.from === 0);
+            const page1Segments = result.filter((s) => s.from === 1);
+
+            // Page 0: splits at whitespace 150, 301 → 3 segments (150, 150, 50)
+            // Page 1: 100 chars fits → 1 segment
+            expect(page0Segments.length).toBe(3);
+            expect(page1Segments.length).toBe(1);
+            // All segments should be <= 200 chars
+            for (const seg of result) {
+                expect(seg.content.length).toBeLessThanOrEqual(200);
+            }
+            // No segment should span multiple pages (maxPages=0)
+            for (const seg of result) {
+                expect(seg.to).toBeUndefined();
+            }
+        });
+
+        it('should not fragment page 0 into tiny segments when page 1 is added (BUG REGRESSION)', () => {
+            // BUG: Adding a second page caused page 0 to be over-split into tiny fragments
+            // even when page 0's remaining content fit within maxContentLength.
+            //
+            // ROOT CAUSE: When segment spanned multiple pages (page 0 + page 1),
+            // the code checked ALL remaining content's span (which crosses pages),
+            // instead of just the CURRENT page's remaining content.
+            //
+            // SYMPTOM: With only page 0, segments were normal (e.g., ~800 chars each).
+            //          With page 0 + page 1, page 0 got over-split into tiny fragments
+            //          (e.g., 147, 229, 65 chars) because breakpoints kept triggering.
+            //
+            // THIS TEST FAILS WITHOUT THE FIX - it produces tiny fragments on page 0.
+
+            // Page 0: 1500 chars with punctuation at 800 and 1400
+            const page0Content = 'A'.repeat(800) + '. ' + 'B'.repeat(600) + '. ' + 'C'.repeat(96);
+            // Page 1: 500 chars (fits within maxContentLength)
+            const page1Content = 'D'.repeat(500);
+
+            const pages = [
+                { content: page0Content, id: 0 },
+                { content: page1Content, id: 1 },
+            ];
+            const normalizedContent = [page0Content, page1Content];
+            const joined = normalizedContent.join(' ');
+            const segments: Segment[] = [{ content: joined, from: 0, to: 1 }];
+
+            const result = applyBreakpoints(
+                segments,
+                pages,
+                normalizedContent,
+                0, // maxPages=0
+                ['\\.'], // punctuation breakpoint
+                'longer',
+                patternProcessor,
+                undefined,
+                'space',
+                undefined,
+                1000, // maxContentLength=1000
+            );
+
+            // EXPECTED BEHAVIOR:
+            // - Page 0 (1500 chars): split at punctuation → 2 segments (~800, ~700 chars)
+            // - Page 1 (500 chars): fits within 1000 → 1 segment
+            //
+            // BUG BEHAVIOR (without fix):
+            // - Page 0 would get over-split into many tiny segments (147, 229, 65, etc.)
+            // - because breakpoints kept triggering even when not needed
+
+            const page0Segments = result.filter((s) => s.from === 0);
+            const page1Segments = result.filter((s) => s.from === 1);
+
+            // Page 0 should have exactly 2 segments (split at punctuation)
+            expect(page0Segments.length).toBe(2);
+            // Page 1 should have exactly 1 segment
+            expect(page1Segments.length).toBe(1);
+
+            // No tiny fragments - all page 0 segments should be substantial
+            for (const seg of page0Segments) {
+                expect(seg.content.length).toBeGreaterThan(500);
+            }
+
+            // All segments within maxContentLength
+            for (const seg of result) {
+                expect(seg.content.length).toBeLessThanOrEqual(1000);
+            }
+
+            // No multi-page segments
+            for (const seg of result) {
+                expect(seg.to).toBeUndefined();
+            }
+        });
     });
 });

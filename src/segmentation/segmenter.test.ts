@@ -4454,5 +4454,125 @@ describe('segmenter', () => {
             // If empty words are truly filtered out, the remaining '' fallback is at index 0.
             expect((result[0].meta as any)?._flappa?.breakpoint?.index).toBe(0);
         });
+
+        it('should match word prefixes (words field does NOT enforce word boundaries)', () => {
+            // This test proves that words: ['ثم'] will also match 'ثمامة' (a name starting with ثم)
+            // because the pattern is \s+(?:ثم) which matches any text starting with ثم after whitespace
+            const pages: Page[] = [
+                {
+                    content: 'بداية النص ثمامة بن أثال كان من أهل اليمامة وهذا نص طويل يحتاج إلى تقسيم',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ words: ['ثم'] }],
+                maxContentLength: 50,
+            });
+
+            // The word 'ثم' matches the prefix of 'ثمامة', so it splits there
+            // Multiple splits may occur because the content is long
+            expect(result.length).toBeGreaterThanOrEqual(2);
+            // First segment ends before 'ثمامة' - proving 'ثم' matched inside 'ثمامة'
+            expect(result[0].content).not.toContain('ثمامة');
+            // Second segment starts with 'ثمامة' (the 'ثم' prefix matched)
+            expect(result[1].content).toStartWith('ثمامة');
+        });
+
+        it('should use trailing space to match only complete words', () => {
+            // Solution: add trailing space to match only the standalone word 'ثم '
+            // This prevents matching 'ثمامة' since there's no space after 'ثم' in that word
+            const pages: Page[] = [
+                {
+                    content: 'بداية النص ثمامة بن أثال ثم ذهب إلى المدينة وهذا نص طويل للتقسيم',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ words: ['ثم '] }], // Note: trailing space
+                maxContentLength: 50,
+            });
+
+            // Now it should only match 'ثم ' (with space), not 'ثمامة'
+            expect(result.length).toBe(2);
+            // First segment should CONTAIN 'ثمامة' (wasn't split there)
+            expect(result[0].content).toContain('ثمامة');
+            // Second segment starts with 'ثم' (the standalone word)
+            expect(result[1].content).toStartWith('ثم');
+        });
+
+        it('should NOT work with {{newline}} in words field (requires preceding whitespace)', () => {
+            // Content has lines WITHOUT trailing whitespace before \n
+            const pages: Page[] = [
+                {
+                    content:
+                        'First line with enough content to exceed the minimum limit\nSecond line with enough content to exceed the minimum limit\nThird line here',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ words: ['{{newline}}'] }],
+                maxContentLength: 70,
+            });
+
+            // words: ['{{newline}}'] generates \s+(?:\n) which requires whitespace BEFORE newline
+            // Since newlines typically don't have whitespace before them, this won't match
+            // The library falls back to safe-break (whitespace/unicode boundary)
+            expect(result.length).toBeGreaterThan(1);
+            // The splits happen at safe whitespace boundaries, NOT at exact line breaks
+            // So the content is split mid-sentence at spaces, not cleanly at newlines
+            expect(result[0].content).not.toBe('First line with enough content to exceed the minimum limit');
+        });
+
+        it('should work with {{newline}} in pattern field (no prefix added)', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'First line with enough content to exceed the minimum limit\nSecond line with enough content to exceed the minimum limit\nThird line with enough content here',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ pattern: '{{newline}}' }],
+                maxContentLength: 70,
+            });
+
+            // pattern: '{{newline}}' matches \n directly without any prefix
+            expect(result.length).toBe(3);
+            expect(result[0].content).toBe('First line with enough content to exceed the minimum limit');
+            expect(result[1].content).toBe('Second line with enough content to exceed the minimum limit');
+            expect(result[2].content).toBe('Third line with enough content here');
+        });
+
+        it('should produce same output for {{newline}} with split:after and split:at (both trimmed)', () => {
+            const pages: Page[] = [
+                {
+                    content:
+                        'First line with enough content here to test\nSecond line with enough content here to test\nThird line',
+                    id: 1,
+                },
+            ];
+
+            const resultAfter = segmentPages(pages, {
+                breakpoints: [{ pattern: '{{newline}}', split: 'after' }],
+                maxContentLength: 50,
+            });
+
+            const resultAt = segmentPages(pages, {
+                breakpoints: [{ pattern: '{{newline}}', split: 'at' }],
+                maxContentLength: 50,
+            });
+
+            // Both should produce the same trimmed output
+            // split:after → prev ends with \n, trimmed → no \n
+            // split:at → next starts with \n, trimmed → no \n
+            expect(resultAfter.length).toBe(resultAt.length);
+            expect(resultAfter.map((s) => s.content)).toEqual(resultAt.map((s) => s.content));
+            expect(resultAfter[0].content).toBe('First line with enough content here to test');
+            expect(resultAfter[1].content).toBe('Second line with enough content here to test');
+        });
     });
 });

@@ -965,12 +965,13 @@ describe('index', () => {
             // With maxPages=0, no segment should span pages (no 'to' field should exist)
             expect(segments.every((s) => s.to === undefined)).toBeTrue();
 
-            // Should have 4 segments: 2 from page 0, 1 from page 1, 1 from page 2
-            expect(segments).toHaveLength(4);
+            // Should have 3 segments: 1 per page
+            // NOTE: Breakpoints are only applied when content EXCEEDS maxContentLength.
+            // Since all page contents are well under 2000 chars, no breakpoint splitting occurs.
+            expect(segments).toHaveLength(3);
             expect(segments[0].from).toBe(0);
-            expect(segments[1].from).toBe(0);
-            expect(segments[2].from).toBe(1);
-            expect(segments[3].from).toBe(2);
+            expect(segments[1].from).toBe(1);
+            expect(segments[2].from).toBe(2);
         });
 
         it('should include contentLengthSplit metadata when standard breakpoint triggers on length limit', () => {
