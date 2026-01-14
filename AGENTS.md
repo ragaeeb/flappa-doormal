@@ -604,6 +604,8 @@ bunx biome lint .
 
 48. **The "adding content changes behavior" smell**: If adding unrelated content (like a second page) dramatically changes how the first page is processed, suspect incorrect span/window calculations. The fix pattern: ensure window calculations are scoped to the CURRENT context (current page) not the ORIGINAL context (all remaining content).
 
+49. **Use `trimStart()` not `trim()` for user-provided patterns with semantic whitespace**: When processing user-provided patterns like the `words` field, only strip leading whitespace (likely accidental). Trailing whitespace may be intentional for whole-word matching (e.g., `'بل '` should match only the standalone word, not words starting with `بل` like `بلغ`). **Bug symptom**: `words: ['بل ']` matched `بلغ` because `.trim()` stripped the trailing space to just `بل`. **Fix**: Use `.trimStart()` to preserve trailing whitespace.
+
 ### Process Template (Multi-agent design review, TDD-first)
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:

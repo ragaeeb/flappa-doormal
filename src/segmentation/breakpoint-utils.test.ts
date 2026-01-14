@@ -358,6 +358,127 @@ describe('breakpoint-utils', () => {
             expect(result[0].rule.min).toBe(10);
             expect(result[0].rule.max).toBe(100);
         });
+
+        it('should preserve trailing whitespace in words for whole-word matching', () => {
+            // Bug regression: 'بل ' with trailing space was being trimmed to 'بل'
+            // This caused matching of 'بلغ' (any word starting with بل) instead of just 'بل '
+            const result = expandBreakpoints([{ words: ['بل '] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            // The pattern should include the trailing space
+            expect(source).toContain('بل ');
+
+            // Verify the regex correctly matches only the whole word with trailing space
+            const regex = result[0].regex!;
+
+            // Should match: whitespace + 'بل '
+            const matchesWholeWord = ' بل '.match(regex);
+            expect(matchesWholeWord).not.toBeNull();
+
+            // Should NOT match: whitespace + 'بلغ' (word that only starts with بل)
+            const matchesPartial = ' بلغ '.match(regex);
+            expect(matchesPartial).toBeNull();
+        });
+
+        it('should preserve multiple trailing spaces in words', () => {
+            // Users might add multiple trailing spaces intentionally
+            const result = expandBreakpoints([{ words: ['word  '] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            expect(source).toContain('word  '); // Two trailing spaces preserved
+
+            const regex = result[0].regex!;
+            // Should match with two trailing spaces
+            expect(' word  '.match(regex)).not.toBeNull();
+            // Should NOT match with only one trailing space
+            expect(' word '.match(regex)).toBeNull();
+        });
+
+        it('should strip leading whitespace from words', () => {
+            // Leading whitespace is stripped (likely accidental formatting)
+            const result = expandBreakpoints([{ words: ['  word'] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            // The pattern should NOT have leading whitespace before the word
+            expect(source).toContain('(?:word)'); // Pattern should be just 'word'
+            expect(source).not.toMatch(/\(\?:\s+word\)/); // No leading spaces in group
+
+            const regex = result[0].regex!;
+            expect(' word'.match(regex)).not.toBeNull();
+        });
+
+        it('should handle words with both leading and trailing whitespace', () => {
+            // Leading is stripped, trailing preserved
+            const result = expandBreakpoints([{ words: ['  بل  '] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            // Should contain 'بل  ' (word + two trailing spaces, no leading)
+            expect(source).toContain('بل  ');
+            expect(source).not.toMatch(/\s+بل/); // No leading whitespace in the word itself
+
+            const regex = result[0].regex!;
+            expect(' بل  '.match(regex)).not.toBeNull();
+            // Should NOT match without trailing spaces
+            expect(' بل'.match(regex)).toBeNull();
+        });
+
+        it('should filter out whitespace-only words even after trimStart', () => {
+            // ' \t ' becomes '' after trimStart, should be filtered out
+            const result = expandBreakpoints([{ words: ['  ', '\t', 'valid'] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            // Only 'valid' should remain
+            expect(source).toContain('valid');
+            expect(source).not.toMatch(/\(\?:\s*\)/); // No empty groups
+        });
+
+        it('should handle words with tab characters', () => {
+            const result = expandBreakpoints([{ words: ['word\t'] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            // Tab should be preserved (not stripped)
+            expect(source).toContain('word\t');
+
+            const regex = result[0].regex!;
+            expect(' word\t'.match(regex)).not.toBeNull();
+            expect(' word '.match(regex)).toBeNull(); // space != tab
+        });
+
+        it('should handle words with newline characters (trailing)', () => {
+            const result = expandBreakpoints([{ words: ['word\n'] }], identityProcessor);
+            const regex = result[0].regex!;
+            // Note: The regex source representation escapes newline as \\n
+            // but the actual matching behavior should work with literal newlines
+            expect(' word\n'.match(regex)).not.toBeNull();
+            expect(' word '.match(regex)).toBeNull(); // newline != space
+            expect(' word'.match(regex)).toBeNull(); // missing trailing newline
+        });
+
+        it('should handle tokens with trailing whitespace', () => {
+            // Simulate a pattern processor that expands {{naql}} to 'حدثنا'
+            const processor = (p: string) => p.replace('{{naql}}', 'حدثنا');
+            const result = expandBreakpoints([{ words: ['{{naql}} '] }], processor);
+            const source = result[0].regex?.source ?? '';
+            // Should contain expanded token + trailing space
+            expect(source).toContain('حدثنا ');
+
+            const regex = result[0].regex!;
+            expect(' حدثنا '.match(regex)).not.toBeNull();
+            expect(' حدثنا'.match(regex)).toBeNull(); // No trailing space = no match
+        });
+
+        it('should correctly sort words by length after processing (with trailing whitespace)', () => {
+            // 'ثم ' (2 chars + space = 3) should come after 'ثم إن' (5 chars)
+            const result = expandBreakpoints([{ words: ['ثم ', 'ثم إن'] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            // Longer word should come first in alternation
+            const longPos = source.indexOf('ثم إن');
+            const shortPos = source.indexOf('(?:ثم )');
+            expect(longPos).toBeLessThan(shortPos);
+        });
+
+        it('should NOT create empty alternation groups from trailing-whitespace-only deduplication', () => {
+            // Both 'test' and ' test' (after trimStart) become 'test' - should deduplicate
+            const result = expandBreakpoints([{ words: ['test', '  test'] }], identityProcessor);
+            const source = result[0].regex?.source ?? '';
+            // Should only have one occurrence of 'test'
+            const matches = source.match(/test/g);
+            expect(matches?.length).toBe(1);
+        });
     });
 
     describe('hasExcludedPageInRange', () => {

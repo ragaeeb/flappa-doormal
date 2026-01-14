@@ -224,7 +224,10 @@ export type PatternProcessor = (pattern: string) => string;
  */
 const buildWordsRegex = (words: string[], processPattern: PatternProcessor): string | null => {
     const processed = words
-        .map((w) => w.trim())
+        // Use trimStart() to preserve trailing whitespace for whole-word matching
+        // e.g., 'بل ' (with trailing space) should match only the standalone word,
+        // not words like 'بلغ' that start with 'بل'
+        .map((w) => w.trimStart())
         .filter((w) => w.length > 0)
         .map((w) => processPattern(escapeWordsOutsideTokens(w)));
 

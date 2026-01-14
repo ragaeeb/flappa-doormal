@@ -4502,6 +4502,29 @@ describe('segmenter', () => {
             expect(result[1].content).toStartWith('ثم');
         });
 
+        it('should NOT match بلغ when words contains بل with trailing space (regression)', () => {
+            // Explicit regression test for the bug where:
+            // words: ['بل '] was trimmed to 'بل' and incorrectly matched 'بلغ'
+            const pages: Page[] = [
+                {
+                    content: 'لم تبلغهم الدعوة ولكن بل هم يعرفون الحق وهذا نص إضافي لتجاوز الحد',
+                    id: 1,
+                },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [{ words: ['بل '] }], // trailing space = whole word only
+                maxContentLength: 50,
+            });
+
+            // Should split at 'بل ' (standalone), NOT at 'بلغ' (embedded in 'تبلغهم')
+            expect(result.length).toBe(2);
+            // First segment should contain 'تبلغهم' (بلغ inside a word was NOT matched)
+            expect(result[0].content).toContain('تبلغهم');
+            // Second segment should start with 'بل' (the standalone word)
+            expect(result[1].content).toStartWith('بل');
+        });
+
         it('should NOT work with {{newline}} in words field (requires preceding whitespace)', () => {
             // Content has lines WITHOUT trailing whitespace before \n
             const pages: Page[] = [
