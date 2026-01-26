@@ -16,9 +16,16 @@ export {
 } from './detection.js';
 export type { OptimizeResult } from './optimization/optimize-rules.js';
 export { optimizeRules } from './optimization/optimize-rules.js';
+export {
+    applyPreprocessToPage,
+    condenseEllipsis,
+    fixTrailingWaw,
+    removeZeroWidth,
+} from './preprocessing/transforms.js';
 export type { MarkerRecoveryReport, MarkerRecoveryRun, MarkerRecoverySelector } from './recovery.js';
 export { recoverMistakenLineStartsAfterMarkers, recoverMistakenMarkersForRuns } from './recovery.js';
 export type { PatternProcessor } from './segmentation/breakpoint-utils.js';
+export { escapeWordsOutsideTokens } from './segmentation/breakpoint-utils.js';
 export type {
     RuleValidationResult,
     ValidationIssue,
@@ -42,7 +49,6 @@ export {
     templateToRegex,
     withCapture,
 } from './segmentation/tokens.js';
-export { escapeWordsOutsideTokens } from './segmentation/breakpoint-utils.js';
 export type { Breakpoint, BreakpointRule } from './types/breakpoints.js';
 export type { Page, PageRange, PageRangeConstraint, PageRangeConstraintWithExclude, Segment } from './types/index.js';
 export type {
@@ -53,11 +59,5 @@ export type {
     RemoveZeroWidthRule,
     SegmentationOptions,
 } from './types/options.js';
-export {
-    applyPreprocessToPage,
-    condenseEllipsis,
-    fixTrailingWaw,
-    removeZeroWidth,
-} from './preprocessing/transforms.js';
 export { PATTERN_TYPE_KEYS, type PatternTypeKey, type SplitRule } from './types/rules.js';
 export { escapeRegex, escapeTemplateBrackets, makeDiacriticInsensitive } from './utils/textUtils.js';

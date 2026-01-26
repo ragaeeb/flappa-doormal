@@ -947,6 +947,57 @@ const segments = segmentPages(pages, { rules });
 // ]
 ```
 
+## Advanced: Metadata Extraction & Data Migration
+
+If you already have pre-segmented data (e.g., records from a database or JSON file) and want to use **flappa-doormal's** token system to extract metadata and clean the content without further splitting, you can use the **Metadata Extraction** pattern.
+
+By setting `maxPages: 0`, you guarantee a **1:1 mapping**: each input page produces exactly one output segment, regardless of how much text is on the page.
+
+### Example: Extracting multiple fields from pre-split records
+
+```typescript
+import { segmentPages, type Page } from 'flappa-doormal';
+
+const excerpts = [
+  { nass: '٧٠١٦ - ١ - ١ - فَقَصَّتْهَا حَفْصَةُ', id: 1 },
+  { nass: '٧٠١٧ (أ) - بَابُ الْقَيْدِ', id: 2 },
+  { nass: 'باب الصلاة - الفصل الأول', id: 3 },
+];
+
+// Convert your data to the Page format
+const pages: Page[] = excerpts.map(e => ({ content: e.nass, id: e.id }));
+
+const result = segmentPages(pages, {
+  maxPages: 0, // IMPORTANT: Guarantees each page stays isolated (no merging/splitting)
+  rules: [
+    // 1. Extract triple numbers: ٧٠١٦ - ١ - ١
+    {
+      lineStartsAfter: ['{{raqms:num}} {{dash}} {{raqms:num2}} {{dash}} {{raqms:num3}} '],
+    },
+    // 2. Extract number + indicator: ٧٠١٧ (أ)
+    {
+      lineStartsAfter: ['{{raqms:num}} ({{harf:indicator}}) {{dash}} '],
+    },
+    // 3. Mark chapters using fuzzy tokens
+    {
+      fuzzy: true,
+      lineStartsWith: ['{{bab}} '],
+      meta: { type: 'Chapter' },
+    },
+  ],
+});
+
+// Segment 0: { content: 'فَقَصَّتْهَا حَفْصَةُ', meta: { num: '٧٠١٦', num2: '١', num3: '١' }, ... }
+// Segment 1: { content: 'بَابُ الْقَيْدِ', meta: { num: '٧٠١٧', indicator: 'أ' }, ... }
+// Segment 2: { content: 'باب الصلاة - الفصل الأول', meta: { type: 'Chapter' }, ... }
+```
+
+### Why use this?
+- **Pattern Robustness**: Use `{{raqms}}`, `{{dash}}`, and `{{harf}}` instead of writing raw regex for every edge case.
+- **Prefix Cleaning**: `lineStartsAfter` automatically removes the matched pattern, leaving only the clean text.
+- **Deduplication**: Named captures like `{{raqms:num}}` automatically populate the `meta` object.
+- **Fuzzy Headers**: Use `fuzzy: true` to match headers like "Book" or "Chapter" regardless of Arabic diacritics.
+
 ## Rule Optimization
 
 Use `optimizeRules()` to automatically merge compatible rules, remove duplicate patterns, and sort rules by specificity (longest patterns first):
