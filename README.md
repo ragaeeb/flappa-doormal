@@ -92,6 +92,35 @@ const segments = segmentPages(pages, {
 // ]
 ```
 
+## Segment Validation
+
+Use `validateSegments()` to sanity-check segmentation output against the input pages and options. This is useful for detecting page attribution issues or maxPages violations before sending segments to downstream systems.
+
+```typescript
+import { segmentPages, validateSegments } from 'flappa-doormal';
+
+const segments = segmentPages(pages, { rules, maxPages: 0 });
+const report = validateSegments(pages, { rules, maxPages: 0 }, segments);
+
+if (!report.ok) {
+  console.log(report.summary);
+  console.log(report.issues[0]);
+}
+```
+
+Example issue entry (truncated):
+
+```json
+{
+  "type": "page_attribution_mismatch",
+  "severity": "error",
+  "segmentIndex": 2,
+  "expected": { "from": 5 },
+  "actual": { "from": 4 },
+  "evidence": "Content found in page 5, but segment.from=4."
+}
+```
+
 ## Features
 
 ### 1. Template Tokens

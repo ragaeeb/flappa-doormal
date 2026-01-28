@@ -756,6 +756,25 @@ See README.md for complete examples.
 
 ## Debugging Tips
 
+### Reading Validation Reports
+
+`validateSegments(pages, options, segments)` returns a structured report for attribution and `maxPages` issues. Use it to quickly localize bugs without re-running segmentation.
+
+**Key fields:**
+- `summary.errors` / `summary.warnings`: Use to decide if the bug is a hard failure or a suspected edge case.
+- `issues[].type`: The failure class (see below).
+- `issues[].segmentIndex`: Which segment to inspect in output.
+- `issues[].expected` / `issues[].actual`: Where attribution diverged.
+- `issues[].pageContext`: Matching page preview + `matchIndex` (if found).
+- `issues[].hint`: Direct pointer to likely culprit code path.
+
+**Issue types and next steps:**
+- `max_pages_violation`: Segment spans too many pages. Check breakpoint windowing in `breakpoint-processor.ts` and boundary logic in `breakpoint-utils.ts`.
+- `page_attribution_mismatch`: Content matched a different page than `segment.from`. Focus on `buildBoundaryPositions()` and `findPageStartNearExpectedBoundary()`.
+- `content_not_found`: Segment content not found in any page. Compare preprocessing, `pageJoiner`, and trimming behavior.
+- `ambiguous_attribution`: Content appears on multiple pages. Look for duplicated text or weak anchors; consider stronger rules.
+- `page_not_found`: Segment `from` is not in input pages; validate page IDs and input ordering.
+
 ### Page Boundary Detection Issues
 
 If `maxPages=0` produces merged segments when pages have identical prefixes or duplicated content:

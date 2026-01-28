@@ -50,7 +50,17 @@ export {
     withCapture,
 } from './segmentation/tokens.js';
 export type { Breakpoint, BreakpointRule } from './types/breakpoints.js';
-export type { Page, PageRange, PageRangeConstraint, PageRangeConstraintWithExclude, Segment } from './types/index.js';
+export type {
+    Page,
+    PageRange,
+    PageRangeConstraint,
+    PageRangeConstraintWithExclude,
+    Segment,
+    ValidationIssue,
+    ValidationIssueSeverity,
+    ValidationIssueType,
+    ValidationReport,
+} from './types/index.js';
 export type {
     CondenseEllipsisRule,
     FixTrailingWawRule,
@@ -61,3 +71,4 @@ export type {
 } from './types/options.js';
 export { PATTERN_TYPE_KEYS, type PatternTypeKey, type SplitRule } from './types/rules.js';
 export { escapeRegex, escapeTemplateBrackets, makeDiacriticInsensitive } from './utils/textUtils.js';
+export { validateSegments } from './validation/validate-segments.js';
