@@ -1002,4 +1002,186 @@ describe('index', () => {
             });
         });
     });
+
+    describe('metadata extraction from pre-segmented content', () => {
+        it('should extract meta from segments using segmentPages with maxPages=0', () => {
+            // Generate a mixed array of 100 items: ~70 with numbered prefix, ~30 without
+            const generateItems = (): Page[] => {
+                const items: Page[] = [];
+                const arabicNums = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+                const toArabicNum = (n: number): string =>
+                    n
+                        .toString()
+                        .split('')
+                        .map((d) => arabicNums[parseInt(d, 10)])
+                        .join('');
+
+                for (let i = 0; i < 100; i++) {
+                    const hasNumberedPrefix = i % 10 < 7; // 70% have numbered prefix
+                    if (hasNumberedPrefix) {
+                        const num = toArabicNum(1000 + i);
+                        items.push({
+                            content: `${num} - الحديث رقم ${i} نص طويل هنا للاختبار`,
+                            id: i,
+                        });
+                    } else {
+                        items.push({
+                            content: `باب في الإيمان - الفصل ${i}`,
+                            id: i,
+                        });
+                    }
+                }
+                return items;
+            };
+
+            const originalItems = generateItems();
+
+            // Step 1: First pass - segment with a basic rule (no meta capture)
+            // This simulates having pre-segmented content
+            const firstPassResult = segmentPages(originalItems, {
+                maxPages: 0, // Keep each page isolated
+                rules: [], // No splitting rules - just pass through
+            });
+
+            // Verify 1:1 mapping preserved
+            expect(firstPassResult).toHaveLength(100);
+
+            // Step 2: Second pass - extract metadata using maxPages=0
+            // Convert segments back to pages format for second pass
+            const segmentsAsPages: Page[] = firstPassResult.map((seg) => ({
+                content: seg.content,
+                id: seg.from,
+            }));
+
+            const extractedResult = segmentPages(segmentsAsPages, {
+                maxPages: 0, // Guarantees 1:1 mapping
+                rules: [
+                    {
+                        lineStartsAfter: ['{{raqms:num}} {{dash}} '],
+                    },
+                ],
+            });
+
+            // Verify count preserved
+            expect(extractedResult).toHaveLength(100);
+
+            // Count items with meta
+            const withMeta = extractedResult.filter((seg) => seg.meta?.num !== undefined);
+            const withoutMeta = extractedResult.filter((seg) => seg.meta?.num === undefined);
+
+            // 70 items should have extracted meta (indices where i % 10 < 7)
+            expect(withMeta).toHaveLength(70);
+            expect(withoutMeta).toHaveLength(30);
+
+            // Verify specific extractions
+            const seg0 = extractedResult[0];
+            expect(seg0.meta?.num).toBe('١٠٠٠'); // 1000 in Arabic numerals
+            expect(seg0.content).toBe('الحديث رقم 0 نص طويل هنا للاختبار');
+            expect(seg0.content).not.toContain('١٠٠٠'); // Number stripped
+            expect(seg0.content).not.toContain(' - '); // Dash stripped
+
+            const seg5 = extractedResult[5];
+            expect(seg5.meta?.num).toBe('١٠٠٥'); // 1005
+            expect(seg5.content).toBe('الحديث رقم 5 نص طويل هنا للاختبار');
+
+            // Verify non-matching items preserved
+            const seg7 = extractedResult[7]; // Index 7 % 10 = 7, so no numbered prefix
+            expect(seg7.meta?.num).toBeUndefined();
+            expect(seg7.content).toBe('باب في الإيمان - الفصل 7');
+
+            // Verify all items can be mapped back by their 'from' field
+            for (let i = 0; i < 100; i++) {
+                expect(extractedResult[i].from).toBe(i);
+            }
+        });
+
+        it('should handle extraction with trimming correctly', () => {
+            const pages: Page[] = [
+                { content: '٧٠١٦ -   text with leading spaces after dash', id: 1 },
+                { content: '٧٠١٧ - text without extra spaces', id: 2 },
+                { content: 'no number here', id: 3 },
+            ];
+
+            const result = segmentPages(pages, {
+                maxPages: 0,
+                rules: [{ lineStartsAfter: ['{{raqms:num}} {{dash}} '] }],
+            });
+
+            expect(result).toHaveLength(3);
+
+            // Content should be trimmed
+            expect(result[0].content).toBe('text with leading spaces after dash');
+            expect(result[0].meta?.num).toBe('٧٠١٦');
+
+            expect(result[1].content).toBe('text without extra spaces');
+            expect(result[1].meta?.num).toBe('٧٠١٧');
+
+            // Non-matching content preserved exactly
+            expect(result[2].content).toBe('no number here');
+            expect(result[2].meta).toBeUndefined();
+        });
+    });
+
+    it.skip('should migrate', async () => {
+        const data = await Bun.file('excerpts.json').json();
+        initPages(data.excerpts.map((e) => e.nass));
+
+        const segments = segmentPages(pages, {
+            maxPages: 0, // Guarantees 1:1 mapping
+            rules: [
+                {
+                    lineStartsAfter: [
+                        '{{raqms:num}} {{dash}} {{raqms:num2}} {{dash}} {{raqms:num3}} ',
+                        '{{raqms:num}} {{dash}} {{raqms:num2}} {{dash}} ',
+                        '{{raqms:num}} ({{harf}}) {{dash}} ',
+                        '{{raqms:num}} «{{harf}}» {{dash}}',
+                        '{{raqms:num}} ({{harf}}) ',
+                        '{{raqms:num}} {{dash}}',
+                    ],
+                },
+                {
+                    fuzzy: true,
+                    lineStartsWith: ['{{bab}} ', '{{bab}}:'],
+                    meta: {
+                        type: 'C',
+                    },
+                },
+                {
+                    fuzzy: true,
+                    lineStartsWith: ['{{kitab}} '],
+                    meta: {
+                        type: 'B',
+                    },
+                },
+            ],
+        });
+
+        for (let i = 0; i < segments.length; i++) {
+            const s = segments[i];
+
+            if (!data.excerpts[i].nass.includes(s.content)) {
+                console.log('Check', s);
+                console.log('vs.', data.excerpts[i]);
+                break;
+            }
+        }
+
+        expect(segments.length).toBe(data.excerpts.length);
+
+        segments.forEach((s, i) => {
+            data.excerpts[i].nass = s.content;
+
+            if (s.meta) {
+                data.excerpts[i].meta = s.meta;
+            }
+        });
+
+        const headings = [];
+
+        data.headings.forEach(({ parent, ...h }) => {
+            headings.push(h);
+        });
+
+        await Bun.write('output.json', JSON.stringify({ ...data, headings }, null, 2));
+    });
 });
