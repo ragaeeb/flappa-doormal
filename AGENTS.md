@@ -606,6 +606,14 @@ bunx biome lint .
 
 49. **Use `trimStart()` not `trim()` for user-provided patterns with semantic whitespace**: When processing user-provided patterns like the `words` field, only strip leading whitespace (likely accidental). Trailing whitespace may be intentional for whole-word matching (e.g., `'بل '` should match only the standalone word, not words starting with `بل` like `بلغ`). **Bug symptom**: `words: ['بل ']` matched `بلغ` because `.trim()` stripped the trailing space to just `بل`. **Fix**: Use `.trimStart()` to preserve trailing whitespace.
 
+50. **When expected boundaries exceed segment length, trust content matches**: If `expectedBoundary >= remainingContent.length`, any deviation-based validation is meaningless. In this case the boundary search must scan the full segment content and rank candidates without a distance constraint. Otherwise early valid page starts can be missed and page attribution will drift.
+
+51. **Infer start offset from the first boundary when necessary**: If the initial boundary search fails right after a structural split, rerun a relaxed search to find the true page start and infer `startOffsetInFromPage`. This corrects the baseline for all subsequent boundary estimates.
+
+52. **Windowed boundary searches can be wrong when offsets drift**: If the approximate offset is skewed (e.g., repeated line-start markers), a windowed scan may miss the real boundary. A full-content scan is required to recover early matches.
+
+53. **Harden maxPages=0 with targeted tests**: Add tests that hit the failure modes: segment starts at page boundary with repeated marker, very short pages (< 100 chars), minimal prefix lengths (15 chars), multiple candidate prefixes in content, tiny tail segments after structural splits, and fast-path threshold transitions (999 vs 1000 pages).
+
 ### Process Template (Multi-agent design review, TDD-first)
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:
