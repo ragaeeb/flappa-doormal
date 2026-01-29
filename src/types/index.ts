@@ -151,8 +151,8 @@ export type {
 } from './options.js';
 
 export type {
-    ValidationIssue,
-    ValidationIssueSeverity,
-    ValidationIssueType,
-    ValidationReport,
+    SegmentValidationIssue as ValidationIssue,
+    SegmentValidationIssueSeverity as ValidationIssueSeverity,
+    SegmentValidationIssueType as ValidationIssueType,
+    SegmentValidationReport as ValidationReport,
 } from './validation.js';

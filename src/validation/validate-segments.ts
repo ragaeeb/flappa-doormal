@@ -1,7 +1,7 @@
 import { applyPreprocessToPage } from '@/preprocessing/transforms.js';
 import type { Page, Segment } from '@/types';
 import type { SegmentationOptions } from '@/types/options.js';
-import type { ValidationIssue, ValidationReport } from '@/types/validation.js';
+import type { SegmentValidationIssue, SegmentValidationReport } from '@/types/validation.js';
 import { normalizeLineEndings } from '@/utils/textUtils.js';
 
 type JoinedBoundary = {
@@ -66,27 +66,33 @@ const findBoundaryIdForOffset = (offset: number, boundaries: JoinedBoundary[]) =
             return boundary.id;
         }
     }
-    return boundaries.at(-1)!.id;
+
+    if (boundaries.length === 0) {
+        return undefined;
+    }
+
+    const last = boundaries.at(-1)!;
+    return offset > last.end ? last.id : undefined;
 };
 
-type IssueOverrides = Partial<Omit<ValidationIssue, 'type' | 'segment' | 'segmentIndex' | 'severity'>> & {
+type IssueOverrides = Partial<Omit<SegmentValidationIssue, 'type' | 'segment' | 'segmentIndex' | 'severity'>> & {
     matchIndex?: number;
 };
 
 const createIssue = (
-    type: ValidationIssue['type'],
+    type: SegmentValidationIssue['type'],
     segment: Segment,
     segmentIndex: number,
     overrides: IssueOverrides = {},
     pageMap?: Map<number, Page>,
-): ValidationIssue => {
+): SegmentValidationIssue => {
     const segmentSnapshot = buildSegmentSnapshot(segment);
     const page = pageMap?.get(segment.from);
 
     const matchIndex = overrides.matchIndex;
     const { matchIndex: _ignored, ...restOverrides } = overrides;
 
-    const base: Omit<ValidationIssue, 'type' | 'severity'> = {
+    const base: Omit<SegmentValidationIssue, 'type' | 'severity'> = {
         actual: { from: segment.from, to: segment.to },
         segment: segmentSnapshot,
         segmentIndex,
@@ -175,7 +181,7 @@ const checkMaxPagesViolation = (
     matchEnd: number,
     expectedBoundaryEnd: number,
     boundaries: JoinedBoundary[],
-): ValidationIssue[] => {
+): SegmentValidationIssue[] => {
     if (maxPages === 0 && segment.to === undefined && matchEnd > expectedBoundaryEnd) {
         const actualToId = findBoundaryIdForOffset(matchEnd, boundaries);
         return [
@@ -195,7 +201,7 @@ const handleMissingBoundary = (
     joined: string,
     boundaries: JoinedBoundary[],
     pageMap: Map<number, Page>,
-): ValidationIssue[] => {
+): SegmentValidationIssue[] => {
     // Search full text to see if content exists anywhere
     const matches = findJoinedMatches(segment.content, joined, 0, joined.length, 1);
     if (matches.length === 0) {
@@ -239,7 +245,7 @@ const handleFallbackSearch = (
     boundaries: JoinedBoundary[],
     pageMap: Map<number, Page>,
     maxPages: number | undefined,
-): ValidationIssue[] => {
+): SegmentValidationIssue[] => {
     const content = segment.content;
     const bufferSize = 1000;
     const slowSearchStart = Math.max(0, searchStart - bufferSize);
@@ -342,7 +348,7 @@ const getAttributionIssues = (
     boundaries: JoinedBoundary[],
     boundaryMap: Map<number, JoinedBoundary>,
     pageMap: Map<number, Page>,
-): ValidationIssue[] => {
+): SegmentValidationIssue[] => {
     if (!segment.content) {
         return [
             createIssue('content_not_found', segment, segmentIndex, { evidence: 'Segment content is empty.' }, pageMap),
@@ -406,7 +412,7 @@ export const validateSegments = (
     pages: Page[],
     options: SegmentationOptions,
     segments: Segment[],
-): ValidationReport => {
+): SegmentValidationReport => {
     const normalizedPages = normalizePages(pages, options);
     const joiner = options.pageJoiner === 'newline' ? '\n' : ' ';
     const { boundaries, joined } = buildJoinedContent(normalizedPages, joiner);
@@ -424,7 +430,7 @@ export const validateSegments = (
     const pageIds = new Set(normalizedPages.map((p) => p.id));
     const maxPages = options.maxPages;
 
-    const issues: ValidationIssue[] = [];
+    const issues: SegmentValidationIssue[] = [];
 
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];

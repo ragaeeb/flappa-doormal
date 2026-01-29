@@ -1,14 +1,14 @@
-export type ValidationIssueSeverity = 'error' | 'warn';
+export type SegmentValidationIssueSeverity = 'error' | 'warn';
 
-export type ValidationIssueType =
+export type SegmentValidationIssueType =
     | 'max_pages_violation'
     | 'page_attribution_mismatch'
     | 'content_not_found'
     | 'page_not_found';
 
-export type ValidationIssue = {
-    type: ValidationIssueType;
-    severity: ValidationIssueSeverity;
+export type SegmentValidationIssue = {
+    type: SegmentValidationIssueType;
+    severity: SegmentValidationIssueSeverity;
     segmentIndex: number;
     segment: {
         from: number;
@@ -32,7 +32,7 @@ export type ValidationIssue = {
     hint?: string;
 };
 
-export type ValidationReport = {
+export type SegmentValidationReport = {
     ok: boolean;
     summary: {
         segmentCount: number;
@@ -41,5 +41,5 @@ export type ValidationReport = {
         errors: number;
         warnings: number;
     };
-    issues: ValidationIssue[];
+    issues: SegmentValidationIssue[];
 };
