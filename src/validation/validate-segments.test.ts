@@ -75,4 +75,17 @@ describe('validateSegments', () => {
         expect(report.issues[0]?.type).toBe('ambiguous_attribution');
         expect(report.issues[0]?.severity).toBe('warn');
     });
+
+    it('should detect maxPages violation when content only matches joined pages', () => {
+        const pages: Page[] = [
+            { content: 'Alpha', id: 0 },
+            { content: 'Beta', id: 1 },
+        ];
+        const segments: Segment[] = [{ content: 'Alpha Beta', from: 0 }];
+
+        const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+
+        expect(report.ok).toBe(false);
+        expect(report.issues[0]?.type).toBe('max_pages_violation');
+    });
 });
