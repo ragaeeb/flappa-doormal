@@ -292,4 +292,97 @@ describe('validateSegments', () => {
             expect(report.ok).toBe(true);
         });
     });
+
+    describe('Edge Cases', () => {
+        it('should handle empty segment content as not found', () => {
+            const pages: Page[] = [{ content: 'Some content', id: 0 }];
+            const segments: Segment[] = [{ content: '', from: 0 }];
+            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+            // Empty content returns no matches, so it's treated as not found
+            expect(report.ok).toBe(false);
+            expect(report.issues[0]?.type).toBe('content_not_found');
+        });
+
+        it('should handle single character segments', () => {
+            const pages: Page[] = [{ content: 'ABC', id: 0 }];
+            const segments: Segment[] = [{ content: 'B', from: 0 }];
+            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+            expect(report.ok).toBe(true);
+        });
+
+        it('should handle very long segment content', () => {
+            const longContent = 'A'.repeat(1000);
+            const pages: Page[] = [{ content: longContent, id: 0 }];
+            const segments: Segment[] = [{ content: longContent, from: 0 }];
+            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+            expect(report.ok).toBe(true);
+        });
+
+        it('should handle segment content at page boundaries', () => {
+            const pages: Page[] = [
+                { content: 'End', id: 0 },
+                { content: 'Start', id: 1 },
+            ];
+            // Content spans across boundary (default space joiner)
+            const segments: Segment[] = [{ content: 'End Start', from: 0, to: 1 }];
+            const report = validateSegments(pages, { maxPages: 1, rules: [] }, segments);
+            expect(report.ok).toBe(true);
+        });
+
+        it('should handle non-sequential page IDs', () => {
+            const pages: Page[] = [
+                { content: 'First', id: 100 },
+                { content: 'Second', id: 500 },
+                { content: 'Third', id: 1000 },
+            ];
+            const segments: Segment[] = [{ content: 'Second', from: 500 }];
+            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+            expect(report.ok).toBe(true);
+        });
+
+        it('should handle newline joiner option', () => {
+            const pages: Page[] = [
+                { content: 'Line1', id: 0 },
+                { content: 'Line2', id: 1 },
+            ];
+            const segments: Segment[] = [{ content: 'Line1\nLine2', from: 0, to: 1 }];
+            const report = validateSegments(pages, { maxPages: 1, pageJoiner: 'newline', rules: [] }, segments);
+            expect(report.ok).toBe(true);
+        });
+
+        it('should validate many segments efficiently', () => {
+            const pages: Page[] = Array.from({ length: 100 }, (_, i) => ({
+                content: `Page ${i} content here`,
+                id: i,
+            }));
+            const segments: Segment[] = Array.from({ length: 100 }, (_, i) => ({
+                content: `Page ${i} content`,
+                from: i,
+            }));
+
+            const start = performance.now();
+            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+            const elapsed = performance.now() - start;
+
+            expect(report.ok).toBe(true);
+            expect(elapsed).toBeLessThan(100); // Should complete in under 100ms
+        });
+
+        it('should correctly count errors and warnings in summary', () => {
+            const pages: Page[] = [
+                { content: 'Content A', id: 0 },
+                { content: 'Content B', id: 1 },
+            ];
+            const segments: Segment[] = [
+                { content: 'Missing', from: 0 }, // content_not_found (error)
+                { content: 'Content A', from: 1 }, // page_attribution_mismatch (error)
+            ];
+            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+
+            expect(report.ok).toBe(false);
+            expect(report.summary.errors).toBe(2);
+            expect(report.summary.segmentCount).toBe(2);
+            expect(report.summary.pageCount).toBe(2);
+        });
+    });
 });
