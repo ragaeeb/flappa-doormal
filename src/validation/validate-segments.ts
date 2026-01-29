@@ -74,39 +74,144 @@ const findBoundaryIdForOffset = (offset: number, boundaries: JoinedBoundary[]) =
     return boundaries.at(-1)?.id;
 };
 
-const findJoinedMatches = (content: string, joined: string, boundaries: JoinedBoundary[]): JoinedMatch[] => {
-    const matches: JoinedMatch[] = [];
+const findJoinedMatches = (content: string, joined: string): { start: number; end: number }[] => {
+    const matches: { start: number; end: number }[] = [];
     if (!content) {
         return matches;
     }
     let idx = joined.indexOf(content);
     while (idx >= 0) {
-        const end = idx + content.length - 1;
-        const fromId = findBoundaryIdForOffset(idx, boundaries);
-        const toId = findBoundaryIdForOffset(end, boundaries);
-        if (fromId !== undefined && toId !== undefined) {
-            matches.push({ fromId, matchIndex: idx, toId });
-        }
+        matches.push({ end: idx + content.length - 1, start: idx });
         idx = joined.indexOf(content, idx + 1);
     }
     return matches;
 };
 
-const findContentMatches = (content: string, pages: NormalizedPage[]) => {
-    const matches: Array<{ pageId: number; matchIndex: number }> = [];
-    for (const page of pages) {
-        const idx = page.content.indexOf(content);
-        if (idx >= 0) {
-            matches.push({ matchIndex: idx, pageId: page.id });
-            continue;
-        }
-        const trimmed = page.content.trim();
-        const idxTrimmed = trimmed.indexOf(content);
-        if (idxTrimmed >= 0) {
-            matches.push({ matchIndex: idxTrimmed, pageId: page.id });
-        }
+const getAttributionIssues = (
+    segment: Segment,
+    segmentIndex: number,
+    segmentSnapshot: ReturnType<typeof buildSegmentSnapshot>,
+    normalizedPages: NormalizedPage[],
+    maxPages: number | undefined,
+    joined: string,
+    boundaries: JoinedBoundary[],
+    boundaryMap: Map<number, JoinedBoundary>,
+): ValidationIssue[] => {
+    // Optimization: Search in the full joined string.
+    const rawMatches = findJoinedMatches(segment.content, joined);
+
+    if (rawMatches.length === 0) {
+        const page = normalizedPages.find((p) => p.id === segment.from);
+        return [
+            {
+                actual: { from: segment.from, to: segment.to },
+                evidence: 'Segment content not found in any page content.',
+                hint: 'Check preprocessing and content normalization paths.',
+                pageContext: page ? { pageId: page.id, pagePreview: buildPreview(page.content) } : undefined,
+                segment: segmentSnapshot,
+                segmentIndex,
+                severity: 'error',
+                type: 'content_not_found',
+            },
+        ];
     }
-    return matches;
+
+    const expectedBoundary = boundaryMap.get(segment.from);
+    let alignedMatches: { start: number; end: number }[] = [];
+
+    if (expectedBoundary) {
+        // Find matches that start within the expected page's bounds
+        alignedMatches = rawMatches.filter((m) => m.start >= expectedBoundary.start && m.start <= expectedBoundary.end);
+    }
+
+    // If we have matches on the expected page
+    if (alignedMatches.length > 0) {
+        if (alignedMatches.length > 1) {
+            // We can report multiple matches on the same page/region
+            // Or should we report general duplication?
+            // Previous logic checked if > 1 match started at same page ID.
+            // Here alignedMatches are all starting at expectedBoundary (same ID).
+            // So yes, this detects multiple occurrences on the source page.
+            // Do we warn if content appears on OTHER pages?
+            // "ambiguous_attribution" usually implies multiple valid candidates.
+            // If alignedMatches > 0, we found it where we expected.
+            // If rawMatches > alignedMatches, it implies duplicates elsewhere.
+
+            // The previous logic only warned if `alignedMatches.length > 1` (multiple on expected page).
+            // It did NOT warn if appeared elsewhere?
+            // Let's stick to previous logic: warn if multiple matches start at `segment.from`.
+
+            return [
+                {
+                    actual: { from: segment.from, to: segment.to },
+                    evidence: `Content appears on multiple joined positions for page ${segment.from}.`,
+                    hint: 'Content duplicates may require stronger anchors or additional rules.',
+                    segment: segmentSnapshot,
+                    segmentIndex,
+                    severity: 'warn',
+                    type: 'ambiguous_attribution',
+                },
+            ];
+        }
+
+        // Check maxPages violation for the primary aligned match
+        const primary = alignedMatches[0];
+        // Does it span?
+        // We need the ID of where it ends.
+        // We know it starts at `segment.from` (because we filtered).
+        // Does it exceed the expected boundary end?
+        if (primary.end > expectedBoundary!.end) {
+            // It spans.
+            if (maxPages !== undefined && maxPages === 0) {
+                // Violation.
+                // We need the ACTUAL toId.
+                const toId = findBoundaryIdForOffset(primary.end, boundaries);
+
+                return [
+                    {
+                        actual: { from: segment.from, to: segment.to },
+                        evidence: `Segment spans pages ${segment.from}-${toId} in joined content.`,
+                        expected: { from: segment.from, to: segment.from },
+                        hint: 'Check page boundary attribution in segmenter.ts and breakpoint-processor.ts.',
+                        segment: segmentSnapshot,
+                        segmentIndex,
+                        severity: 'error',
+                        type: 'max_pages_violation',
+                    },
+                ];
+            }
+        }
+
+        return [];
+    }
+
+    // No match found on expected page. Report mismatch.
+    // Use the first match found anywhere.
+    const primary = rawMatches[0];
+    const actualFromId = findBoundaryIdForOffset(primary.start, boundaries);
+    const actualToId = findBoundaryIdForOffset(primary.end, boundaries); // Optional, for context
+
+    const page = normalizedPages.find((p) => p.id === actualFromId);
+
+    return [
+        {
+            actual: { from: segment.from, to: segment.to },
+            evidence: `Content found in joined content at page ${actualFromId}, but segment.from=${segment.from}.`,
+            expected: { from: actualFromId, to: actualToId },
+            hint: 'Check content matching and boundary attribution logic.',
+            pageContext: page
+                ? {
+                      matchIndex: primary.start,
+                      pageId: page.id,
+                      pagePreview: buildPreview(page.content),
+                  }
+                : undefined,
+            segment: segmentSnapshot,
+            segmentIndex,
+            severity: 'error',
+            type: 'page_attribution_mismatch',
+        },
+    ];
 };
 
 const buildSegmentSnapshot = (segment: Segment) => ({
@@ -180,152 +285,6 @@ const getMaxPagesIssues = (
     ];
 };
 
-const getAttributionIssues = (
-    segment: Segment,
-    segmentIndex: number,
-    segmentSnapshot: ReturnType<typeof buildSegmentSnapshot>,
-    normalizedPages: NormalizedPage[],
-    maxPages: number | undefined,
-    joined: string,
-    boundaries: JoinedBoundary[],
-): ValidationIssue[] => {
-    if (maxPages !== 0 && maxPages !== undefined) {
-        return [];
-    }
-
-    const matches = findContentMatches(segment.content, normalizedPages);
-
-    if (matches.length === 0) {
-        return getJoinedAttributionIssues(
-            segment,
-            segmentIndex,
-            segmentSnapshot,
-            normalizedPages,
-            maxPages,
-            joined,
-            boundaries,
-        );
-    }
-
-    if (matches.length === 1) {
-        const match = matches[0];
-        if (match.pageId === segment.from) {
-            return [];
-        }
-
-        const page = normalizedPages.find((p) => p.id === match.pageId);
-        return [
-            {
-                actual: { from: segment.from, to: segment.to },
-                evidence: `Content found in page ${match.pageId}, but segment.from=${segment.from}.`,
-                expected: { from: match.pageId, to: match.pageId },
-                hint: 'Check buildBoundaryPositions() and findPageStartNearExpectedBoundary().',
-                pageContext: page
-                    ? {
-                          matchIndex: match.matchIndex,
-                          pageId: page.id,
-                          pagePreview: buildPreview(page.content),
-                      }
-                    : undefined,
-                segment: segmentSnapshot,
-                segmentIndex,
-                severity: 'error',
-                type: 'page_attribution_mismatch',
-            },
-        ];
-    }
-
-    const matchIds = matches.map((m) => m.pageId);
-    if (!matchIds.includes(segment.from)) {
-        return [
-            {
-                actual: { from: segment.from, to: segment.to },
-                evidence: `Content appears on pages [${matchIds.join(', ')}], but segment.from=${segment.from}.`,
-                expected: { from: matches[0]?.pageId, to: matches[0]?.pageId },
-                hint: 'Check content matching and boundary attribution logic.',
-                segment: segmentSnapshot,
-                segmentIndex,
-                severity: 'error',
-                type: 'page_attribution_mismatch',
-            },
-        ];
-    }
-
-    return [];
-};
-
-const getJoinedAttributionIssues = (
-    segment: Segment,
-    segmentIndex: number,
-    segmentSnapshot: ReturnType<typeof buildSegmentSnapshot>,
-    normalizedPages: NormalizedPage[],
-    maxPages: number | undefined,
-    joined: string,
-    boundaries: JoinedBoundary[],
-): ValidationIssue[] => {
-    const joinedMatches = findJoinedMatches(segment.content, joined, boundaries);
-    if (joinedMatches.length === 0) {
-        const page = normalizedPages.find((p) => p.id === segment.from);
-        return [
-            {
-                actual: { from: segment.from, to: segment.to },
-                evidence: 'Segment content not found in any page content.',
-                hint: 'Check preprocessing and content normalization paths.',
-                pageContext: page ? { pageId: page.id, pagePreview: buildPreview(page.content) } : undefined,
-                segment: segmentSnapshot,
-                segmentIndex,
-                severity: 'error',
-                type: 'content_not_found',
-            },
-        ];
-    }
-
-    const alignedMatches = joinedMatches.filter((m) => m.fromId === segment.from);
-    const primary = alignedMatches[0] ?? joinedMatches[0];
-    const issues: ValidationIssue[] = [];
-
-    if (alignedMatches.length > 1) {
-        issues.push({
-            actual: { from: segment.from, to: segment.to },
-            evidence: `Content appears on multiple joined positions for page ${segment.from}.`,
-            hint: 'Content duplicates may require stronger anchors or additional rules.',
-            segment: segmentSnapshot,
-            segmentIndex,
-            severity: 'warn',
-            type: 'ambiguous_attribution',
-        });
-    }
-
-    if (primary.fromId !== segment.from) {
-        issues.push({
-            actual: { from: segment.from, to: segment.to },
-            evidence: `Content found in joined content at page ${primary.fromId}, but segment.from=${segment.from}.`,
-            expected: { from: primary.fromId, to: primary.toId },
-            hint: 'Check content matching and boundary attribution logic.',
-            segment: segmentSnapshot,
-            segmentIndex,
-            severity: 'error',
-            type: 'page_attribution_mismatch',
-        });
-        return issues;
-    }
-
-    if (maxPages === 0 && primary.toId !== primary.fromId) {
-        issues.push({
-            actual: { from: segment.from, to: segment.to },
-            evidence: `Segment spans pages ${primary.fromId}-${primary.toId} in joined content.`,
-            expected: { from: primary.fromId, to: primary.fromId },
-            hint: 'Check page boundary attribution in segmenter.ts and breakpoint-processor.ts.',
-            segment: segmentSnapshot,
-            segmentIndex,
-            severity: 'error',
-            type: 'max_pages_violation',
-        });
-    }
-
-    return issues;
-};
-
 export const validateSegments = (
     pages: Page[],
     options: SegmentationOptions,
@@ -334,6 +293,12 @@ export const validateSegments = (
     const normalizedPages = normalizePages(pages, options);
     const joiner = options.pageJoiner === 'newline' ? '\n' : ' ';
     const { boundaries, joined } = buildJoinedContent(normalizedPages, joiner);
+    // Optimisation: Create map for O(1) boundary lookups
+    const boundaryMap = new Map<number, JoinedBoundary>();
+    for (const b of boundaries) {
+        boundaryMap.set(b.id, b);
+    }
+
     const pageIds = new Set(normalizedPages.map((p) => p.id));
     const issues: ValidationIssue[] = [];
     const maxPages = options.maxPages;
@@ -347,7 +312,16 @@ export const validateSegments = (
         }
         issues.push(...getMaxPagesIssues(segment, i, segmentSnapshot, maxPages));
         issues.push(
-            ...getAttributionIssues(segment, i, segmentSnapshot, normalizedPages, maxPages, joined, boundaries),
+            ...getAttributionIssues(
+                segment,
+                i,
+                segmentSnapshot,
+                normalizedPages,
+                maxPages,
+                joined,
+                boundaries,
+                boundaryMap,
+            ),
         );
     }
 
