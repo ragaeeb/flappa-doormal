@@ -56,10 +56,10 @@ export type {
     PageRangeConstraint,
     PageRangeConstraintWithExclude,
     Segment,
-    ValidationIssue,
-    ValidationIssueSeverity,
-    ValidationIssueType,
-    ValidationReport,
+    SegmentValidationIssue,
+    SegmentValidationIssueSeverity,
+    SegmentValidationIssueType,
+    SegmentValidationReport,
 } from './types/index.js';
 export type {
     CondenseEllipsisRule,
@@ -71,4 +71,4 @@ export type {
 } from './types/options.js';
 export { PATTERN_TYPE_KEYS, type PatternTypeKey, type SplitRule } from './types/rules.js';
 export { escapeRegex, escapeTemplateBrackets, makeDiacriticInsensitive } from './utils/textUtils.js';
-export { validateSegments } from './validation/validate-segments.js';
+export { type ValidationOptions, validateSegments } from './validation/validate-segments.js';

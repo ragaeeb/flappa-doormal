@@ -47,8 +47,12 @@
     },
     "scripts": {
         "build": "tsdown",
+        "format": "biome format --write",
+        "lint": "biome check",
+        "postbuild": "bun run test:exports",
         "test": "bun test",
-        "test:perf": "RUN_PERF=true bun test src/segmentation/segmenter.perf.test.ts"
+        "test:exports": "bunx tsc --noEmit testing/exports.test.ts --moduleResolution bundler --target esnext --module esnext --esModuleInterop --skipLibCheck --types bun-types,node && bun test testing/exports.test.ts",
+        "test:perf": "RUN_PERF=true bun test src/segmentation/segmenter.perf.test.ts src/validation/validate.perf.test.ts"
     },
     "type": "module",
     "types": "./dist/index.d.mts",

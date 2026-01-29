@@ -31,7 +31,7 @@ describe('validateSegments', () => {
             const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
 
             expect(report.ok).toBe(false);
-            expect(report.issues).toHaveLength(2); // page_not_found + content_not_found only (content check skipped)
+            expect(report.issues).toHaveLength(1); // page_not_found only (content check skipped)
             expect(report.issues.find((i) => i.type === 'page_not_found')).toBeDefined();
             expect(report.issues.find((i) => i.type === 'page_not_found')?.severity).toBe('error');
         });
@@ -193,7 +193,7 @@ describe('validateSegments', () => {
                 { content: 'llo', id: 1 },
             ];
             const segments: Segment[] = [{ content: 'He llo', from: 0, to: 1 }];
-            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+            const _report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
 
             // maxPages=0 violation check: getJoinedAttributionIssues should flag it if static check passes?
             // But static check runs first.
@@ -208,6 +208,140 @@ describe('validateSegments', () => {
             expect(issue).toBeDefined();
             expect(issue!.evidence).toContain('Segment spans pages 0-1');
         });
+
+        it('should detect max_pages_violation when segment.to is set but content physically spans more pages', () => {
+            // He (Page 0) llo (Page 1) matches joined "He llo".
+            // User claims explicit range [0, 0] (single page).
+            // But content physically spans 0 and 1.
+            // This should be a violation of maxPages=0 AND a validity check failure.
+            const pages = [
+                { content: 'He', id: 0 },
+                { content: 'llo', id: 1 },
+            ];
+            const segments: Segment[] = [{ content: 'He llo', from: 0, to: 0 }];
+            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+
+            expect(report.ok).toBe(false);
+            const issue = report.issues.find((i) => i.type === 'max_pages_violation');
+            expect(issue).toBeDefined();
+            expect(issue!.evidence).toContain('spans pages 0-1');
+        });
+    });
+
+    describe('Duplicate Content Attribution', () => {
+        it('should attribute segment to the correct page when content is duplicated', () => {
+            const content = 'Repeated Content Section';
+            const pages: Page[] = [
+                { content: `Prefix A\n${content}\nSuffix A`, id: 0 },
+                { content: `Prefix B\n${content}\nSuffix B`, id: 1 }, // Expected page
+                { content: `Prefix C\n${content}\nSuffix C`, id: 2 },
+            ];
+
+            const segments: Segment[] = [
+                { content, from: 1 }, // Claims it is on page 1
+            ];
+
+            // With the bug, it would find the match on page 0 first and fail.
+            // With the fix, it should find the match on page 1 and pass.
+            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+
+            expect(report.ok).toBe(true);
+            expect(report.issues).toHaveLength(0);
+        });
+
+        it('should report mismatch if segment claims a page where content does NOT exist, even if it exists elsewhere', () => {
+            const content = 'Unique Repeated Content';
+            const pages: Page[] = [
+                { content: `Prefix A\n${content}\nSuffix A`, id: 0 },
+                { content: `Prefix B\nDifferent Content\nSuffix B`, id: 1 }, // Correct page 1 has NO match
+            ];
+
+            const segments: Segment[] = [
+                { content, from: 1 }, // Claims page 1, but content is only on page 0
+            ];
+
+            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+
+            expect(report.ok).toBe(false);
+            const issue = report.issues.find((i) => i.type === 'page_attribution_mismatch');
+            expect(issue).toBeDefined();
+            expect(issue!.actual?.from).toBe(1);
+            expect(issue!.expected?.from).toBe(0); // Should point to where it actually found it
+        });
+    });
+
+    describe('Validation Options', () => {
+        it('should respect fullSearchThreshold option', () => {
+            const shortContent = 'Short match';
+            // Page 0 does not have content.
+            // Page 1 has content, but is far away (> 1000 chars buffer).
+            const padding = 'x'.repeat(2000);
+            const pages: Page[] = [
+                { content: 'Page 0 Content', id: 0 },
+                { content: `${padding}${shortContent}`, id: 1 },
+            ];
+
+            // Segment claims to be on Page 0 only.
+            // This restricts fast path search to Page 0.
+            const segments: Segment[] = [{ content: shortContent, from: 0, to: 0 }];
+
+            // Case 1: Default threshold (500) -> Should find it via full search (mismatch)
+            // 11 chars < 500 -> Full search runs -> Finds it on Page 1 -> Attribution Mismatch
+            const reportDefault = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+            expect(reportDefault.ok).toBe(false);
+            expect(reportDefault.issues[0].type).toBe('page_attribution_mismatch');
+
+            // Case 2: Lower threshold (5) -> Should NOT find it (content_not_found)
+            // 11 chars > 5 -> Full search skipped -> Content not found in window
+            const reportLower = validateSegments(pages, { maxPages: 0, rules: [] }, segments, {
+                fullSearchThreshold: 5,
+            });
+            expect(reportLower.ok).toBe(false);
+            expect(reportLower.issues[0].type).toBe('content_not_found');
+        });
+    });
+
+    describe('Unicode Boundaries', () => {
+        it('should handle surrogate pairs split across pages correctly', () => {
+            // "𝕳" is \uD835\uDD73 (2 chars)
+            // Split it: \uD835 on page 0, \uDD73 on page 1
+            const pages: Page[] = [
+                { content: 'Prefix \uD835', id: 0 },
+                { content: '\uDD73 Suffix', id: 1 },
+            ];
+
+            // The joined content should be "Prefix 𝕳 Suffix" (if joiner is empty/smart?)
+            // Standard validator uses space/newline joiner.
+            // If we use space joiner: "Prefix \uD835 \uDD73 Suffix" -> "Prefix   Suffix" (broken)
+            // This test verifies robust handling or at least consistent failure if joiner breaks it.
+            // BUT: If the original segmenter handled it, validateSegments should verify it.
+            // Let's assume a segment spans both.
+
+            const segments: Segment[] = [
+                { content: 'Prefix \uD835\n\uDD73 Suffix', from: 0, to: 1 }, // Normalized joiner \n
+            ];
+
+            // Use newline joiner to avoid breaking the surrogate pair with a space?
+            // Actually, inserting ANY joiner between surrogate halves breaks the char.
+            // This tests if validation blows up or handles it gracefully.
+            const report = validateSegments(pages, { maxPages: 1, pageJoiner: 'newline', rules: [] }, segments);
+
+            // Expectation: It passes because we match "Prefix \uD835\n\uDD73 Suffix" exactly against joined content.
+            expect(report.ok).toBe(true);
+        });
+
+        it('should handle combining marks at page boundaries', () => {
+            // "Café" -> 'e' + combining acute (U+0301)
+            const pages: Page[] = [
+                { content: 'Caf', id: 0 },
+                { content: 'e\u0301', id: 1 }, // 'é' starts on new page
+            ];
+            const segments: Segment[] = [{ content: 'Caf\ne\u0301', from: 0, to: 1 }];
+
+            const report = validateSegments(pages, { maxPages: 1, pageJoiner: 'newline', rules: [] }, segments);
+
+            expect(report.ok).toBe(true);
+        });
     });
 
     describe('Normalization & Preprocessing', () => {
@@ -215,6 +349,13 @@ describe('validateSegments', () => {
             const pages = [{ content: 'Line\r\nBreak', id: 0 }];
             const segments = [{ content: 'Line\nBreak', from: 0 }];
             const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+            expect(report.ok).toBe(true);
+        });
+
+        it('should handle single-page non-normalized content correctly', () => {
+            const pgs = [{ content: 'Line 1\r\nLine 2', id: 0 }];
+            const segs = [{ content: 'Line 1\nLine 2', from: 0 }]; // Segment has LF, page has CRLF
+            const report = validateSegments(pgs, { maxPages: 0, rules: [] }, segs);
             expect(report.ok).toBe(true);
         });
 
@@ -309,6 +450,47 @@ describe('validateSegments', () => {
             expect(report.summary.errors).toBe(2);
             expect(report.summary.segmentCount).toBe(2);
             expect(report.summary.pageCount).toBe(2);
+        });
+    });
+
+    describe('Empty Page Handling', () => {
+        it('should handle mixed empty and non-empty pages correctly', () => {
+            const pages: Page[] = [
+                { content: 'Page 0', id: 0 },
+                { content: '', id: 1 }, // Empty page
+                { content: 'Page 2', id: 2 },
+            ];
+            // Segment spanning empty page (Page 1)
+            const segments: Segment[] = [{ content: 'Page 0 Page 2', from: 0, to: 2 }];
+            // "Page 0" + space + "" + space + "Page 2" -> "Page 0  Page 2" (double space)
+            // Note: If joiner logic is smart, it might behave differently, but default joins with space.
+            // Wait, buildJoinedContent adds joiner between pages.
+            // P0 (len 6) + " " + P1 (len 0) + " " + P2 (len 6).
+            // "Page 0  Page 2".
+            const report = validateSegments(pages, { maxPages: 2, rules: [] }, segments);
+            expect(report.ok).toBe(true);
+        });
+
+        it('should report page_not_found for all segments if pages array is empty', () => {
+            const pages: Page[] = [];
+            const segments: Segment[] = [{ content: 'Some content', from: 0 }];
+            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+
+            expect(report.ok).toBe(false);
+            expect(report.issues[0].type).toBe('page_not_found');
+        });
+    });
+
+    describe('Binary Search Gap Edge Case (Theoretical)', () => {
+        it.skip('should handle offset in joiner gap between pages', () => {
+            const pages = [
+                { content: 'ABC', id: 0 },
+                { content: 'DEF', id: 1 },
+            ];
+            // Segment consists ONLY of the joiner (gap).
+            const segments: Segment[] = [{ content: ' ', from: 0 }];
+            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+            expect(report.ok).toBe(true);
         });
     });
 });

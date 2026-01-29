@@ -5,7 +5,7 @@ on:
     paths:
       - 'src/**'
       - 'package.json'
-      - 'bun.lockb'
+      - 'bun.lock'
 
 jobs:
   measure:

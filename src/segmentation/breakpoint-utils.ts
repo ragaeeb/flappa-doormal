@@ -4,7 +4,10 @@ import type { Logger } from '@/types/options.js';
 import { adjustForUnicodeBoundary } from '@/utils/textUtils.js';
 import {
     FAST_PATH_THRESHOLD,
+    INFERENCE_PROXIMITY_LIMIT,
     JOINER_PREFIX_LENGTHS,
+    MAX_DEVIATION,
+    NON_NEWLINE_PENALTY,
     STOP_CHARACTERS,
     WINDOW_PREFIX_LENGTHS,
 } from './breakpoint-constants.js';
@@ -470,8 +473,8 @@ export const findPageStartNearExpectedBoundary = (
 
         // Only accept matches within MAX_DEVIATION of the expected boundary.
         // Prefer newline-preceded candidates *among valid matches*, otherwise choose the closest.
-        const MAX_DEVIATION = ignoreDeviation ? Number.POSITIVE_INFINITY : 2000;
-        const inRange = candidates.filter((c) => Math.abs(c.pos - expectedBoundary) <= MAX_DEVIATION);
+        const deviationLimit = ignoreDeviation ? Number.POSITIVE_INFINITY : MAX_DEVIATION;
+        const inRange = candidates.filter((c) => Math.abs(c.pos - expectedBoundary) <= deviationLimit);
         if (inRange.length > 0) {
             const best = selectBestAnchor(inRange, expectedForRanking);
             return best.pos;
@@ -482,7 +485,7 @@ export const findPageStartNearExpectedBoundary = (
             bestDistance: Math.abs(bestOverall.pos - expectedForRanking),
             expectedBoundary,
             matchPos: bestOverall.pos,
-            maxDeviation: MAX_DEVIATION,
+            maxDeviation: deviationLimit,
             prefixLength: len,
             targetPageIdx,
         });
@@ -525,8 +528,6 @@ const selectBestAnchor = (candidates: AnchorCandidate[], expectedBoundary: numbe
     // However, it prevents a distant newline (e.g. 300+ chars away) from overriding
     // an exact whitespace match, ensuring we don't skip valid page boundaries just
     // because they were normalized to spaces.
-    const NON_NEWLINE_PENALTY = 20;
-
     return candidates.reduce((best, curr) => {
         const bestScore = Math.abs(best.pos - expectedBoundary) + (best.isNewline ? 0 : NON_NEWLINE_PENALTY);
         const currScore = Math.abs(curr.pos - expectedBoundary) + (curr.isNewline ? 0 : NON_NEWLINE_PENALTY);
@@ -582,8 +583,8 @@ const isBoundaryPositionValid = (
         return true;
     }
 
-    const MAX_DEVIATION = 2000;
-    return Math.abs(pos - expectedBoundary) < MAX_DEVIATION;
+    const deviationLimit = MAX_DEVIATION;
+    return Math.abs(pos - expectedBoundary) < deviationLimit;
 };
 
 const resolveBoundaryMatch = (
@@ -619,7 +620,11 @@ const resolveBoundaryMatch = (
         );
         if (relaxedPos > 0) {
             const inferredStartOffset = rawBoundary - relaxedPos;
-            if (inferredStartOffset >= 0) {
+            const currentExpected = Math.max(0, rawBoundary - startOffsetInFromPage);
+
+            // Only infer if match is reasonably close to expected position
+            // This prevents inferring from early duplicates in content
+            if (inferredStartOffset >= 0 && Math.abs(relaxedPos - currentExpected) < INFERENCE_PROXIMITY_LIMIT) {
                 startOffsetInFromPage = inferredStartOffset;
                 expectedBoundary = Math.max(0, rawBoundary - startOffsetInFromPage);
                 pos = relaxedPos;

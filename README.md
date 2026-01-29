@@ -1415,6 +1415,38 @@ Notes:
 - Recovery is **explicitly scoped** by the `selector`; it will not “guess” which rules are mistaken.
 - If your segments were heavily post-processed (trimmed/normalized/reordered), recovery may return unresolved items; see the report for details.
 
+#### `recoverMistakenMarkersForRuns(runs, opts?)`
+
+Batch version of `recoverMistakenLineStartsAfterMarkers`. Processes multiple independent segmentation runs (e.g. from different books) and returns a consolidated report.
+
+```typescript
+import { recoverMistakenMarkersForRuns } from 'flappa-doormal';
+
+const results = recoverMistakenMarkersForRuns([
+  { pages: pages1, segments: segments1, options: options1, selector: selector1 },
+  { pages: pages2, segments: segments2, options: options2, selector: selector2 },
+]);
+```
+
+### `validateSegments(pages, options, segments, validationOptions?)`
+
+Validates that segments correctly map back to the source pages and adhere to constraints.
+
+```typescript
+import { validateSegments } from 'flappa-doormal';
+
+const report = validateSegments(pages, options, segments, {
+  // Optional: Max content length to search before falling back (default: 500)
+  // Segments longer than this are checked via fast path unless issues are found.
+  fullSearchThreshold: 1000, 
+});
+```
+
+Returns a `SegmentValidationReport` containing:
+- `ok`: boolean
+- `summary`: counts of errors/warnings
+- `issues`: detailed list of problems (page attribution mismatch, maxPages violation, etc.)
+
 ### `stripHtmlTags(html)`
 
 Remove all HTML tags from content, keeping only text.
@@ -1748,7 +1780,3 @@ bun run deploy
 ## License
 
 MIT
-
-## Inspiration
-
-The name of the project is from Asmāʾ, it seems to be some sort of gymnastic move.
