@@ -614,6 +614,14 @@ bunx biome lint .
 
 53. **Harden maxPages=0 with targeted tests**: Add tests that hit the failure modes: segment starts at page boundary with repeated marker, very short pages (< 100 chars), minimal prefix lengths (15 chars), multiple candidate prefixes in content, tiny tail segments after structural splits, and fast-path threshold transitions (999 vs 1000 pages).
 
+54. **Beware trusting `segment.to` in validation**: When validating `maxPages` violations, do NOT rely solely on `segment.to` if it exists. A segment might claim to end on page X (via `segment.to`) but its content physically matches text on page Y. If `maxPages=0`, trusting `segment.to` hides the violation. Always check the physical match location (`actualToId`) against the constraint, regardless of what the segment claims.
+
+55. **Duplicate `case` labels in manual merges**: When applying fixes suggested by AI or manual merges, check surrounding code for duplicate `case` statements. JavaScript switch statements with duplicate cases are syntax errors (strict mode) or unreachable code. Validation errors usually catch this, but careful reading prevents it.
+
+56. **Linting vs Checks**: `bunx biome check` is strict. Complexity limits (max 15/18) force you to decompose functions. If you receive a complexity error, extract the complex logic (e.g., switch cases, specific validation checks) into standalone helper functions.
+
+57. **Validation Hints Specificity**: Generic error hints like "Check segmenter.ts" are unhelpful. Provide specific file names and logical components (e.g., "Check maxPages windowing in breakpoint-processor.ts"). User-friendly validation reports guide debugging much faster than "Something is wrong".
+
 ### Process Template (Multi-agent design review, TDD-first)
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:
@@ -788,4 +796,9 @@ Key functions: `applyBreakpoints()` → `processOversizedSegment()` → `findBre
 - Pass `logger` with `debug`/`trace` methods to `segmentPages()` for detailed logs
 - Check `boundaryPositions built` log for page boundary byte offsets
 - Check `iteration=N` logs for `currentFromIdx`, `cursorPos`, `windowEndPosition` per loop
+
+## Known Issues
+
+- **Binary Search Gap (Theoretical)**: `findBoundaryIdForOffset` returns `undefined` if the search offset falls exactly on a joiner character (e.g., a space or newline) between two pages. This is mathematically correct (the gap belongs to neither page) but may cause validation errors if a segment consists _only_ of such a gap or matches content starting/ending strictly within the gap. We have marked this as "accept" behavior for now, with a documented skipped test case.
+
 
