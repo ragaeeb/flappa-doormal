@@ -17,42 +17,65 @@ export type PartitionedRules = {
     fastFuzzyRules: FastFuzzyRule[];
 };
 
+const tryCompileFastFuzzyRule = (
+    rule: SplitRule,
+): { compiled: FastFuzzyTokenRule; kind: 'startsWith' | 'startsAfter' } | null => {
+    const fuzzy = (rule as { fuzzy?: boolean }).fuzzy;
+    if (!fuzzy) {
+        return null;
+    }
+
+    if ('lineStartsWith' in rule && rule.lineStartsWith?.length === 1) {
+        const compiled = compileFastFuzzyTokenRule(rule.lineStartsWith[0]);
+        if (compiled) {
+            return { compiled, kind: 'startsWith' };
+        }
+    }
+    if ('lineStartsAfter' in rule && rule.lineStartsAfter?.length === 1) {
+        const compiled = compileFastFuzzyTokenRule(rule.lineStartsAfter[0]);
+        if (compiled) {
+            return { compiled, kind: 'startsAfter' };
+        }
+    }
+    return null;
+};
+
+const isCombinableRule = (rule: SplitRule): boolean => {
+    if ('regex' in rule && rule.regex) {
+        return (
+            extractNamedCaptureNames(rule.regex).length === 0 &&
+            !/\\[1-9]/.test(rule.regex) &&
+            !hasCapturingGroup(rule.regex)
+        );
+    }
+    return true;
+};
+
 export const partitionRulesForMatching = (rules: SplitRule[]) => {
     const combinableRules: { rule: SplitRule; prefix: string; index: number }[] = [];
     const standaloneRules: SplitRule[] = [];
     const fastFuzzyRules: FastFuzzyRule[] = [];
 
-    rules.forEach((rule, index) => {
-        const fuzzy = (rule as { fuzzy?: boolean }).fuzzy;
-        if (fuzzy) {
-            if ('lineStartsWith' in rule && rule.lineStartsWith.length === 1) {
-                const compiled = compileFastFuzzyTokenRule(rule.lineStartsWith[0]);
-                if (compiled) {
-                    return fastFuzzyRules.push({ compiled, kind: 'startsWith', rule, ruleIndex: index });
-                }
-            }
-            if ('lineStartsAfter' in rule && rule.lineStartsAfter.length === 1) {
-                const compiled = compileFastFuzzyTokenRule(rule.lineStartsAfter[0]);
-                if (compiled) {
-                    return fastFuzzyRules.push({ compiled, kind: 'startsAfter', rule, ruleIndex: index });
-                }
-            }
+    for (let index = 0; index < rules.length; index++) {
+        const rule = rules[index];
+        const fuzzyComp = tryCompileFastFuzzyRule(rule);
+
+        if (fuzzyComp) {
+            fastFuzzyRules.push({
+                compiled: fuzzyComp.compiled,
+                kind: fuzzyComp.kind,
+                rule,
+                ruleIndex: index,
+            });
+            continue;
         }
 
-        let isCombinable = true;
-        if ('regex' in rule && rule.regex) {
-            isCombinable =
-                extractNamedCaptureNames(rule.regex).length === 0 &&
-                !/\\[1-9]/.test(rule.regex) &&
-                !hasCapturingGroup(rule.regex);
-        }
-
-        if (isCombinable) {
+        if (isCombinableRule(rule)) {
             combinableRules.push({ index, prefix: `r${index}_`, rule });
         } else {
             standaloneRules.push(rule);
         }
-    });
+    }
 
     return { combinableRules, fastFuzzyRules, standaloneRules };
 };
@@ -125,6 +148,32 @@ const recordSplitPointAt = (splitPointsByRule: Map<number, SplitPoint[]>, ruleIn
     }
 };
 
+const attemptFastFuzzyMatch = (
+    matchContent: string,
+    lineStart: number,
+    { compiled, kind, rule, ruleIndex }: FastFuzzyRule,
+    splitPointsByRule: Map<number, SplitPoint[]>,
+) => {
+    const end = matchFastFuzzyTokenAt(matchContent, lineStart, compiled);
+    if (end === null) {
+        return;
+    }
+
+    const splitAt = rule.split ?? 'at';
+    const splitIndex = splitAt === 'at' ? lineStart : end;
+
+    if (kind === 'startsWith') {
+        recordSplitPointAt(splitPointsByRule, ruleIndex, { index: splitIndex, meta: rule.meta });
+    } else {
+        const markerLength = end - lineStart;
+        recordSplitPointAt(splitPointsByRule, ruleIndex, {
+            contentStartOffset: splitAt === 'at' ? markerLength : undefined,
+            index: splitIndex,
+            meta: rule.meta,
+        });
+    }
+};
+
 /**
  * Processes matches for all fast-fuzzy rules at a specific line start.
  */
@@ -137,31 +186,16 @@ const processFastFuzzyMatchesAt = (
     isPageStart: boolean,
     splitPointsByRule: Map<number, SplitPoint[]>,
 ) => {
-    for (const { compiled, kind, rule, ruleIndex } of fastFuzzyRules) {
-        if (!passesRuleConstraints(rule, pageId)) {
+    for (const ffRule of fastFuzzyRules) {
+        if (!passesRuleConstraints(ffRule.rule, pageId)) {
             continue;
         }
 
-        if (isPageStart && !passesPageStartGuard(rule, ruleIndex, lineStart)) {
+        if (isPageStart && !passesPageStartGuard(ffRule.rule, ffRule.ruleIndex, lineStart)) {
             continue;
         }
 
-        const end = matchFastFuzzyTokenAt(matchContent, lineStart, compiled);
-        if (end === null) {
-            continue;
-        }
-
-        const splitIndex = (rule.split ?? 'at') === 'at' ? lineStart : end;
-        if (kind === 'startsWith') {
-            recordSplitPointAt(splitPointsByRule, ruleIndex, { index: splitIndex, meta: rule.meta });
-        } else {
-            const markerLength = end - lineStart;
-            recordSplitPointAt(splitPointsByRule, ruleIndex, {
-                contentStartOffset: (rule.split ?? 'at') === 'at' ? markerLength : undefined,
-                index: splitIndex,
-                meta: rule.meta,
-            });
-        }
+        attemptFastFuzzyMatch(matchContent, lineStart, ffRule, splitPointsByRule);
     }
 };
 

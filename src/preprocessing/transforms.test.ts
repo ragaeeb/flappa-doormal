@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import {
-    applyPreprocessToPage,
-    condenseEllipsis,
-    fixTrailingWaw,
-    isZeroWidth,
-    removeZeroWidth,
-} from './transforms.js';
+import { applyPreprocessToPage, condenseEllipsis, fixTrailingWaw, isZeroWidth, removeZeroWidth } from './transforms.js';
 
 describe('isZeroWidth', () => {
     it('should return true for U+200B (Zero Width Space)', () => {
@@ -202,43 +196,39 @@ describe('applyPreprocessToPage', () => {
 
     it('should apply multiple transforms in order', () => {
         const content = '\u200Btext... و word';
-        const result = applyPreprocessToPage(content, 1, [
-            'removeZeroWidth',
-            'condenseEllipsis',
-            'fixTrailingWaw',
-        ]);
+        const result = applyPreprocessToPage(content, 1, ['removeZeroWidth', 'condenseEllipsis', 'fixTrailingWaw']);
         expect(result).toBe('text… وword');
     });
 
     it('should respect min constraint', () => {
         const content = 'text...';
-        const result = applyPreprocessToPage(content, 5, [{ type: 'condenseEllipsis', min: 10 }]);
+        const result = applyPreprocessToPage(content, 5, [{ min: 10, type: 'condenseEllipsis' }]);
         // Page 5 < min 10, so transform should not apply
         expect(result).toBe('text...');
     });
 
     it('should respect max constraint', () => {
         const content = 'text...';
-        const result = applyPreprocessToPage(content, 15, [{ type: 'condenseEllipsis', max: 10 }]);
+        const result = applyPreprocessToPage(content, 15, [{ max: 10, type: 'condenseEllipsis' }]);
         // Page 15 > max 10, so transform should not apply
         expect(result).toBe('text...');
     });
 
     it('should apply transform when page is within min/max range', () => {
         const content = 'text...';
-        const result = applyPreprocessToPage(content, 50, [{ type: 'condenseEllipsis', min: 10, max: 100 }]);
+        const result = applyPreprocessToPage(content, 50, [{ max: 100, min: 10, type: 'condenseEllipsis' }]);
         expect(result).toBe('text…');
     });
 
     it('should apply transform at exact min boundary', () => {
         const content = 'text...';
-        const result = applyPreprocessToPage(content, 10, [{ type: 'condenseEllipsis', min: 10 }]);
+        const result = applyPreprocessToPage(content, 10, [{ min: 10, type: 'condenseEllipsis' }]);
         expect(result).toBe('text…');
     });
 
     it('should apply transform at exact max boundary', () => {
         const content = 'text...';
-        const result = applyPreprocessToPage(content, 100, [{ type: 'condenseEllipsis', max: 100 }]);
+        const result = applyPreprocessToPage(content, 100, [{ max: 100, type: 'condenseEllipsis' }]);
         expect(result).toBe('text…');
     });
 
@@ -250,7 +240,7 @@ describe('applyPreprocessToPage', () => {
 
     it('should handle removeZeroWidth with mode option', () => {
         const content = 'a\u200Bb';
-        const result = applyPreprocessToPage(content, 1, [{ type: 'removeZeroWidth', mode: 'space' }]);
+        const result = applyPreprocessToPage(content, 1, [{ mode: 'space', type: 'removeZeroWidth' }]);
         expect(result).toBe('a b');
     });
 
@@ -267,10 +257,7 @@ describe('applyPreprocessToPage', () => {
         const content = 'text... و word';
         // condenseEllipsis: page 1 is within range (no constraints)
         // fixTrailingWaw: page 1 < min 10, so skip
-        const result = applyPreprocessToPage(content, 1, [
-            'condenseEllipsis',
-            { type: 'fixTrailingWaw', min: 10 },
-        ]);
+        const result = applyPreprocessToPage(content, 1, ['condenseEllipsis', { min: 10, type: 'fixTrailingWaw' }]);
         expect(result).toBe('text… و word');
     });
 

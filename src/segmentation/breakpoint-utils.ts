@@ -4,7 +4,10 @@ import type { Logger } from '@/types/options.js';
 import { adjustForUnicodeBoundary } from '@/utils/textUtils.js';
 import {
     FAST_PATH_THRESHOLD,
+    INFERENCE_PROXIMITY_LIMIT,
     JOINER_PREFIX_LENGTHS,
+    MAX_DEVIATION,
+    NON_NEWLINE_PENALTY,
     STOP_CHARACTERS,
     WINDOW_PREFIX_LENGTHS,
 } from './breakpoint-constants.js';
@@ -395,14 +398,36 @@ export const estimateStartOffsetInCurrentPage = (
         return 0;
     }
 
-    const remStart = remainingContent.trimStart().slice(0, Math.min(60, remainingContent.length));
-    const needle = remStart.slice(0, Math.min(30, remStart.length));
-    if (!needle) {
+    // Optimization: slice a small chunk first to avoid trimStart() on potentially huge strings
+    const remPrefix = remainingContent.slice(0, 500).trimStart();
+    if (!remPrefix) {
         return 0;
     }
 
-    const idx = currentPageData.content.indexOf(needle);
-    return idx > 0 ? idx : 0;
+    // Try progressively shorter prefixes. This handles cases where remainingContent starts
+    // near the end of the current page, causing a long needle to span across the page boundary
+    // and fail to match. We start with longer prefixes for better uniqueness, falling back
+    // to shorter ones if needed.
+    const maxNeedleLen = Math.min(30, remPrefix.length);
+    for (let len = maxNeedleLen; len >= 5; len -= 5) {
+        const needle = remPrefix.slice(0, len);
+        const idx = currentPageData.content.indexOf(needle);
+        if (idx >= 0) {
+            return idx;
+        }
+    }
+
+    // Last resort: try very short prefix (3 chars) which has higher collision risk
+    // but is better than returning 0 when we're truly at the end of a page
+    if (remPrefix.length >= 3) {
+        const needle = remPrefix.slice(0, 3);
+        const idx = currentPageData.content.indexOf(needle);
+        if (idx >= 0) {
+            return idx;
+        }
+    }
+
+    return 0;
 };
 
 /**
@@ -431,32 +456,36 @@ export const findPageStartNearExpectedBoundary = (
     const searchEnd = Math.min(remainingContent.length, approx + 2_000);
 
     const targetTrimmed = targetPageData.content.trimStart();
+    const ignoreDeviation = expectedBoundary >= remainingContent.length;
+    const scanStart = ignoreDeviation ? 0 : searchStart;
+    const scanEnd = ignoreDeviation ? remainingContent.length : searchEnd;
+    const expectedForRanking = ignoreDeviation ? 0 : expectedBoundary;
     for (const len of WINDOW_PREFIX_LENGTHS) {
         const prefix = targetTrimmed.slice(0, Math.min(len, targetTrimmed.length)).trim();
         if (!prefix) {
             continue;
         }
 
-        const candidates = findAnchorCandidates(remainingContent, prefix, searchStart, searchEnd);
+        const candidates = findAnchorCandidates(remainingContent, prefix, scanStart, scanEnd);
         if (candidates.length === 0) {
             continue;
         }
 
         // Only accept matches within MAX_DEVIATION of the expected boundary.
         // Prefer newline-preceded candidates *among valid matches*, otherwise choose the closest.
-        const MAX_DEVIATION = 2000;
-        const inRange = candidates.filter((c) => Math.abs(c.pos - expectedBoundary) <= MAX_DEVIATION);
+        const deviationLimit = ignoreDeviation ? Number.POSITIVE_INFINITY : MAX_DEVIATION;
+        const inRange = candidates.filter((c) => Math.abs(c.pos - expectedBoundary) <= deviationLimit);
         if (inRange.length > 0) {
-            const best = selectBestAnchor(inRange, expectedBoundary);
+            const best = selectBestAnchor(inRange, expectedForRanking);
             return best.pos;
         }
 
-        const bestOverall = selectBestAnchor(candidates, expectedBoundary);
+        const bestOverall = selectBestAnchor(candidates, expectedForRanking);
         logger?.debug?.('[breakpoints] findPageStartNearExpectedBoundary: Rejected match exceeding deviation', {
-            bestDistance: Math.abs(bestOverall.pos - expectedBoundary),
+            bestDistance: Math.abs(bestOverall.pos - expectedForRanking),
             expectedBoundary,
             matchPos: bestOverall.pos,
-            maxDeviation: MAX_DEVIATION,
+            maxDeviation: deviationLimit,
             prefixLength: len,
             targetPageIdx,
         });
@@ -493,12 +522,174 @@ const findAnchorCandidates = (content: string, prefix: string, start: number, en
 
 /** Selects the best anchor candidate, prioritizing newlines then proximity to boundary */
 const selectBestAnchor = (candidates: AnchorCandidate[], expectedBoundary: number) => {
-    const newlines = candidates.filter((c) => c.isNewline);
-    const pool = newlines.length > 0 ? newlines : candidates;
+    // Penalty for not being a newline. This allows a newline candidate to "win"
+    // against a whitespace candidate if it is reasonably close (e.g. within 20 chars),
+    // which handles cases like offset drift from marker stripping.
+    // However, it prevents a distant newline (e.g. 300+ chars away) from overriding
+    // an exact whitespace match, ensuring we don't skip valid page boundaries just
+    // because they were normalized to spaces.
+    return candidates.reduce((best, curr) => {
+        const bestScore = Math.abs(best.pos - expectedBoundary) + (best.isNewline ? 0 : NON_NEWLINE_PENALTY);
+        const currScore = Math.abs(curr.pos - expectedBoundary) + (curr.isNewline ? 0 : NON_NEWLINE_PENALTY);
+        return currScore < bestScore ? curr : best;
+    });
+};
 
-    return pool.reduce((best, curr) =>
-        Math.abs(curr.pos - expectedBoundary) < Math.abs(best.pos - expectedBoundary) ? curr : best,
+const buildBoundaryPositionsFastPath = (
+    segmentContent: string,
+    fromIdx: number,
+    toIdx: number,
+    pageCount: number,
+    cumulativeOffsets: number[],
+    logger?: Logger,
+) => {
+    const boundaryPositions: number[] = [0];
+    logger?.debug?.('[breakpoints] Using fast-path for large segment in buildBoundaryPositions', {
+        fromIdx,
+        pageCount,
+        toIdx,
+    });
+
+    const baseOffset = cumulativeOffsets[fromIdx] ?? 0;
+    for (let i = fromIdx + 1; i <= toIdx; i++) {
+        const offset = cumulativeOffsets[i];
+        if (offset !== undefined) {
+            const boundary = Math.max(0, offset - baseOffset);
+            const prevBoundary = boundaryPositions[boundaryPositions.length - 1];
+            // Ensure strictly increasing boundaries
+            boundaryPositions.push(Math.max(prevBoundary + 1, Math.min(boundary, segmentContent.length)));
+        }
+    }
+    boundaryPositions.push(segmentContent.length); // sentinel
+    return boundaryPositions;
+};
+
+const isBoundaryPositionValid = (
+    pos: number,
+    prevBoundary: number,
+    expectedBoundary: number,
+    segmentLength: number,
+    ignoreDeviation = false,
+) => {
+    if (pos <= 0 || pos <= prevBoundary) {
+        return false;
+    }
+
+    if (ignoreDeviation) {
+        return true;
+    }
+
+    if (expectedBoundary >= segmentLength) {
+        return true;
+    }
+
+    const deviationLimit = MAX_DEVIATION;
+    return Math.abs(pos - expectedBoundary) < deviationLimit;
+};
+
+const resolveBoundaryMatch = (
+    segmentContent: string,
+    pageIdx: number,
+    rawBoundary: number | undefined,
+    startOffsetInFromPage: number,
+    canInferStartOffset: boolean,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    logger?: Logger,
+) => {
+    let expectedBoundary =
+        rawBoundary !== undefined ? Math.max(0, rawBoundary - startOffsetInFromPage) : segmentContent.length;
+    let pos = findPageStartNearExpectedBoundary(
+        segmentContent,
+        pageIdx,
+        expectedBoundary,
+        pageIds,
+        normalizedPages,
+        logger,
     );
+    let didInferStartOffset = false;
+
+    if (pos < 0 && canInferStartOffset && rawBoundary !== undefined) {
+        const relaxedPos = findPageStartNearExpectedBoundary(
+            segmentContent,
+            pageIdx,
+            segmentContent.length,
+            pageIds,
+            normalizedPages,
+            logger,
+        );
+        if (relaxedPos > 0) {
+            const inferredStartOffset = rawBoundary - relaxedPos;
+            const currentExpected = Math.max(0, rawBoundary - startOffsetInFromPage);
+
+            // Only infer if match is reasonably close to expected position
+            // This prevents inferring from early duplicates in content
+            if (inferredStartOffset >= 0 && Math.abs(relaxedPos - currentExpected) < INFERENCE_PROXIMITY_LIMIT) {
+                startOffsetInFromPage = inferredStartOffset;
+                expectedBoundary = Math.max(0, rawBoundary - startOffsetInFromPage);
+                pos = relaxedPos;
+                didInferStartOffset = true;
+            }
+        }
+    }
+
+    return { didInferStartOffset, expectedBoundary, pos, startOffsetInFromPage };
+};
+
+const buildBoundaryPositionsAccurate = (
+    segmentContent: string,
+    fromIdx: number,
+    toIdx: number,
+    pageCount: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    cumulativeOffsets: number[],
+    logger?: Logger,
+) => {
+    const boundaryPositions: number[] = [0];
+
+    logger?.debug?.('[breakpoints] buildBoundaryPositions: Using accurate string-search path', {
+        contentLength: segmentContent.length,
+        fromIdx,
+        pageCount,
+        toIdx,
+    });
+    let startOffsetInFromPage = estimateStartOffsetInCurrentPage(segmentContent, fromIdx, pageIds, normalizedPages);
+    let didInferStartOffset = false;
+
+    for (let i = fromIdx + 1; i <= toIdx; i++) {
+        const rawBoundary =
+            cumulativeOffsets[i] !== undefined && cumulativeOffsets[fromIdx] !== undefined
+                ? Math.max(0, cumulativeOffsets[i] - cumulativeOffsets[fromIdx])
+                : undefined;
+        const resolved = resolveBoundaryMatch(
+            segmentContent,
+            i,
+            rawBoundary,
+            startOffsetInFromPage,
+            !didInferStartOffset && i === fromIdx + 1,
+            pageIds,
+            normalizedPages,
+            logger,
+        );
+        startOffsetInFromPage = resolved.startOffsetInFromPage;
+        didInferStartOffset = didInferStartOffset || resolved.didInferStartOffset;
+
+        const prevBoundary = boundaryPositions[boundaryPositions.length - 1];
+        if (isBoundaryPositionValid(resolved.pos, prevBoundary, resolved.expectedBoundary, segmentContent.length)) {
+            boundaryPositions.push(resolved.pos);
+        } else {
+            // Fallback for whitespace-only pages, identical content, or stripped markers.
+            // Ensure estimate is strictly > prevBoundary to prevent duplicate zero-length
+            // boundaries, which would break binary-search page-attribution logic.
+            const estimate = Math.max(prevBoundary + 1, resolved.expectedBoundary);
+            boundaryPositions.push(Math.min(estimate, segmentContent.length));
+        }
+    }
+
+    boundaryPositions.push(segmentContent.length); // sentinel
+    logger?.debug?.('[breakpoints] buildBoundaryPositions: Complete', { boundaryCount: boundaryPositions.length });
+    return boundaryPositions;
 };
 
 /**
@@ -535,7 +726,6 @@ export const buildBoundaryPositions = (
     cumulativeOffsets: number[],
     logger?: Logger,
 ) => {
-    const boundaryPositions: number[] = [0];
     const pageCount = toIdx - fromIdx + 1;
 
     // FAST PATH: For large segments (1000+ pages), use cumulative offsets directly.
@@ -543,72 +733,22 @@ export const buildBoundaryPositions = (
     // have stripped content causing offset drift. For large books with simple breakpoints,
     // the precomputed offsets are accurate and O(n) vs O(n×m) string searching.
     if (pageCount >= FAST_PATH_THRESHOLD) {
-        logger?.debug?.('[breakpoints] Using fast-path for large segment in buildBoundaryPositions', {
-            fromIdx,
-            pageCount,
-            toIdx,
-        });
-
-        const baseOffset = cumulativeOffsets[fromIdx] ?? 0;
-        for (let i = fromIdx + 1; i <= toIdx; i++) {
-            const offset = cumulativeOffsets[i];
-            if (offset !== undefined) {
-                const boundary = Math.max(0, offset - baseOffset);
-                const prevBoundary = boundaryPositions[boundaryPositions.length - 1];
-                // Ensure strictly increasing boundaries
-                boundaryPositions.push(Math.max(prevBoundary + 1, Math.min(boundary, segmentContent.length)));
-            }
-        }
-        boundaryPositions.push(segmentContent.length); // sentinel
-        return boundaryPositions;
+        return buildBoundaryPositionsFastPath(segmentContent, fromIdx, toIdx, pageCount, cumulativeOffsets, logger);
     }
 
     // ACCURATE PATH: For smaller segments, verify boundaries with string search
     // This handles cases where structural rules stripped markers causing offset drift
     // WARNING: This path is O(n×m) - if this log appears for large pageCount, investigate!
-    logger?.debug?.('[breakpoints] buildBoundaryPositions: Using accurate string-search path', {
-        contentLength: segmentContent.length,
+    return buildBoundaryPositionsAccurate(
+        segmentContent,
         fromIdx,
-        pageCount,
         toIdx,
-    });
-    const startOffsetInFromPage = estimateStartOffsetInCurrentPage(segmentContent, fromIdx, pageIds, normalizedPages);
-
-    for (let i = fromIdx + 1; i <= toIdx; i++) {
-        const expectedBoundary =
-            cumulativeOffsets[i] !== undefined && cumulativeOffsets[fromIdx] !== undefined
-                ? Math.max(0, cumulativeOffsets[i] - cumulativeOffsets[fromIdx] - startOffsetInFromPage)
-                : segmentContent.length;
-
-        const pos = findPageStartNearExpectedBoundary(
-            segmentContent,
-            i,
-            expectedBoundary,
-            pageIds,
-            normalizedPages,
-            logger,
-        );
-
-        const prevBoundary = boundaryPositions[boundaryPositions.length - 1];
-
-        // Strict > prevents duplicate boundaries when pages have identical content
-        const MAX_DEVIATION = 2000;
-        const isValidPosition = pos > 0 && pos > prevBoundary && Math.abs(pos - expectedBoundary) < MAX_DEVIATION;
-
-        if (isValidPosition) {
-            boundaryPositions.push(pos);
-        } else {
-            // Fallback for whitespace-only pages, identical content, or stripped markers.
-            // Ensure estimate is strictly > prevBoundary to prevent duplicate zero-length
-            // boundaries, which would break binary-search page-attribution logic.
-            const estimate = Math.max(prevBoundary + 1, expectedBoundary);
-            boundaryPositions.push(Math.min(estimate, segmentContent.length));
-        }
-    }
-
-    boundaryPositions.push(segmentContent.length); // sentinel
-    logger?.debug?.('[breakpoints] buildBoundaryPositions: Complete', { boundaryCount: boundaryPositions.length });
-    return boundaryPositions;
+        pageCount,
+        pageIds,
+        normalizedPages,
+        cumulativeOffsets,
+        logger,
+    );
 };
 
 /**

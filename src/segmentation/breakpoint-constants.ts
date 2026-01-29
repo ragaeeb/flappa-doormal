@@ -33,3 +33,33 @@ export const JOINER_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15, 12, 10, 8, 6] as c
 
 // Includes Arabic comma (،), semicolon (؛), full stop (.), etc.
 export const STOP_CHARACTERS = /[\s\n.,;!?؛،۔]/;
+
+/**
+ * Buffer size for fuzzy searching around expected boundary positions (characters).
+ * Used when exact matches fail due to minor content variations.
+ */
+export const BUFFER_SIZE = 1000;
+
+/**
+ * Maximum allowed deviation between expected and actual boundary positions (characters).
+ * Matches outside this range are rejected unless `ignoreDeviation` is active.
+ */
+export const MAX_DEVIATION = 2000;
+
+/**
+ * Penalty score applied to non-newline anchor candidates.
+ *
+ * Designed to prioritize newline-aligned boundaries unless a whitespace match is
+ * significantly closer (within 20 chars). Handles cases where marker stripping
+ * shifts the boundary slightly.
+ */
+export const NON_NEWLINE_PENALTY = 20;
+
+/**
+ * Limit for inferring start offset from a relaxed search (characters).
+ *
+ * If the relaxed search finds a match more than this distance away from the
+ * expected position, we assume it's a false positive (e.g. repeated content)
+ * and do not use it to infer the start offset.
+ */
+export const INFERENCE_PROXIMITY_LIMIT = 500;

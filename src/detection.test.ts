@@ -40,7 +40,9 @@ describe('detection', () => {
         });
 
         it('should detect "دت" as a single rumuz atom (common combined code)', () => {
-            expect(detectTokenPatterns('دت عس ق:')).toEqual([{ endIndex: 7, index: 0, match: 'دت عس ق', token: 'rumuz' }]);
+            expect(detectTokenPatterns('دت عس ق:')).toEqual([
+                { endIndex: 7, index: 0, match: 'دت عس ق', token: 'rumuz' },
+            ]);
         });
 
         it('should detect "سن" as a single rumuz atom', () => {
@@ -48,7 +50,9 @@ describe('detection', () => {
         });
 
         it('should treat "دس" as a rumuz atom within a rumuz block (e.g. "بخ دس ق:")', () => {
-            expect(detectTokenPatterns('بخ دس ق:')).toEqual([{ endIndex: 7, index: 0, match: 'بخ دس ق', token: 'rumuz' }]);
+            expect(detectTokenPatterns('بخ دس ق:')).toEqual([
+                { endIndex: 7, index: 0, match: 'بخ دس ق', token: 'rumuz' },
+            ]);
         });
 
         it('should detect single-letter rumuz like س in "١٥٦ - س:"', () => {

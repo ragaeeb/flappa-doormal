@@ -1139,4 +1139,47 @@ describe('adjustForSurrogate', () => {
         expect(adjustForSurrogate(content, 0)).toBe(0);
         expect(adjustForSurrogate(content, content.length)).toBe(content.length);
     });
+
+    describe('Inference Safeguard (New)', () => {
+        it('should reject start offset inference if match deviates too far from expected position', () => {
+            const pageIds = [0, 1];
+            const normalizedPages = new Map<number, NormalizedPage>(
+                [
+                    { content: `${'x'.repeat(4000)}UNIQUE_PREFIX${'x'.repeat(990)}`, index: 0, length: 5000 },
+                    { content: 'START_MARKER content', index: 1, length: 20 },
+                ].map((p) => [p.index, p]),
+            );
+
+            // Cumulative offsets: P0 starts 0. P1 starts 5000.
+            const cumulativeOffsets = [0, 5000];
+
+            const segContent =
+                'UNIQUE_PREFIX' + // 13 chars (at 0)
+                'x'.repeat(87) + // total 100
+                'START_MARKER' + // Trap at 100.
+                'x'.repeat(800) + // total ~900
+                'START_BROKEN' + // At ~912.
+                'x'.repeat(100);
+
+            // Estimate finds 'UNIQUE_PREFIX' at 4000. Correct.
+            // Expected = 5000 - 4000 = 1000.
+            // Primary Search window: 1000 ± buffer.
+            // "START_BROKEN" doesn't match.
+            // Primary fails.
+            // Relaxed search runs. Finds "START_MARKER" at 100.
+            // Deviation: |100 - 1000| = 900 > 500.
+            // REJECTED.
+
+            // If rejected, it finds NO boundary.
+            // So returned boundaries should be [0, segContent.length] (sentinel).
+
+            const boundaries = buildBoundaryPositions(segContent, 0, 1, pageIds, normalizedPages, cumulativeOffsets);
+
+            // Should NOT have split at 100.
+            // But it SHOULD split at 1000 (fallback to expected boundary).
+            expect(boundaries).toHaveLength(3); // Start + Boundary + Sentinel
+            expect(boundaries[1]).toBe(1000); // Correct fallback
+            expect(boundaries[1]).not.toBe(100); // False positive rejected
+        });
+    });
 });

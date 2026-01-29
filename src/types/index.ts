@@ -149,3 +149,10 @@ export type {
     PreprocessTransform,
     RemoveZeroWidthRule,
 } from './options.js';
+
+export type {
+    SegmentValidationIssue,
+    SegmentValidationIssueSeverity,
+    SegmentValidationIssueType,
+    SegmentValidationReport,
+} from './validation.js';

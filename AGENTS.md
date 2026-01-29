@@ -606,6 +606,22 @@ bunx biome lint .
 
 49. **Use `trimStart()` not `trim()` for user-provided patterns with semantic whitespace**: When processing user-provided patterns like the `words` field, only strip leading whitespace (likely accidental). Trailing whitespace may be intentional for whole-word matching (e.g., `'بل '` should match only the standalone word, not words starting with `بل` like `بلغ`). **Bug symptom**: `words: ['بل ']` matched `بلغ` because `.trim()` stripped the trailing space to just `بل`. **Fix**: Use `.trimStart()` to preserve trailing whitespace.
 
+50. **When expected boundaries exceed segment length, trust content matches**: If `expectedBoundary >= remainingContent.length`, any deviation-based validation is meaningless. In this case the boundary search must scan the full segment content and rank candidates without a distance constraint. Otherwise early valid page starts can be missed and page attribution will drift.
+
+51. **Infer start offset from the first boundary when necessary**: If the initial boundary search fails right after a structural split, rerun a relaxed search to find the true page start and infer `startOffsetInFromPage`. This corrects the baseline for all subsequent boundary estimates.
+
+52. **Windowed boundary searches can be wrong when offsets drift**: If the approximate offset is skewed (e.g., repeated line-start markers), a windowed scan may miss the real boundary. A full-content scan is required to recover early matches.
+
+53. **Harden maxPages=0 with targeted tests**: Add tests that hit the failure modes: segment starts at page boundary with repeated marker, very short pages (< 100 chars), minimal prefix lengths (15 chars), multiple candidate prefixes in content, tiny tail segments after structural splits, and fast-path threshold transitions (999 vs 1000 pages).
+
+54. **Beware trusting `segment.to` in validation**: When validating `maxPages` violations, do NOT rely solely on `segment.to` if it exists. A segment might claim to end on page X (via `segment.to`) but its content physically matches text on page Y. If `maxPages=0`, trusting `segment.to` hides the violation. Always check the physical match location (`actualToId`) against the constraint, regardless of what the segment claims.
+
+55. **Duplicate `case` labels in manual merges**: When applying fixes suggested by AI or manual merges, check surrounding code for duplicate `case` statements. JavaScript switch statements with duplicate cases are syntax errors (strict mode) or unreachable code. Validation errors usually catch this, but careful reading prevents it.
+
+56. **Linting vs Checks**: `bunx biome check` is strict. Complexity limits (max 15/18) force you to decompose functions. If you receive a complexity error, extract the complex logic (e.g., switch cases, specific validation checks) into standalone helper functions.
+
+57. **Validation Hints Specificity**: Generic error hints like "Check segmenter.ts" are unhelpful. Provide specific file names and logical components (e.g., "Check maxPages windowing in breakpoint-processor.ts"). User-friendly validation reports guide debugging much faster than "Something is wrong".
+
 ### Process Template (Multi-agent design review, TDD-first)
 
 If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:
@@ -748,6 +764,24 @@ See README.md for complete examples.
 
 ## Debugging Tips
 
+### Reading Validation Reports
+
+`validateSegments(pages, options, segments)` returns a structured report for attribution and `maxPages` issues. Use it to quickly localize bugs without re-running segmentation.
+
+**Key fields:**
+- `summary.errors` / `summary.warnings`: Use to decide if the bug is a hard failure or a suspected edge case.
+- `issues[].type`: The failure class (see below).
+- `issues[].segmentIndex`: Which segment to inspect in output.
+- `issues[].expected` / `issues[].actual`: Where attribution diverged.
+- `issues[].pageContext`: Matching page preview + `matchIndex` (if found).
+- `issues[].hint`: Direct pointer to likely culprit code path.
+
+**Issue types and next steps:**
+- `max_pages_violation`: Segment spans too many pages. Check breakpoint windowing in `breakpoint-processor.ts` and boundary logic in `breakpoint-utils.ts`.
+- `page_attribution_mismatch`: Content matched a different page than `segment.from`. Focus on `buildBoundaryPositions()` and `findPageStartNearExpectedBoundary()`.
+- `content_not_found`: Segment content not found in any page. Compare preprocessing, `pageJoiner`, and trimming behavior.
+- `page_not_found`: Segment `from` is not in input pages; validate page IDs and input ordering.
+
 ### Page Boundary Detection Issues
 
 If `maxPages=0` produces merged segments when pages have identical prefixes or duplicated content:
@@ -762,4 +796,9 @@ Key functions: `applyBreakpoints()` → `processOversizedSegment()` → `findBre
 - Pass `logger` with `debug`/`trace` methods to `segmentPages()` for detailed logs
 - Check `boundaryPositions built` log for page boundary byte offsets
 - Check `iteration=N` logs for `currentFromIdx`, `cursorPos`, `windowEndPosition` per loop
+
+## Known Issues
+
+- **Binary Search Gap (Theoretical)**: `findBoundaryIdForOffset` returns `undefined` if the search offset falls exactly on a joiner character (e.g., a space or newline) between two pages. This is mathematically correct (the gap belongs to neither page) but may cause validation errors if a segment consists _only_ of such a gap or matches content starting/ending strictly within the gap. We have marked this as "accept" behavior for now, with a documented skipped test case.
+
 

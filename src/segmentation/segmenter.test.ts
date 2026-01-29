@@ -3026,6 +3026,47 @@ describe('segmenter', () => {
     });
 
     describe('Edge Cases: Boundary position accuracy', () => {
+        it('should keep page attribution when a structural split creates a short tail', () => {
+            const marker = 'SPLIT start';
+            const filler = 'x'.repeat(2100);
+            const pages: Page[] = [
+                { content: `${marker} intro ${filler}\n${marker} tail`, id: 0 },
+                { content: 'NEXT page content.', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                maxPages: 0,
+                rules: [{ lineStartsWith: [marker] }],
+            });
+
+            expect(result).toHaveLength(3);
+            expect(result[0].from).toBe(0);
+            expect(result[1].from).toBe(0);
+            expect(result[2].from).toBe(1);
+            expect(result[2].content).toStartWith('NEXT page');
+        });
+
+        it('should not merge pages when relaxed boundary scan must consider early matches', () => {
+            const marker = 'MARK';
+            const repeatedLine = `${marker} line\n`;
+            const filler = 'a'.repeat(6000);
+            const tail = 'b'.repeat(20);
+            const pages: Page[] = [
+                { content: `${repeatedLine}${filler}\n${repeatedLine}${tail}`, id: 0 },
+                { content: 'c'.repeat(6000), id: 1 },
+                { content: 'd'.repeat(6000), id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                maxPages: 0,
+                rules: [{ lineStartsWith: [marker] }],
+            });
+
+            expect(result.some((seg) => seg.from === 1)).toBe(true);
+            expect(result.some((seg) => seg.from === 2)).toBe(true);
+            expect(result.every((seg) => seg.to === undefined)).toBe(true);
+        });
+
         it('should correctly identify page boundaries when pages have similar prefixes', () => {
             // This tests the findPageStartNearExpectedBoundary function
             const commonPrefix = 'SHARED_PREFIX_';
@@ -3079,6 +3120,103 @@ describe('segmenter', () => {
             expect(result[0].content).toBe('Short');
             expect(result[1].content).toBe('Short and longer content');
         });
+
+        it('should handle segment starting at page boundary (offset 0) with marker also mid-page', () => {
+            const marker = 'MARKER';
+            const pages: Page[] = [
+                { content: `${marker} start\nsome filler content here\n${marker} also mid-page`, id: 0 },
+                { content: 'Page 2 content here.', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                maxPages: 0,
+                rules: [{ lineStartsWith: [marker] }],
+            });
+
+            // Should produce 3 segments: two from page 0 (start + mid-page split), one from page 1
+            expect(result).toHaveLength(3);
+            expect(result[0].from).toBe(0);
+            expect(result[1].from).toBe(0);
+            expect(result[2].from).toBe(1);
+            expect(result[2].content).toStartWith('Page 2');
+        });
+
+        it('should handle very short pages (< 100 chars) with maxPages=0', () => {
+            const pages: Page[] = [
+                { content: 'A', id: 0 },
+                { content: 'B', id: 1 },
+                { content: 'C', id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+            });
+
+            expect(result).toHaveLength(3);
+            expect(result[0].from).toBe(0);
+            expect(result[1].from).toBe(1);
+            expect(result[2].from).toBe(2);
+            expect(result.every((s) => s.to === undefined)).toBe(true);
+        });
+
+        it('should handle pages with minimal prefix length (exactly 15 chars)', () => {
+            const pages: Page[] = [
+                { content: '123456789012345', id: 0 },
+                { content: 'abcdefghij12345', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+            });
+
+            expect(result).toHaveLength(2);
+            expect(result[0].from).toBe(0);
+            expect(result[1].from).toBe(1);
+        });
+
+        it('should handle multiple candidate positions for same prefix', () => {
+            // Page 2's prefix appears 3 times in the content: early, middle, and late
+            const prefix = 'TARGET_PREFIX';
+            const pages: Page[] = [
+                {
+                    content: `Start content\n${prefix} early occurrence\n${'x'.repeat(3000)}\n${prefix} middle occurrence\n${'y'.repeat(3000)}`,
+                    id: 0,
+                },
+                { content: `${prefix} this is page 2`, id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+            });
+
+            expect(result).toHaveLength(2);
+            expect(result[0].from).toBe(0);
+            expect(result[1].from).toBe(1);
+            // Page 2 content should be intact, not split at an earlier false-positive
+            expect(result[1].content).toContain('this is page 2');
+        });
+
+        it('should correctly attribute pages when marker creates tiny tail segment', () => {
+            // Regression: marker near end of page creates tiny segment, next page incorrectly merged
+            const marker = 'SPLIT';
+            const pages: Page[] = [
+                { content: `${marker} intro ${'x'.repeat(5000)}\n${marker} tiny`, id: 0 },
+                { content: 'Page 2 content.', id: 1 },
+                { content: 'Page 3 content.', id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                maxPages: 0,
+                rules: [{ lineStartsWith: [marker] }],
+            });
+
+            expect(result.some((seg) => seg.from === 1)).toBe(true);
+            expect(result.some((seg) => seg.from === 2)).toBe(true);
+            expect(result.every((seg) => seg.to === undefined)).toBe(true);
+        });
     });
 
     describe('Edge Cases: Large scale and performance-related', () => {
@@ -3112,6 +3250,33 @@ describe('segmenter', () => {
             // Should produce multiple segments, all from page 0
             expect(result.length).toBeGreaterThan(1);
             expect(result.every((s) => s.from === 0 && s.to === undefined)).toBe(true);
+        });
+
+        it('should produce consistent page attribution at fast-path threshold boundary (999 vs 1000 pages)', () => {
+            const makePages = (count: number): Page[] =>
+                Array.from({ length: count }, (_, i) => ({
+                    content: `Page ${i} unique content xyz${i}.`,
+                    id: i,
+                }));
+
+            const run = (pages: Page[]) =>
+                segmentPages(pages, {
+                    breakpoints: [''],
+                    maxPages: 0,
+                });
+
+            // Just below threshold (accurate path)
+            const below = run(makePages(FAST_PATH_THRESHOLD - 1));
+            // At threshold (fast path)
+            const at = run(makePages(FAST_PATH_THRESHOLD));
+
+            // Both should produce correct page attribution
+            expect(below).toHaveLength(FAST_PATH_THRESHOLD - 1);
+            expect(at).toHaveLength(FAST_PATH_THRESHOLD);
+
+            // Verify page attribution is correct for both
+            expect(below.every((s, i) => s.from === i && s.to === undefined)).toBe(true);
+            expect(at.every((s, i) => s.from === i && s.to === undefined)).toBe(true);
         });
     });
 
