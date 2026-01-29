@@ -1,7 +1,7 @@
+import { applyPreprocessToPage } from '@/preprocessing/transforms.js';
 import type { Page, Segment } from '@/types';
 import type { Logger, SegmentationOptions } from '@/types/options.js';
 import type { SplitRule } from '@/types/rules.js';
-import { applyPreprocessToPage } from '@/preprocessing/transforms.js';
 import { normalizeLineEndings } from '@/utils/textUtils.js';
 import type { PageBoundary, PageMap, SplitPoint } from '../types/segmenter.js';
 import { applyBreakpoints } from './breakpoint-processor.js';

@@ -9,6 +9,18 @@ type NormalizedPage = {
     content: string;
 };
 
+type JoinedBoundary = {
+    id: number;
+    start: number;
+    end: number;
+};
+
+type JoinedMatch = {
+    fromId: number;
+    matchIndex: number;
+    toId: number;
+};
+
 const PREVIEW_LIMIT = 140;
 
 const buildPreview = (text: string): string => {
@@ -30,6 +42,54 @@ const normalizePages = (pages: Page[], options: SegmentationOptions): Normalized
             id: page.id,
         };
     });
+};
+
+const buildJoinedContent = (pages: NormalizedPage[], joiner: string) => {
+    const boundaries: JoinedBoundary[] = [];
+    let offset = 0;
+    for (let i = 0; i < pages.length; i++) {
+        const content = pages[i].content;
+        const start = offset;
+        const end = start + content.length - 1;
+        boundaries.push({ end, id: pages[i].id, start });
+        offset = end + 1 + (i < pages.length - 1 ? joiner.length : 0);
+    }
+    return { boundaries, joined: pages.map((p) => p.content).join(joiner) };
+};
+
+const findBoundaryIdForOffset = (offset: number, boundaries: JoinedBoundary[]) => {
+    let lo = 0;
+    let hi = boundaries.length - 1;
+    while (lo <= hi) {
+        const mid = (lo + hi) >>> 1;
+        const boundary = boundaries[mid];
+        if (offset < boundary.start) {
+            hi = mid - 1;
+        } else if (offset > boundary.end) {
+            lo = mid + 1;
+        } else {
+            return boundary.id;
+        }
+    }
+    return boundaries.at(-1)?.id;
+};
+
+const findJoinedMatches = (content: string, joined: string, boundaries: JoinedBoundary[]): JoinedMatch[] => {
+    const matches: JoinedMatch[] = [];
+    if (!content) {
+        return matches;
+    }
+    let idx = joined.indexOf(content);
+    while (idx >= 0) {
+        const end = idx + content.length - 1;
+        const fromId = findBoundaryIdForOffset(idx, boundaries);
+        const toId = findBoundaryIdForOffset(end, boundaries);
+        if (fromId !== undefined && toId !== undefined) {
+            matches.push({ fromId, matchIndex: idx, toId });
+        }
+        idx = joined.indexOf(content, idx + 1);
+    }
+    return matches;
 };
 
 const findContentMatches = (content: string, pages: NormalizedPage[]) => {
@@ -126,6 +186,8 @@ const getAttributionIssues = (
     segmentSnapshot: ReturnType<typeof buildSegmentSnapshot>,
     normalizedPages: NormalizedPage[],
     maxPages: number | undefined,
+    joined: string,
+    boundaries: JoinedBoundary[],
 ): ValidationIssue[] => {
     if (maxPages !== 0 && maxPages !== undefined) {
         return [];
@@ -134,19 +196,15 @@ const getAttributionIssues = (
     const matches = findContentMatches(segment.content, normalizedPages);
 
     if (matches.length === 0) {
-        const page = normalizedPages.find((p) => p.id === segment.from);
-        return [
-            {
-                actual: { from: segment.from, to: segment.to },
-                evidence: 'Segment content not found in any page content.',
-                hint: 'Check preprocessing and content normalization paths.',
-                pageContext: page ? { pageId: page.id, pagePreview: buildPreview(page.content) } : undefined,
-                segment: segmentSnapshot,
-                segmentIndex,
-                severity: 'error',
-                type: 'content_not_found',
-            },
-        ];
+        return getJoinedAttributionIssues(
+            segment,
+            segmentIndex,
+            segmentSnapshot,
+            normalizedPages,
+            maxPages,
+            joined,
+            boundaries,
+        );
     }
 
     if (matches.length === 1) {
@@ -211,12 +269,86 @@ const getAttributionIssues = (
     ];
 };
 
+const getJoinedAttributionIssues = (
+    segment: Segment,
+    segmentIndex: number,
+    segmentSnapshot: ReturnType<typeof buildSegmentSnapshot>,
+    normalizedPages: NormalizedPage[],
+    maxPages: number | undefined,
+    joined: string,
+    boundaries: JoinedBoundary[],
+): ValidationIssue[] => {
+    const joinedMatches = findJoinedMatches(segment.content, joined, boundaries);
+    if (joinedMatches.length === 0) {
+        const page = normalizedPages.find((p) => p.id === segment.from);
+        return [
+            {
+                actual: { from: segment.from, to: segment.to },
+                evidence: 'Segment content not found in any page content.',
+                hint: 'Check preprocessing and content normalization paths.',
+                pageContext: page ? { pageId: page.id, pagePreview: buildPreview(page.content) } : undefined,
+                segment: segmentSnapshot,
+                segmentIndex,
+                severity: 'error',
+                type: 'content_not_found',
+            },
+        ];
+    }
+
+    const alignedMatches = joinedMatches.filter((m) => m.fromId === segment.from);
+    const primary = alignedMatches[0] ?? joinedMatches[0];
+    const issues: ValidationIssue[] = [];
+
+    if (alignedMatches.length > 1) {
+        issues.push({
+            actual: { from: segment.from, to: segment.to },
+            evidence: `Content appears on multiple joined positions for page ${segment.from}.`,
+            hint: 'Content duplicates may require stronger anchors or additional rules.',
+            segment: segmentSnapshot,
+            segmentIndex,
+            severity: 'warn',
+            type: 'ambiguous_attribution',
+        });
+    }
+
+    if (primary.fromId !== segment.from) {
+        issues.push({
+            actual: { from: segment.from, to: segment.to },
+            evidence: `Content found in joined content at page ${primary.fromId}, but segment.from=${segment.from}.`,
+            expected: { from: primary.fromId, to: primary.toId },
+            hint: 'Check content matching and boundary attribution logic.',
+            segment: segmentSnapshot,
+            segmentIndex,
+            severity: 'error',
+            type: 'page_attribution_mismatch',
+        });
+        return issues;
+    }
+
+    if (maxPages === 0 && primary.toId !== primary.fromId) {
+        issues.push({
+            actual: { from: segment.from, to: segment.to },
+            evidence: `Segment spans pages ${primary.fromId}-${primary.toId} in joined content.`,
+            expected: { from: primary.fromId, to: primary.fromId },
+            hint: 'Check page boundary attribution in segmenter.ts and breakpoint-processor.ts.',
+            segment: segmentSnapshot,
+            segmentIndex,
+            severity: 'error',
+            type: 'max_pages_violation',
+        });
+    }
+
+    return issues;
+};
+
 export const validateSegments = (
     pages: Page[],
     options: SegmentationOptions,
     segments: Segment[],
 ): ValidationReport => {
     const normalizedPages = normalizePages(pages, options);
+    const joiner = options.pageJoiner === 'newline' ? '\n' : ' ';
+    const { boundaries, joined } = buildJoinedContent(normalizedPages, joiner);
     const pageIds = new Set(normalizedPages.map((p) => p.id));
     const issues: ValidationIssue[] = [];
     const maxPages = options.maxPages;
@@ -229,7 +361,9 @@ export const validateSegments = (
             issues.push(pageIssue);
         }
         issues.push(...getMaxPagesIssues(segment, i, segmentSnapshot, maxPages));
-        issues.push(...getAttributionIssues(segment, i, segmentSnapshot, normalizedPages, maxPages));
+        issues.push(
+            ...getAttributionIssues(segment, i, segmentSnapshot, normalizedPages, maxPages, joined, boundaries),
+        );
     }
 
     const errors = issues.filter((issue) => issue.severity === 'error').length;
