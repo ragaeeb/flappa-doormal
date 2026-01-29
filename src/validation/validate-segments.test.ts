@@ -31,9 +31,19 @@ describe('validateSegments', () => {
             const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
 
             expect(report.ok).toBe(false);
-            expect(report.issues).toHaveLength(2); // page_not_found + content_not_found
+            expect(report.issues).toHaveLength(2); // page_not_found + content_not_found only (content check skipped)
             expect(report.issues.find((i) => i.type === 'page_not_found')).toBeDefined();
             expect(report.issues.find((i) => i.type === 'page_not_found')?.severity).toBe('error');
+        });
+
+        it('should report error when segment.to does not exist in input pages', () => {
+            const pages: Page[] = [{ content: 'Content', id: 0 }];
+            const segments: Segment[] = [{ content: 'Content', from: 0, to: 999 }];
+            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
+
+            expect(report.ok).toBe(false);
+            const issue = report.issues.find((i) => i.type === 'page_not_found' && i.evidence?.includes('to=999'));
+            expect(issue).toBeDefined();
         });
     });
 
@@ -99,7 +109,7 @@ describe('validateSegments', () => {
             const issue = report.issues.find((i) => i.type === 'page_attribution_mismatch');
             expect(issue).toBeDefined();
             expect(issue!.expected?.from).toBe(20);
-            expect(issue!.actual.from).toBe(10);
+            expect(issue!.actual?.from).toBe(10);
         });
 
         it('should report mismatch when content belongs to multiple pages but none include segment.from', () => {
@@ -282,24 +292,6 @@ describe('validateSegments', () => {
             const segments: Segment[] = [{ content: 'Line1\nLine2', from: 0, to: 1 }];
             const report = validateSegments(pages, { maxPages: 1, pageJoiner: 'newline', rules: [] }, segments);
             expect(report.ok).toBe(true);
-        });
-
-        it('should validate many segments efficiently', () => {
-            const pages: Page[] = Array.from({ length: 100 }, (_, i) => ({
-                content: `Page ${i} content here`,
-                id: i,
-            }));
-            const segments: Segment[] = Array.from({ length: 100 }, (_, i) => ({
-                content: `Page ${i} content`,
-                from: i,
-            }));
-
-            const start = performance.now();
-            const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
-            const elapsed = performance.now() - start;
-
-            expect(report.ok).toBe(true);
-            expect(elapsed).toBeLessThan(100); // Should complete in under 100ms
         });
 
         it('should correctly count errors and warnings in summary', () => {

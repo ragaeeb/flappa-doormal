@@ -103,7 +103,7 @@ const createIssue = (
         case 'page_not_found':
             return {
                 ...base,
-                evidence: `Segment.from=${segment.from} does not exist in input pages.`,
+                evidence: overrides.evidence ?? `Segment.from=${segment.from} does not exist in input pages.`,
                 hint: 'Check page IDs passed into segmentPages() and validateSegments().',
                 severity: 'error',
                 type,
@@ -118,13 +118,13 @@ const createIssue = (
                 type,
             };
         case 'page_attribution_mismatch': {
-            const actualFromId = overrides.actual?.from ?? segment.from;
-            const actualPage = pageMap?.get(actualFromId);
+            const matchedFromId = overrides.expected?.from ?? overrides.actual?.from ?? segment.from;
+            const actualPage = pageMap?.get(matchedFromId);
             return {
                 ...base,
                 evidence:
                     overrides.evidence ??
-                    `Content found in joined content at page ${actualFromId}, but segment.from=${segment.from}.`,
+                    `Content found in joined content at page ${matchedFromId}, but segment.from=${segment.from}.`,
                 hint: overrides.hint ?? 'Check content matching and boundary attribution logic.',
                 pageContext: actualPage
                     ? {
@@ -435,9 +435,15 @@ export const validateSegments = (
     for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
 
-        // Check page existence
         if (!pageIds.has(segment.from)) {
             issues.push(createIssue('page_not_found', segment, i));
+        }
+        if (segment.to !== undefined && !pageIds.has(segment.to)) {
+            issues.push(
+                createIssue('page_not_found', segment, i, {
+                    evidence: `Segment.to=${segment.to} does not exist in input pages.`,
+                }),
+            );
         }
 
         // Check maxPages constraint
