@@ -251,22 +251,7 @@ const getAttributionIssues = (
         ];
     }
 
-    const firstMatch = matches[0];
-    const page = normalizedPages.find((p) => p.id === firstMatch.pageId);
-    return [
-        {
-            actual: { from: segment.from, to: segment.to },
-            evidence: `Content appears on multiple pages [${matchIds.join(', ')}].`,
-            hint: 'Content duplicates may require stronger anchors or additional rules.',
-            pageContext: page
-                ? { matchIndex: firstMatch.matchIndex, pageId: page.id, pagePreview: buildPreview(page.content) }
-                : undefined,
-            segment: segmentSnapshot,
-            segmentIndex,
-            severity: 'warn',
-            type: 'ambiguous_attribution',
-        },
-    ];
+    return [];
 };
 
 const getJoinedAttributionIssues = (

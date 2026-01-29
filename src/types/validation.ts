@@ -4,7 +4,6 @@ export type ValidationIssueType =
     | 'max_pages_violation'
     | 'page_attribution_mismatch'
     | 'content_not_found'
-    | 'ambiguous_attribution'
     | 'page_not_found';
 
 export type ValidationIssue = {

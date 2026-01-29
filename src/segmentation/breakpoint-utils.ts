@@ -395,14 +395,36 @@ export const estimateStartOffsetInCurrentPage = (
         return 0;
     }
 
-    const remStart = remainingContent.trimStart().slice(0, Math.min(60, remainingContent.length));
-    const needle = remStart.slice(0, Math.min(30, remStart.length));
-    if (!needle) {
+    // Optimization: slice a small chunk first to avoid trimStart() on potentially huge strings
+    const remPrefix = remainingContent.slice(0, 500).trimStart();
+    if (!remPrefix) {
         return 0;
     }
 
-    const idx = currentPageData.content.indexOf(needle);
-    return idx > 0 ? idx : 0;
+    // Try progressively shorter prefixes. This handles cases where remainingContent starts
+    // near the end of the current page, causing a long needle to span across the page boundary
+    // and fail to match. We start with longer prefixes for better uniqueness, falling back
+    // to shorter ones if needed.
+    const maxNeedleLen = Math.min(30, remPrefix.length);
+    for (let len = maxNeedleLen; len >= 5; len -= 5) {
+        const needle = remPrefix.slice(0, len);
+        const idx = currentPageData.content.indexOf(needle);
+        if (idx >= 0) {
+            return idx;
+        }
+    }
+
+    // Last resort: try very short prefix (3 chars) which has higher collision risk
+    // but is better than returning 0 when we're truly at the end of a page
+    if (remPrefix.length >= 3) {
+        const needle = remPrefix.slice(0, 3);
+        const idx = currentPageData.content.indexOf(needle);
+        if (idx >= 0) {
+            return idx;
+        }
+    }
+
+    return 0;
 };
 
 /**
@@ -497,12 +519,19 @@ const findAnchorCandidates = (content: string, prefix: string, start: number, en
 
 /** Selects the best anchor candidate, prioritizing newlines then proximity to boundary */
 const selectBestAnchor = (candidates: AnchorCandidate[], expectedBoundary: number) => {
-    const newlines = candidates.filter((c) => c.isNewline);
-    const pool = newlines.length > 0 ? newlines : candidates;
+    // Penalty for not being a newline. This allows a newline candidate to "win"
+    // against a whitespace candidate if it is reasonably close (e.g. within 20 chars),
+    // which handles cases like offset drift from marker stripping.
+    // However, it prevents a distant newline (e.g. 300+ chars away) from overriding
+    // an exact whitespace match, ensuring we don't skip valid page boundaries just
+    // because they were normalized to spaces.
+    const NON_NEWLINE_PENALTY = 20;
 
-    return pool.reduce((best, curr) =>
-        Math.abs(curr.pos - expectedBoundary) < Math.abs(best.pos - expectedBoundary) ? curr : best,
-    );
+    return candidates.reduce((best, curr) => {
+        const bestScore = Math.abs(best.pos - expectedBoundary) + (best.isNewline ? 0 : NON_NEWLINE_PENALTY);
+        const currScore = Math.abs(curr.pos - expectedBoundary) + (curr.isNewline ? 0 : NON_NEWLINE_PENALTY);
+        return currScore < bestScore ? curr : best;
+    });
 };
 
 const buildBoundaryPositionsFastPath = (

@@ -772,7 +772,6 @@ See README.md for complete examples.
 - `max_pages_violation`: Segment spans too many pages. Check breakpoint windowing in `breakpoint-processor.ts` and boundary logic in `breakpoint-utils.ts`.
 - `page_attribution_mismatch`: Content matched a different page than `segment.from`. Focus on `buildBoundaryPositions()` and `findPageStartNearExpectedBoundary()`.
 - `content_not_found`: Segment content not found in any page. Compare preprocessing, `pageJoiner`, and trimming behavior.
-- `ambiguous_attribution`: Content appears on multiple pages. Look for duplicated text or weak anchors; consider stronger rules.
 - `page_not_found`: Segment `from` is not in input pages; validate page IDs and input ordering.
 
 ### Page Boundary Detection Issues

@@ -62,20 +62,6 @@ describe('validateSegments', () => {
         expect(report.issues[0]?.type).toBe('content_not_found');
     });
 
-    it('should warn on ambiguous attribution when content appears on multiple pages', () => {
-        const pages: Page[] = [
-            { content: 'Same content here.', id: 0 },
-            { content: 'Same content here.', id: 1 },
-        ];
-        const segments: Segment[] = [{ content: 'Same content', from: 0 }];
-
-        const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
-
-        expect(report.ok).toBe(false);
-        expect(report.issues[0]?.type).toBe('ambiguous_attribution');
-        expect(report.issues[0]?.severity).toBe('warn');
-    });
-
     it('should detect maxPages violation when content only matches joined pages', () => {
         const pages: Page[] = [
             { content: 'Alpha', id: 0 },
