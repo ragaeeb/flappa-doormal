@@ -4932,5 +4932,35 @@ describe('segmenter', () => {
             expect(result[1].content).toBe('Section 2');
             expect(result[2].content).toBe('Section 3');
         });
+
+        it('should correctly attribute content to next page when hr is at end of page (regression)', () => {
+            // Regression test: When {{hr}} matches at the END of a page with content
+            // starting on the NEXT page, the segment's `from` should be the next page,
+            // not the page where the hr was found.
+            // Bug: lineStartsAfter was using the match position (page 1) for `from`
+            // instead of where the actual trimmed content begins (page 2).
+            const pages: Page[] = [
+                { content: 'Content on page 1\n______________', id: 1 },
+                { content: 'Content on page 2', id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+
+            // Should produce 2 segments: one for page 1 content, one for page 2 content
+            expect(result.length).toBe(2);
+
+            // First segment is the content before the hr on page 1
+            expect(result[0].content).toBe('Content on page 1');
+            expect(result[0].from).toBe(1);
+
+            // Second segment MUST be from page 2 (not page 1)
+            // This was the bug: it was incorrectly set to page 1
+            expect(result[1].content).toBe('Content on page 2');
+            expect(result[1].from).toBe(2);
+        });
     });
 });

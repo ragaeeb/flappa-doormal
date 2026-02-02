@@ -426,8 +426,15 @@ const buildSegments = (
         if (!capturedContent) {
             text = convertPageBreaks(text, actualStart, pageMap.pageBreaks, pageJoiner);
         }
-        const from = pageMap.getId(actualStart);
-        const to = capturedContent ? pageMap.getId(end - 1) : pageMap.getId(actualStart + text.length - 1);
+
+        // Calculate how much leading whitespace was trimmed to get the correct 'from' page.
+        // This is critical for lineStartsAfter rules where the content after the marker
+        // may start on a different page than where the marker was matched.
+        const leadingTrimmed = contentStartOffset ? sliced.length - sliced.trimStart().length : 0;
+        const adjustedStart = actualStart + leadingTrimmed;
+
+        const from = pageMap.getId(adjustedStart);
+        const to = capturedContent ? pageMap.getId(end - 1) : pageMap.getId(adjustedStart + text.length - 1);
         const seg: Segment = { content: text, from };
         if (to !== from) {
             seg.to = to;
