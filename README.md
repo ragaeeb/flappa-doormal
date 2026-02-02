@@ -146,7 +146,7 @@ Replace regex with readable tokens:
 | `{{kitab}}` | "كتاب" (book) | `كتاب` |
 | `{{bab}}` | "باب" (chapter) | `باب` |
 | `{{basmalah}}` | "بسم الله" | `بسم الله` |
-| `{{hr}}` | Horizontal rule / separator | `(?:ـ{10,}|_{10,}|—{5,}|–{5,}|-{10,})` |
+| `{{hr}}` | Horizontal rule / separator | `(?:ـ{10,}\|_{10,}\|—{5,}\|–{5,}\|-{10,})` |
 
 #### Token Details
 

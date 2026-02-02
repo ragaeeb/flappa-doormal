@@ -4962,5 +4962,30 @@ describe('segmenter', () => {
             expect(result[1].content).toBe('Content on page 2');
             expect(result[1].from).toBe(2);
         });
+
+        it('should NOT match em-dash sequences below threshold (4 chars)', () => {
+            const pages: Page[] = [{ content: 'First section\n————\nSecond section', id: 1 }];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+
+            // Should NOT split because 4 em-dashes is below the 5 char threshold
+            expect(result.length).toBe(1);
+            expect(result[0].content).toContain('————');
+        });
+
+        it('should match em-dash sequences at exact threshold (5 chars)', () => {
+            const pages: Page[] = [{ content: 'First section\n—————\nSecond section', id: 1 }];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+
+            // Should split because 5 em-dashes meets the threshold
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('First section');
+            expect(result[1].content).toBe('Second section');
+        });
     });
 });
