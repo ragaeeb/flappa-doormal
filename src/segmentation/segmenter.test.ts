@@ -4763,4 +4763,229 @@ describe('segmenter', () => {
             expect(resultAfter[1].content).toBe('Second line with enough content here to test');
         });
     });
+
+    describe('{{hr}} horizontal rule token', () => {
+        it('should strip tatweel horizontal rule with lineStartsAfter', () => {
+            const pages: Page[] = [
+                { content: 'First section content\nـــــــــــــــ\nSecond section content', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('First section content');
+            expect(result[1].content).toBe('Second section content');
+            // Ensure the hr characters are NOT in either segment
+            expect(result[0].content).not.toContain('ـ');
+            expect(result[1].content).not.toContain('ـ');
+        });
+
+        it('should strip underscore horizontal rule with lineStartsAfter', () => {
+            const pages: Page[] = [{ content: 'First section\n______________\nSecond section', id: 1 }];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('First section');
+            expect(result[1].content).toBe('Second section');
+            expect(result[0].content).not.toContain('_');
+            expect(result[1].content).not.toContain('_');
+        });
+
+        it('should strip em-dash horizontal rule with lineStartsAfter', () => {
+            const pages: Page[] = [{ content: 'First section\n—————————\nSecond section', id: 1 }];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('First section');
+            expect(result[1].content).toBe('Second section');
+            expect(result[0].content).not.toContain('—');
+            expect(result[1].content).not.toContain('—');
+        });
+
+        it('should strip en-dash horizontal rule with lineStartsAfter', () => {
+            const pages: Page[] = [{ content: 'First section\n–––––––––\nSecond section', id: 1 }];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('First section');
+            expect(result[1].content).toBe('Second section');
+            expect(result[0].content).not.toContain('–');
+            expect(result[1].content).not.toContain('–');
+        });
+
+        it('should strip hyphen horizontal rule with lineStartsAfter', () => {
+            const pages: Page[] = [{ content: 'First section\n--------------\nSecond section', id: 1 }];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('First section');
+            expect(result[1].content).toBe('Second section');
+            expect(result[0].content).not.toContain('-');
+            expect(result[1].content).not.toContain('-');
+        });
+
+        it('should keep tatweel horizontal rule with lineStartsWith', () => {
+            const pages: Page[] = [
+                { content: 'First section content\nـــــــــــــــ\nSecond section content', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsWith: ['{{hr}}'], split: 'at' }],
+            });
+
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('First section content');
+            // The hr line should be at the START of the second segment
+            expect(result[1].content).toContain('ـــــــــــــــ');
+            expect(result[1].content).toStartWith('ـ');
+        });
+
+        it('should keep underscore horizontal rule with lineStartsWith', () => {
+            const pages: Page[] = [{ content: 'First section\n______________\nSecond section', id: 1 }];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsWith: ['{{hr}}'], split: 'at' }],
+            });
+
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('First section');
+            expect(result[1].content).toContain('______________');
+            expect(result[1].content).toStartWith('_');
+        });
+
+        it('should keep em-dash horizontal rule with lineStartsWith', () => {
+            const pages: Page[] = [{ content: 'First section\n—————————\nSecond section', id: 1 }];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsWith: ['{{hr}}'], split: 'at' }],
+            });
+
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('First section');
+            expect(result[1].content).toContain('—————————');
+            expect(result[1].content).toStartWith('—');
+        });
+
+        it('should keep en-dash horizontal rule with lineStartsWith', () => {
+            const pages: Page[] = [{ content: 'First section\n–––––––––\nSecond section', id: 1 }];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsWith: ['{{hr}}'], split: 'at' }],
+            });
+
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('First section');
+            expect(result[1].content).toContain('–––––––––');
+            expect(result[1].content).toStartWith('–');
+        });
+
+        it('should keep hyphen horizontal rule with lineStartsWith', () => {
+            const pages: Page[] = [{ content: 'First section\n--------------\nSecond section', id: 1 }];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsWith: ['{{hr}}'], split: 'at' }],
+            });
+
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('First section');
+            expect(result[1].content).toContain('--------------');
+            expect(result[1].content).toStartWith('-');
+        });
+
+        it('should NOT match short dash sequences (below threshold)', () => {
+            const pages: Page[] = [{ content: 'First section\n---\nSecond section', id: 1 }];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+
+            // Should NOT split because --- (3 chars) is below the 10 char threshold
+            expect(result.length).toBe(1);
+            expect(result[0].content).toContain('---');
+        });
+
+        it('should handle multiple hr variations in the same document', () => {
+            const pages: Page[] = [
+                { content: 'Section 1\n______________\nSection 2\nـــــــــــــــ\nSection 3', id: 1 },
+            ];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+
+            expect(result.length).toBe(3);
+            expect(result[0].content).toBe('Section 1');
+            expect(result[1].content).toBe('Section 2');
+            expect(result[2].content).toBe('Section 3');
+        });
+
+        it('should correctly attribute content to next page when hr is at end of page (regression)', () => {
+            // Regression test: When {{hr}} matches at the END of a page with content
+            // starting on the NEXT page, the segment's `from` should be the next page,
+            // not the page where the hr was found.
+            // Bug: lineStartsAfter was using the match position (page 1) for `from`
+            // instead of where the actual trimmed content begins (page 2).
+            const pages: Page[] = [
+                { content: 'Content on page 1\n______________', id: 1 },
+                { content: 'Content on page 2', id: 2 },
+            ];
+
+            const result = segmentPages(pages, {
+                breakpoints: [''],
+                maxPages: 0,
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+
+            // Should produce 2 segments: one for page 1 content, one for page 2 content
+            expect(result.length).toBe(2);
+
+            // First segment is the content before the hr on page 1
+            expect(result[0].content).toBe('Content on page 1');
+            expect(result[0].from).toBe(1);
+
+            // Second segment MUST be from page 2 (not page 1)
+            // This was the bug: it was incorrectly set to page 1
+            expect(result[1].content).toBe('Content on page 2');
+            expect(result[1].from).toBe(2);
+        });
+
+        it('should NOT match em-dash sequences below threshold (4 chars)', () => {
+            const pages: Page[] = [{ content: 'First section\n————\nSecond section', id: 1 }];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+
+            // Should NOT split because 4 em-dashes is below the 5 char threshold
+            expect(result.length).toBe(1);
+            expect(result[0].content).toContain('————');
+        });
+
+        it('should match em-dash sequences at exact threshold (5 chars)', () => {
+            const pages: Page[] = [{ content: 'First section\n—————\nSecond section', id: 1 }];
+
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+
+            // Should split because 5 em-dashes meets the threshold
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('First section');
+            expect(result[1].content).toBe('Second section');
+        });
+    });
 });
