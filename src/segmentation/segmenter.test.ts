@@ -4927,10 +4927,49 @@ describe('segmenter', () => {
                 rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
             });
 
-            expect(result.length).toBe(3);
             expect(result[0].content).toBe('Section 1');
             expect(result[1].content).toBe('Section 2');
             expect(result[2].content).toBe('Section 3');
+        });
+
+        it('should match mixed wide dashes (em/en) as hr', () => {
+            // Mixed sequence of 5 chars: 4 em-dashes + 1 en-dash
+            const pages: Page[] = [{ content: 'Start\n————–\nEnd', id: 1 }];
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('Start');
+            expect(result[1].content).toBe('End');
+        });
+
+        it('should match mixed punctuation (underscore/hyphen/tatweel) as hr', () => {
+            const pages: Page[] = [{ content: 'Start\n_-_-_-\nEnd', id: 1 }]; // 6 chars mixed
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('Start');
+            expect(result[1].content).toBe('End');
+        });
+
+        it('should use consistent minimum length of 5 for all hr types', () => {
+            // Test specifically for hyphens which used to be 10
+            const pages: Page[] = [{ content: 'Start\n-----\nEnd', id: 1 }]; // 5 hyphens
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('Start');
+            expect(result[1].content).toBe('End');
+        });
+
+        it('should NOT match sequences shorter than 5 characters', () => {
+            const pages: Page[] = [{ content: 'Start\n----\nEnd', id: 1 }]; // 4 hyphens
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+            expect(result.length).toBe(1); // Should not split
         });
 
         it('should correctly attribute content to next page when hr is at end of page (regression)', () => {

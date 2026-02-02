@@ -660,7 +660,7 @@ If you want to repeat the “write a plan → get multiple AI critiques → synt
 | `{{bullet}}` | `Token.BULLET` | Bullet points | • * ° |
 | `{{newline}}` | `Token.NEWLINE` | Newline character | `\n` |
 | `{{numbered}}` | `Token.NUMBERED` | `{{raqms}} {{dash}} ` | ٧٥٦٣ - |
-| `{{hr}}` | `Token.HR` | Horizontal rule | ـــــــــــ |
+| `{{hr}}` | `Token.HR` | Horizontal rule (5+ chars) | ـــــــــــ |
 
 ### Token Constants (Better DX)
 

@@ -248,27 +248,28 @@ describe('tokens', () => {
             const pat = getTokenPattern('hr');
             expect(pat).toBeDefined();
             const regex = templateToRegex(`^${pat}$`);
-            // Should match 10+ tatweels
-            expect(regex?.test('ــــــــــ')).toBeTrue();
-            // Should match 10+ underscores
-            expect(regex?.test('__________')).toBeTrue();
+            // Should match 5+ tatweels (was 10+)
+            expect(regex?.test('ـــــ')).toBeTrue();
+            // Should match 5+ underscores (was 10+)
+            expect(regex?.test('_____')).toBeTrue();
             // Should match 5+ em-dashes
             expect(regex?.test('—————')).toBeTrue();
             // Should match 5+ en-dashes
             expect(regex?.test('–––––')).toBeTrue();
-            // Should match 10+ hyphens
-            expect(regex?.test('----------')).toBeTrue();
+            // Should match 5+ hyphens (was 10+)
+            expect(regex?.test('-----')).toBeTrue();
+            // Should match mixed variations
+            expect(regex?.test('—–_ـ-')).toBeTrue(); // 5 chars mixed
         });
 
         it('should NOT match hr with too few characters', () => {
             const pat = getTokenPattern('hr');
             const regex = templateToRegex(`^${pat}$`);
-            // 3 tatweels is too short
+            // 4 chars is too short (needs 5+)
+            expect(regex?.test('____')).toBeFalse();
+            expect(regex?.test('----')).toBeFalse();
             expect(regex?.test('ـــ')).toBeFalse();
-            // 3 em-dashes is too short (needs 5+)
-            expect(regex?.test('———')).toBeFalse();
-            // 5 hyphens is too short (needs 10+)
-            expect(regex?.test('-----')).toBeFalse();
+            expect(regex?.test('—–_-')).toBeFalse(); // 4 chars mixed
         });
     });
 
