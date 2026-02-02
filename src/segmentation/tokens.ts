@@ -75,6 +75,9 @@ const BASE_TOKENS: Record<string, string> = {
     /** One or more single Arabic letters separated by spaces. For multi-letter codes use `{{rumuz}}`. */
     harfs: '[أ-ي](?:\\s+[أ-ي])*',
 
+    /** Horizontal rule / separator: repeated dashes, underscores, or tatweels. */
+    hr: '(?:ـ{10,}|_{10,}|—{5,}|–{5,}|-{10,})',
+
     /** Book marker (كتاب). */
     kitab: 'كتاب',
 
@@ -119,6 +122,8 @@ export const Token = {
     HARF: '{{harf}}',
     /** Multiple Arabic letters separated by spaces */
     HARFS: '{{harfs}}',
+    /** Horizontal rule / separator (repeated dashes) */
+    HR: '{{hr}}',
     /** Book marker - كتاب */
     KITAB: '{{kitab}}',
     /** Hadith transmission phrases */

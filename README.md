@@ -146,6 +146,7 @@ Replace regex with readable tokens:
 | `{{kitab}}` | "كتاب" (book) | `كتاب` |
 | `{{bab}}` | "باب" (chapter) | `باب` |
 | `{{basmalah}}` | "بسم الله" | `بسم الله` |
+| `{{hr}}` | Horizontal rule / separator | `(?:ـ{10,}|_{10,}|—{5,}|–{5,}|-{10,})` |
 
 #### Token Details
 
@@ -238,7 +239,7 @@ const pattern = withCapture(Token.RAQMS, 'hadithNum') + ' ' + Token.DASH + ' ';
 // segment.meta.hadithNum will contain the matched number
 ```
 
-Available constants: `Token.BAB`, `Token.BASMALAH`, `Token.BULLET`, `Token.DASH`, `Token.FASL`, `Token.HARF`, `Token.HARFS`, `Token.KITAB`, `Token.NAQL`, `Token.NUM`, `Token.NUMS`, `Token.NUMBERED`, `Token.RAQM`, `Token.RAQMS`, `Token.RUMUZ`, `Token.TARQIM`
+Available constants: `Token.BAB`, `Token.BASMALAH`, `Token.BULLET`, `Token.DASH`, `Token.FASL`, `Token.HARF`, `Token.HARFS`, `Token.HR`, `Token.KITAB`, `Token.NAQL`, `Token.NUM`, `Token.NUMS`, `Token.NUMBERED`, `Token.RAQM`, `Token.RAQMS`, `Token.RUMUZ`, `Token.TARQIM`
 
 
 ### 2. Named Capture Groups

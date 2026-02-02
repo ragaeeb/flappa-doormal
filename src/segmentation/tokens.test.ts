@@ -243,6 +243,33 @@ describe('tokens', () => {
             expect(regex?.test('تمِييز')).toBeFalse();
             expect(regex?.test('تَمْيِيزٌ')).toBeFalse();
         });
+
+        it('should return a pattern for hr (horizontal rule)', () => {
+            const pat = getTokenPattern('hr');
+            expect(pat).toBeDefined();
+            const regex = templateToRegex(`^${pat}$`);
+            // Should match 10+ tatweels
+            expect(regex?.test('ــــــــــ')).toBeTrue();
+            // Should match 10+ underscores
+            expect(regex?.test('__________')).toBeTrue();
+            // Should match 5+ em-dashes
+            expect(regex?.test('—————')).toBeTrue();
+            // Should match 5+ en-dashes
+            expect(regex?.test('–––––')).toBeTrue();
+            // Should match 10+ hyphens
+            expect(regex?.test('----------')).toBeTrue();
+        });
+
+        it('should NOT match hr with too few characters', () => {
+            const pat = getTokenPattern('hr');
+            const regex = templateToRegex(`^${pat}$`);
+            // 3 tatweels is too short
+            expect(regex?.test('ـــ')).toBeFalse();
+            // 3 em-dashes is too short (needs 5+)
+            expect(regex?.test('———')).toBeFalse();
+            // 5 hyphens is too short (needs 10+)
+            expect(regex?.test('-----')).toBeFalse();
+        });
     });
 
     describe('TOKEN_PATTERNS', () => {
@@ -403,6 +430,7 @@ describe('Token constants', () => {
         expect(Token.RAQMS).toBe('{{raqms}}');
         expect(Token.RUMUZ).toBe('{{rumuz}}');
         expect(Token.TARQIM).toBe('{{tarqim}}');
+        expect(Token.HR).toBe('{{hr}}');
     });
 
     it('should expand {{newline}} to literal newline pattern', () => {
