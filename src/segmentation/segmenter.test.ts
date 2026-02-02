@@ -4972,6 +4972,16 @@ describe('segmenter', () => {
             expect(result.length).toBe(1); // Should not split
         });
 
+        it('should match equals sign horizontal rule with lineStartsAfter', () => {
+            const pages: Page[] = [{ content: 'Section 1\n==============\nSection 2', id: 1 }];
+            const result = segmentPages(pages, {
+                rules: [{ lineStartsAfter: ['{{hr}}'], split: 'at' }],
+            });
+            expect(result.length).toBe(2);
+            expect(result[0].content).toBe('Section 1');
+            expect(result[1].content).toBe('Section 2');
+        });
+
         it('should correctly attribute content to next page when hr is at end of page (regression)', () => {
             // Regression test: When {{hr}} matches at the END of a page with content
             // starting on the NEXT page, the segment's `from` should be the next page,

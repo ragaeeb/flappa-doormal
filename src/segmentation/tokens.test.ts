@@ -258,8 +258,11 @@ describe('tokens', () => {
             expect(regex?.test('–––––')).toBeTrue();
             // Should match 5+ hyphens (was 10+)
             expect(regex?.test('-----')).toBeTrue();
+            // Should match 5+ equals signs
+            expect(regex?.test('=====')).toBeTrue();
             // Should match mixed variations
             expect(regex?.test('—–_ـ-')).toBeTrue(); // 5 chars mixed
+            expect(regex?.test('=-=_-')).toBeTrue(); // 5 chars mixed with equals
         });
 
         it('should NOT match hr with too few characters', () => {
