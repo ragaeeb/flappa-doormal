@@ -31,8 +31,8 @@ export const WINDOW_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15] as const;
 // That can be as short as a few words, so we allow shorter prefixes here.
 export const JOINER_PREFIX_LENGTHS = [80, 60, 40, 30, 20, 15, 12, 10, 8, 6] as const;
 
-// Includes Arabic comma (،), semicolon (؛), full stop (.), etc.
-export const STOP_CHARACTERS = /[\s\n.,;!?؛،۔]/;
+// Includes Arabic comma (،), semicolon (؛), full stop (.), Quranic marks (۝۞), etc.
+export const STOP_CHARACTERS = /[\s\n.,;!?؛،۔۝۞]/;
 
 /**
  * Buffer size for fuzzy searching around expected boundary positions (characters).
