@@ -9,6 +9,7 @@ import type { PageMap, SplitPoint } from '../types/segmenter.js';
 import { isPageExcluded } from './breakpoint-utils.js';
 import { buildRuleDebugPatch, mergeDebugIntoMeta } from './debug-meta.js';
 import {
+    extractDebugIndex,
     extractNamedCaptures,
     filterByConstraints,
     getLastPositionalCapture,
@@ -66,12 +67,15 @@ const passesRuleConstraints = (rule: SplitRule, pageId: number) =>
 
 const createSplitPointFromMatch = (match: RegExpExecArray, rule: SplitRule, ruleInfo: RuleRegexInfo): SplitPoint => {
     const namedCaptures = extractNamedCapturesForRule(match.groups, ruleInfo.captureNames, ruleInfo.prefix);
+    const wordIndex = extractDebugIndex(match.groups, '_r');
+
     return {
         capturedContent: undefined,
         contentStartOffset: buildContentOffsets(match, ruleInfo).contentStartOffset,
         index: (rule.split ?? 'at') === 'at' ? match.index : match.index + match[0].length,
         meta: rule.meta,
         namedCaptures: Object.keys(namedCaptures).length > 0 ? namedCaptures : undefined,
+        wordIndex,
     };
 };
 
@@ -156,6 +160,7 @@ export const processStandaloneRule = (
                 index: (rule.split ?? 'at') === 'at' ? m.start : m.end,
                 meta: rule.meta,
                 namedCaptures: m.namedCaptures,
+                wordIndex: m.wordIndex,
             };
         });
 
@@ -172,11 +177,14 @@ const findMatchesInContent = (content: string, regex: RegExp, usesCapture: boole
     let m = regex.exec(content);
 
     while (m !== null) {
+        const wordIndex = extractDebugIndex(m.groups, '_r');
+
         matches.push({
             captured: usesCapture ? getLastPositionalCapture(m) : undefined,
             end: m.index + m[0].length,
             namedCaptures: extractNamedCaptures(m.groups, captureNames),
             start: m.index,
+            wordIndex,
         });
         if (m[0].length === 0) {
             regex.lastIndex++;
@@ -204,14 +212,16 @@ export const applyOccurrenceFilter = (
 
         const filtered =
             rule.occurrence === 'first' ? [points[0]] : rule.occurrence === 'last' ? [points.at(-1)!] : points;
-        const debugPatch = debugMetaKey ? buildRuleDebugPatch(index, rule) : null;
 
         result.push(
-            ...filtered.map((p) => ({
-                ...p,
-                meta: debugMetaKey ? mergeDebugIntoMeta(p.meta, debugMetaKey, debugPatch!) : p.meta,
-                ruleIndex: index,
-            })),
+            ...filtered.map((p) => {
+                const debugPatch = debugMetaKey ? buildRuleDebugPatch(index, rule, p.wordIndex) : null;
+                return {
+                    ...p,
+                    meta: debugMetaKey ? mergeDebugIntoMeta(p.meta, debugMetaKey, debugPatch!) : p.meta,
+                    ruleIndex: index,
+                };
+            }),
         );
     });
     return result;

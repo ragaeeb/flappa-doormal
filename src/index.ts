@@ -26,6 +26,7 @@ export type { MarkerRecoveryReport, MarkerRecoveryRun, MarkerRecoverySelector } 
 export { recoverMistakenLineStartsAfterMarkers, recoverMistakenMarkersForRuns } from './recovery.js';
 export type { PatternProcessor } from './segmentation/breakpoint-utils.js';
 export { escapeWordsOutsideTokens } from './segmentation/breakpoint-utils.js';
+export { getDebugReason, getSegmentDebugReason } from './segmentation/debug-meta.js';
 export type {
     RuleValidationResult,
     ValidationIssue,

@@ -109,6 +109,8 @@ describe('Build Exports Validation', () => {
         // Utils
         expect(flappa.escapeRegex).toBeFunction();
         expect(flappa.escapeTemplateBrackets).toBeFunction();
+        expect(flappa.getDebugReason).toBeFunction();
+        expect(flappa.getSegmentDebugReason).toBeFunction();
         expect(flappa.makeDiacriticInsensitive).toBeFunction();
 
         // Validation

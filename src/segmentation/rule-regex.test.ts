@@ -119,7 +119,9 @@ describe('rule-regex', () => {
             // {{raqms}} is not a fuzzy-default token
             const rr = buildRuleRegex({ lineStartsWith: ['{{raqms}}'], split: 'at' } as never);
             // Pattern should be exact Unicode range, not fuzzy-expanded (with zero-width prefix)
-            expect(rr.regex.source).toBe('^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:[\\u0660-\\u0669]+)');
+            expect(rr.regex.source).toBe(
+                '^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:(?<_r0>[\\u0660-\\u0669]+))',
+            );
         });
     });
 

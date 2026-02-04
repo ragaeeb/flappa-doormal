@@ -11,6 +11,15 @@ import {
     STOP_CHARACTERS,
     WINDOW_PREFIX_LENGTHS,
 } from './breakpoint-constants.js';
+import { extractDebugIndex } from './match-utils.js';
+
+export type BreakpointMatch = {
+    breakPos: number;
+    breakpointIndex: number;
+    rule: BreakpointRule;
+    contentLengthSplit?: { maxContentLength: number; reason: 'whitespace' | 'unicode_boundary' };
+    wordIndex?: number;
+};
 
 /**
  * Escapes regex metacharacters outside of `{{token}}` delimiters.
@@ -225,23 +234,33 @@ export type PatternProcessor = (pattern: string) => string;
  * Builds regex source from words array.
  * Words are escaped, processed, sorted by length, and joined with alternation.
  */
-const buildWordsRegex = (words: string[], processPattern: PatternProcessor): string | null => {
+export const buildWordsRegex = (words: string[], processPattern: PatternProcessor): string | null => {
     const processed = words
-        // Use trimStart() to preserve trailing whitespace for whole-word matching
-        // e.g., 'بل ' (with trailing space) should match only the standalone word,
-        // not words like 'بلغ' that start with 'بل'
-        .map((w) => w.trimStart())
-        .filter((w) => w.length > 0)
-        .map((w) => processPattern(escapeWordsOutsideTokens(w)));
+        .map((w, i) => ({ originalIndex: i, w: w.trimStart() }))
+        .filter(({ w }) => w.length > 0)
+        .map(({ w, originalIndex }) => ({
+            originalIndex,
+            pattern: processPattern(escapeWordsOutsideTokens(w)),
+        }));
 
-    const unique = [...new Set(processed)];
-    if (unique.length === 0) {
+    if (processed.length === 0) {
         return null;
     }
 
-    unique.sort((a, b) => b.length - a.length);
-    const alternatives = unique.map((w) => `(?:${w})`).join('|');
-    return `\\s+(?:${alternatives})`;
+    const seen = new Set<string>();
+    const unique: typeof processed = [];
+
+    for (const item of processed) {
+        if (!seen.has(item.pattern)) {
+            seen.add(item.pattern);
+            unique.push(item);
+        }
+    }
+
+    unique.sort((a, b) => b.pattern.length - a.pattern.length);
+
+    const alternatives = unique.map((item) => `(?<_w${item.originalIndex}>${item.pattern})`);
+    return `\\s+(?:${alternatives.join('|')})`;
 };
 
 /** Compiles skipWhen pattern to regex, or null if not present. */
@@ -1084,9 +1103,9 @@ export const findPatternBreakPosition = (
     regex: RegExp,
     prefer: 'longer' | 'shorter',
     splitAt = false,
-) => {
+): { pos: number; groups?: Record<string, string> } => {
     // Track last valid match for 'longer' preference
-    let last: { index: number; length: number } | undefined;
+    let last: { index: number; length: number; groups?: Record<string, string> } | undefined;
 
     for (const m of windowContent.matchAll(regex)) {
         const idx = m.index ?? -1;
@@ -1105,20 +1124,21 @@ export const findPatternBreakPosition = (
             continue;
         }
 
-        last = { index: idx, length: len };
+        last = { groups: m.groups, index: idx, length: len };
 
         // Early return for 'shorter' (first valid match)
         if (prefer === 'shorter') {
-            return pos;
+            return { groups: m.groups, pos };
         }
     }
 
     if (!last) {
-        return -1;
+        return { pos: -1 };
     }
 
     // For 'longer', use last valid match
-    return splitAt ? last.index : last.index + last.length;
+    const finalPos = splitAt ? last.index : last.index + last.length;
+    return { groups: last.groups, pos: finalPos };
 };
 
 /**
@@ -1258,9 +1278,11 @@ const checkBreakpointMatch = (
 
     // Find matches within window
     const windowContent = remainingContent.slice(0, Math.min(windowEndPosition, remainingContent.length));
-    const breakPos = findPatternBreakPosition(windowContent, regex, prefer, bpCtx.splitAt);
+    const { pos: breakPos, groups } = findPatternBreakPosition(windowContent, regex, prefer, bpCtx.splitAt);
+
     if (breakPos > 0) {
-        return { breakPos, breakpointIndex: i, rule };
+        const wordIndex = extractDebugIndex(groups, '_w');
+        return { breakPos, breakpointIndex: i, rule, wordIndex };
     }
 
     return null;
@@ -1285,7 +1307,7 @@ export const findBreakPosition = (
     windowEndPosition: number,
     ctx: BreakpointContext,
     maxContentLength?: number,
-) => {
+): BreakpointMatch | null => {
     const { expandedBreakpoints } = ctx;
 
     for (let i = 0; i < expandedBreakpoints.length; i++) {
