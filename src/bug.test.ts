@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { segmentPages } from './index';
+import { segmentPages, validateSegments } from './index';
 
 describe('bug', () => {
     it('should not merge the pages due to prioritizing newline characters over other whitespace', async () => {
@@ -16,7 +16,6 @@ describe('bug', () => {
 
         const segments = segmentPages(pages, {
             breakpoints: [''],
-            //logger: console,
             maxPages: 0,
         } as any);
 
@@ -24,6 +23,44 @@ describe('bug', () => {
         expect(segments[0].content).toEndWith('نعم .');
         expect(segments[1].content).toStartWith('امرأة تسأل عن والدها');
         expect(segments[1].content).toEndWith('تعالى - .');
+    });
+
+    it('should keep per-page boundaries when split starts mid-page', async () => {
+        const pages = [
+            {
+                content: `noise
+START second
+filler
+START second
+${'a'.repeat(200)}`,
+                id: 1,
+            },
+            {
+                content: `page2 ${'b'.repeat(200)}`,
+                id: 2,
+            },
+            {
+                content: `page3 ${'c'.repeat(200)}`,
+                id: 3,
+            },
+        ];
+
+        const options = {
+            breakpoints: [''],
+            maxPages: 0,
+            rules: [
+                {
+                    lineStartsWith: ['START second'],
+                },
+            ],
+        } as any;
+
+        const segments = segmentPages(pages, options);
+        const validation = validateSegments(pages, options, segments);
+
+        expect(validation.ok).toBe(true);
+        expect(segments.some((s) => s.from === 2)).toBe(true);
+        expect(segments.some((s) => s.from === 3)).toBe(true);
     });
 
     it('should not merge the pages', async () => {
@@ -77,5 +114,37 @@ describe('bug', () => {
         } as any);
 
         expect(segments.find((s) => s.from === 142198)!.content).toEndWith('ابن تيمية');
+    });
+
+    // Reproduces bug where FastPath logic in buildBoundaryPositions causes incorrect
+    // boundary calculations when a large segment starts mid-page (offset drift).
+    it('repro_1000_pages_drift', () => {
+        const pages: any[] = [];
+        // Page 1 has content that will be split mid-page
+        pages.push({ content: 'Header\nContent', id: 1 });
+        // Add enough pages to trigger FAST_PATH_THRESHOLD (1000)
+        for (let i = 2; i <= 1005; i++) {
+            pages.push({ content: `Page${i}`, id: i });
+        }
+
+        const options: any = {
+            maxPages: 0,
+            rules: [{ lineStartsWith: ['Content'] }],
+        };
+        const segments = segmentPages(pages, options);
+
+        // Debug assertions to confirm we have the setup we expect
+        // Segment 0: "Header" (from Page 1, trimmed)
+        // Segment 1 onwards should be single pages.
+        // The problematic one is the "Content" part of Page 1, which starts a large chain.
+        // If FastPath is used, it might attribute subsequent pages incorrectly.
+
+        const report = validateSegments(pages, options, segments);
+        const violations = report.issues.filter((i) => i.type === 'max_pages_violation');
+
+        if (violations.length > 0) {
+            console.log('Violations found:', violations.slice(0, 3));
+        }
+        expect(violations).toHaveLength(0);
     });
 });

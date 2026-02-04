@@ -430,6 +430,90 @@ export const estimateStartOffsetInCurrentPage = (
     return 0;
 };
 
+const estimateStartOffsetInCurrentPageFromEnd = (
+    remainingContent: string,
+    currentFromIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+) => {
+    const currentPageData = normalizedPages.get(pageIds[currentFromIdx]);
+    if (!currentPageData) {
+        return 0;
+    }
+
+    const remPrefix = remainingContent.slice(0, 500).trimStart();
+    if (!remPrefix) {
+        return 0;
+    }
+
+    const maxNeedleLen = Math.min(30, remPrefix.length);
+    for (let len = maxNeedleLen; len >= 5; len -= 5) {
+        const needle = remPrefix.slice(0, len);
+        const idx = currentPageData.content.lastIndexOf(needle);
+        if (idx >= 0) {
+            return idx;
+        }
+    }
+
+    if (remPrefix.length >= 3) {
+        const needle = remPrefix.slice(0, 3);
+        const idx = currentPageData.content.lastIndexOf(needle);
+        if (idx >= 0) {
+            return idx;
+        }
+    }
+
+    return 0;
+};
+
+const selectStartOffsetInCurrentPage = (
+    segmentContent: string,
+    fromIdx: number,
+    toIdx: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+    cumulativeOffsets: number[],
+    logger?: Logger,
+) => {
+    const first = estimateStartOffsetInCurrentPage(segmentContent, fromIdx, pageIds, normalizedPages);
+    const last = estimateStartOffsetInCurrentPageFromEnd(segmentContent, fromIdx, pageIds, normalizedPages);
+    const candidates = [...new Set([first, last])];
+    if (candidates.length <= 1 || fromIdx + 1 > toIdx) {
+        return candidates[0] ?? 0;
+    }
+
+    const rawBoundary =
+        cumulativeOffsets[fromIdx + 1] !== undefined && cumulativeOffsets[fromIdx] !== undefined
+            ? Math.max(0, cumulativeOffsets[fromIdx + 1] - cumulativeOffsets[fromIdx])
+            : undefined;
+    if (rawBoundary === undefined) {
+        return candidates[0] ?? 0;
+    }
+
+    let best = candidates[0] ?? 0;
+    let bestScore = Number.POSITIVE_INFINITY;
+    for (const candidate of candidates) {
+        const expectedBoundary = Math.max(0, rawBoundary - candidate);
+        const pos = findPageStartNearExpectedBoundary(
+            segmentContent,
+            fromIdx + 1,
+            expectedBoundary,
+            pageIds,
+            normalizedPages,
+            logger,
+        );
+        if (pos > 0) {
+            const score = Math.abs(pos - expectedBoundary);
+            if (score < bestScore) {
+                bestScore = score;
+                best = candidate;
+            }
+        }
+    }
+
+    return best;
+};
+
 /**
  * Attempts to find the start position of a target page within remainingContent,
  * anchored near an expected boundary position to reduce collisions.
@@ -533,6 +617,38 @@ const selectBestAnchor = (candidates: AnchorCandidate[], expectedBoundary: numbe
         const currScore = Math.abs(curr.pos - expectedBoundary) + (curr.isNewline ? 0 : NON_NEWLINE_PENALTY);
         return currScore < bestScore ? curr : best;
     });
+};
+
+/**
+ * Finds the start position of a target page after a minimum position.
+ * Used to avoid duplicate earlier matches when content repeats.
+ */
+const findPageStartAfterPosition = (
+    remainingContent: string,
+    targetPageIdx: number,
+    minPos: number,
+    pageIds: number[],
+    normalizedPages: Map<number, NormalizedPage>,
+) => {
+    const targetPageData = normalizedPages.get(pageIds[targetPageIdx]);
+    if (!targetPageData) {
+        return -1;
+    }
+
+    const targetTrimmed = targetPageData.content.trimStart();
+    for (const len of WINDOW_PREFIX_LENGTHS) {
+        const prefix = targetTrimmed.slice(0, Math.min(len, targetTrimmed.length)).trim();
+        if (!prefix) {
+            continue;
+        }
+        const candidates = findAnchorCandidates(remainingContent, prefix, Math.max(0, minPos), remainingContent.length);
+        const after = candidates.filter((c) => c.pos > minPos);
+        if (after.length > 0) {
+            return selectBestAnchor(after, minPos).pos;
+        }
+    }
+
+    return -1;
 };
 
 const buildBoundaryPositionsFastPath = (
@@ -654,7 +770,15 @@ const buildBoundaryPositionsAccurate = (
         pageCount,
         toIdx,
     });
-    let startOffsetInFromPage = estimateStartOffsetInCurrentPage(segmentContent, fromIdx, pageIds, normalizedPages);
+    let startOffsetInFromPage = selectStartOffsetInCurrentPage(
+        segmentContent,
+        fromIdx,
+        toIdx,
+        pageIds,
+        normalizedPages,
+        cumulativeOffsets,
+        logger,
+    );
     let didInferStartOffset = false;
 
     for (let i = fromIdx + 1; i <= toIdx; i++) {
@@ -676,8 +800,15 @@ const buildBoundaryPositionsAccurate = (
         didInferStartOffset = didInferStartOffset || resolved.didInferStartOffset;
 
         const prevBoundary = boundaryPositions[boundaryPositions.length - 1];
-        if (isBoundaryPositionValid(resolved.pos, prevBoundary, resolved.expectedBoundary, segmentContent.length)) {
-            boundaryPositions.push(resolved.pos);
+        let resolvedPos = resolved.pos;
+        if (resolvedPos <= prevBoundary) {
+            const afterPos = findPageStartAfterPosition(segmentContent, i, prevBoundary + 1, pageIds, normalizedPages);
+            if (afterPos > prevBoundary) {
+                resolvedPos = afterPos;
+            }
+        }
+        if (isBoundaryPositionValid(resolvedPos, prevBoundary, resolved.expectedBoundary, segmentContent.length)) {
+            boundaryPositions.push(resolvedPos);
         } else {
             // Fallback for whitespace-only pages, identical content, or stripped markers.
             // Ensure estimate is strictly > prevBoundary to prevent duplicate zero-length
@@ -732,7 +863,8 @@ export const buildBoundaryPositions = (
     // The expensive string-search verification is only useful when structural rules
     // have stripped content causing offset drift. For large books with simple breakpoints,
     // the precomputed offsets are accurate and O(n) vs O(n×m) string searching.
-    if (pageCount >= FAST_PATH_THRESHOLD) {
+    const expectedLength = (cumulativeOffsets[toIdx + 1] ?? 0) - (cumulativeOffsets[fromIdx] ?? 0);
+    if (pageCount >= FAST_PATH_THRESHOLD && segmentContent.length === expectedLength) {
         return buildBoundaryPositionsFastPath(segmentContent, fromIdx, toIdx, pageCount, cumulativeOffsets, logger);
     }
 
