@@ -863,7 +863,8 @@ export const buildBoundaryPositions = (
     // The expensive string-search verification is only useful when structural rules
     // have stripped content causing offset drift. For large books with simple breakpoints,
     // the precomputed offsets are accurate and O(n) vs O(n×m) string searching.
-    if (pageCount >= FAST_PATH_THRESHOLD) {
+    const expectedLength = (cumulativeOffsets[toIdx + 1] ?? 0) - (cumulativeOffsets[fromIdx] ?? 0);
+    if (pageCount >= FAST_PATH_THRESHOLD && segmentContent.length === expectedLength) {
         return buildBoundaryPositionsFastPath(segmentContent, fromIdx, toIdx, pageCount, cumulativeOffsets, logger);
     }
 
