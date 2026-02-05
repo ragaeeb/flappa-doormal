@@ -1,6 +1,7 @@
 import './style.css';
 import {
     analyzeCommonLineStarts,
+    getSegmentDebugReason,
     type Page,
     type Segment,
     type SegmentationOptions,
@@ -57,9 +58,16 @@ const whitespaceSelect = document.getElementById('whitespace') as HTMLSelectElem
 
 // Global options
 const maxPagesInput = document.getElementById('max-pages') as HTMLInputElement;
+const maxContentLengthInput = document.getElementById('max-content-length') as HTMLInputElement;
 const breakpointsTextarea = document.getElementById('breakpoints') as HTMLTextAreaElement;
 const preferSelect = document.getElementById('prefer') as HTMLSelectElement;
 const pageJoinerSelect = document.getElementById('page-joiner') as HTMLSelectElement;
+const debugToggle = document.getElementById('debug-toggle') as HTMLInputElement;
+
+// Preprocess
+const preRemoveZW = document.getElementById('pre-remove-zw') as HTMLInputElement;
+const preCondenseEllipsis = document.getElementById('pre-condense-ellipsis') as HTMLInputElement;
+const preFixWaw = document.getElementById('pre-fix-waw') as HTMLInputElement;
 
 // ============================================
 // Page Management
@@ -282,6 +290,7 @@ function buildAllRules(): SplitRule[] {
 
 function buildOptions(): SegmentationOptions {
     const options: SegmentationOptions = {
+        debug: debugToggle.checked,
         pageJoiner: pageJoinerSelect.value as 'space' | 'newline',
         prefer: preferSelect.value as 'longer' | 'shorter',
         rules: buildAllRules(),
@@ -289,6 +298,25 @@ function buildOptions(): SegmentationOptions {
 
     if (maxPagesInput.value) {
         options.maxPages = parseInt(maxPagesInput.value);
+    }
+
+    if (maxContentLengthInput.value) {
+        options.maxContentLength = parseInt(maxContentLengthInput.value);
+    }
+
+    const preprocess: any[] = [];
+    if (preRemoveZW.checked) {
+        preprocess.push('removeZeroWidth');
+    }
+    if (preCondenseEllipsis.checked) {
+        preprocess.push('condenseEllipsis');
+    }
+    if (preFixWaw.checked) {
+        preprocess.push('fixTrailingWaw');
+    }
+
+    if (preprocess.length > 0) {
+        options.preprocess = preprocess;
     }
 
     // Parse breakpoints as newline-separated array
@@ -380,24 +408,38 @@ function renderSegments(segments: Segment[]): void {
 
     resultStats.textContent = `${segments.length} segment${segments.length !== 1 ? 's' : ''}`;
 
+    const table = document.createElement('table');
+    table.className = 'results-table';
+    table.innerHTML = `
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Pages</th>
+          <th>Debug Reason</th>
+          <th>Content</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    `;
+    const tbody = table.querySelector('tbody')!;
+
     segments.forEach((segment, index) => {
-        const item = document.createElement('div');
-        item.className = 'result-item';
+        const row = document.createElement('tr');
 
         const pagesText = segment.to ? `${segment.from}–${segment.to}` : `${segment.from}`;
-        const metaHtml = segment.meta ? `<div class="result-meta">${JSON.stringify(segment.meta)}</div>` : '';
+        const debugReason = getSegmentDebugReason(segment);
+        const content = escapeHtml(segment.content);
 
-        item.innerHTML = `
-      <div class="result-header">
-        <span class="result-index">#${index + 1}</span>
-        <span class="result-pages">p.${pagesText}</span>
-      </div>
-      ${metaHtml}
-      <div class="result-content">${escapeHtml(segment.content)}</div>
-    `;
-
-        resultsContainer.appendChild(item);
+        row.innerHTML = `
+            <td class="index-cell">${index + 1}</td>
+            <td class="pages-cell">${pagesText}</td>
+            <td class="debug-cell">${escapeHtml(debugReason)}</td>
+            <td class="content-cell">${content}</td>
+        `;
+        tbody.appendChild(row);
     });
+
+    resultsContainer.appendChild(table);
 }
 
 function escapeHtml(text: string): string {

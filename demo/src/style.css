@@ -818,3 +818,63 @@ textarea {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--color-text-muted);
 }
+
+/* ============================================
+   Results Table
+   ============================================ */
+.results-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+}
+
+.results-table th {
+    text-align: left;
+    padding: var(--spacing-sm);
+    background: var(--color-bg-tertiary);
+    border-bottom: 1px solid var(--color-border);
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    white-space: nowrap;
+}
+
+.results-table td {
+    padding: var(--spacing-sm);
+    border-bottom: 1px solid var(--color-border);
+    vertical-align: top;
+}
+
+.results-table tr:last-child td {
+    border-bottom: none;
+}
+
+.content-cell {
+    font-family: var(--font-arabic);
+    direction: rtl;
+    text-align: right;
+    max-width: 500px;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.debug-cell {
+    font-family: var(--font-mono);
+    color: var(--color-accent-blue);
+    font-size: 0.75rem;
+    white-space: pre-wrap;
+    max-width: 200px;
+}
+
+.pages-cell {
+    white-space: nowrap;
+    color: var(--color-text-muted);
+}
+
+.index-cell {
+    font-weight: 600;
+    color: var(--color-primary);
+    width: 40px;
+}
