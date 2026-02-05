@@ -457,8 +457,17 @@ const segments = segmentPages(pages, {
     info: (msg, data) => console.info(`[INFO] ${msg}`, data),
     warn: (msg, data) => console.warn(`[WARN] ${msg}`, data),
     error: (msg, data) => console.error(`[ERROR] ${msg}`, data),
+  logger: {
+    debug: (msg, data) => console.log(`[DEBUG] ${msg}`, data),
+    info: (msg, data) => console.info(`[INFO] ${msg}`, data),
+    warn: (msg, data) => console.warn(`[WARN] ${msg}`, data),
+    error: (msg, data) => console.error(`[ERROR] ${msg}`, data),
   }
 });
+
+// Helper to format debug reason
+// import { getSegmentDebugReason } from 'flappa-doormal';
+// console.log(getSegmentDebugReason(segments[0])); // "Rule #0 (lineStartsWith) [idx:2] (Matched: '{{naql}}')"
 ```
 
 #### Debug Metadata (`_flappa`)

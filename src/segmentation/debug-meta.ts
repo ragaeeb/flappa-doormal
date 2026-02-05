@@ -77,48 +77,91 @@ export const buildContentLengthDebugPatch = (
         maxContentLength,
         splitReason,
     },
-    contentLengthSplit: {
-        actualLength,
-        maxContentLength,
-        splitReason,
-    },
 });
+
+/**
+ * Options for formatting the debug reason.
+ */
+export type DebugReasonOptions = {
+    /**
+     * If true, returns a concise string representation.
+     * e.g. 'Rule: "Chapter"' instead of 'Rule #1 (lineStartsWith) [idx:0] (Matched: "Chapter")'
+     */
+    concise?: boolean;
+};
 
 /**
  * Helper to format the debug info into a human-readable string.
  * @param meta - The segment metadata object
+ * @param options - Formatting options
  */
-export const getDebugReason = (meta: Record<string, any> | undefined): string => {
+const formatRuleReason = (rule: any, concise?: boolean) => {
+    const { index, patternType, wordIndex, word } = rule;
+
+    if (concise) {
+        // "Rule: <value>" (value is word or patternType)
+        const val = word ? `"${word}"` : patternType;
+        return `Rule: ${val}`;
+    }
+
+    const wordInfo = word ? ` (Matched: "${word}")` : '';
+    const indexInfo = wordIndex !== undefined ? ` [idx:${wordIndex}]` : '';
+    return `Rule #${index} (${patternType})${indexInfo}${wordInfo}`;
+};
+
+const formatBreakpointReason = (breakpoint: any, concise?: boolean) => {
+    const { index, kind, pattern, wordIndex, word } = breakpoint;
+
+    if (kind === 'pageBoundary') {
+        return concise ? 'Breakpoint: <page-boundary>' : 'Page Boundary (Fallback)';
+    }
+
+    if (concise) {
+        // "Breakpoint: <value>" (value is word or pattern)
+        const val = word ? `"${word}"` : `"${pattern}"`;
+        return `Breakpoint: ${val}`;
+    }
+
+    // For words array matches
+    if (word) {
+        return `Breakpoint #${index} (Words) [idx:${wordIndex}] - "${word}"`;
+    }
+
+    // For standard patterns
+    return `Breakpoint #${index} (${kind}) - "${pattern}"`;
+};
+
+const formatContentLengthReason = (split: any, concise?: boolean) => {
+    const { maxContentLength, splitReason } = split;
+    if (concise) {
+        return `> ${maxContentLength} (${splitReason})`;
+    }
+    return `Safety Split (${splitReason}) > ${maxContentLength}`;
+};
+
+/**
+ * Helper to format the debug info into a human-readable string.
+ * @param meta - The segment metadata object
+ * @param options - Formatting options
+ */
+export const getDebugReason = (meta: Record<string, any> | undefined, options?: DebugReasonOptions) => {
     const debug = meta?._flappa;
     if (!debug) {
         return '-';
     }
 
+    const concise = options?.concise;
+
     if (debug.rule) {
-        const { index, patternType, wordIndex, word } = debug.rule;
-        const wordInfo = word ? ` (Matched: "${word}")` : '';
-        const indexInfo = wordIndex !== undefined ? ` [idx:${wordIndex}]` : '';
-        return `Rule #${index} (${patternType})${indexInfo}${wordInfo}`;
+        return formatRuleReason(debug.rule, concise);
     }
 
     if (debug.breakpoint) {
-        const { index, kind, pattern, wordIndex, word } = debug.breakpoint;
-        if (kind === 'pageBoundary') {
-            return 'Page Boundary (Fallback)';
-        }
-
-        // For words array matches
-        if (word) {
-            return `Breakpoint #${index} (Words) [idx:${wordIndex}] - "${word}"`;
-        }
-
-        // For standard patterns
-        return `Breakpoint #${index} (${kind}) - "${pattern}"`;
+        return formatBreakpointReason(debug.breakpoint, concise);
     }
 
     if (debug.contentLengthSplit) {
-        const { maxContentLength, splitReason } = debug.contentLengthSplit;
-        return `Safety Split (${splitReason}) > ${maxContentLength}`;
+        return formatContentLengthReason(debug.contentLengthSplit, concise);
     }
 
     return 'Unknown';
@@ -127,5 +170,8 @@ export const getDebugReason = (meta: Record<string, any> | undefined): string =>
 /**
  * Convenience helper to get the formatted debug reason directly from a segment.
  * @param segment - The segment object
+ * @param options - Formatting options
  */
-export const getSegmentDebugReason = (segment: Segment) => getDebugReason(segment.meta);
+export const getSegmentDebugReason = (segment: Segment, options?: DebugReasonOptions) => {
+    return getDebugReason(segment.meta, options);
+};
