@@ -38,6 +38,11 @@ export type MatchResult = {
      * { num: '٦٦٩٦' }
      */
     namedCaptures?: Record<string, string>;
+
+    /**
+     * Optional index of the word from a words/patterns array that caused the match.
+     */
+    wordIndex?: number;
 };
 
 /**
@@ -215,3 +220,18 @@ export const filterByOccurrence = (matches: MatchResult[], occurrence?: 'first' 
  */
 export const anyRuleAllowsId = (rules: Pick<SplitRule, 'min' | 'max'>[], pageId: number) =>
     rules.some((r) => (r.min === undefined || pageId >= r.min) && (r.max === undefined || pageId <= r.max));
+
+export const extractDebugIndex = (groups: Record<string, string> | undefined, prefix: string): number | undefined => {
+    if (!groups) {
+        return undefined;
+    }
+    for (const key in groups) {
+        if (key.startsWith(prefix) && groups[key] !== undefined) {
+            const idx = Number.parseInt(key.slice(prefix.length), 10);
+            if (!Number.isNaN(idx)) {
+                return idx;
+            }
+        }
+    }
+    return undefined;
+};

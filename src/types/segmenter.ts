@@ -50,6 +50,8 @@ export type SplitPoint = {
     capturedContent?: string;
     /** Named captures from `{{token:name}}` patterns */
     namedCaptures?: Record<string, string>;
+    /** Optional index of the word from a words/patterns array that caused the match */
+    wordIndex?: number;
     /**
      * Offset from index where content actually starts (for lineStartsAfter).
      * If set, the segment content starts at `index + contentStartOffset`.

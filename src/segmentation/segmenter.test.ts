@@ -776,7 +776,12 @@ describe('segmenter', () => {
 
                 expect(result).toHaveLength(2);
                 expect(result[0].meta?.type).toBe('chapter');
-                expect((result[0].meta as any)?._flappa?.rule).toEqual({ index: 0, patternType: 'lineStartsWith' });
+                expect((result[0].meta as any)?._flappa?.rule).toMatchObject({
+                    index: 0,
+                    patternType: 'lineStartsWith',
+                    word: '## ',
+                    wordIndex: 0,
+                });
             });
 
             it('should merge provenance into existing meta._flappa object', () => {
@@ -789,7 +794,12 @@ describe('segmenter', () => {
 
                 expect(result).toHaveLength(1);
                 expect((result[0].meta as any)?._flappa?.custom).toBe(true);
-                expect((result[0].meta as any)?._flappa?.rule).toEqual({ index: 0, patternType: 'lineStartsWith' });
+                expect((result[0].meta as any)?._flappa?.rule).toMatchObject({
+                    index: 0,
+                    patternType: 'lineStartsWith',
+                    word: '## ',
+                    wordIndex: 0,
+                });
             });
 
             it('should override non-object meta._flappa when debug is enabled', () => {
@@ -800,7 +810,12 @@ describe('segmenter', () => {
 
                 expect(result).toHaveLength(1);
                 expect(typeof (result[0].meta as any)?._flappa).toBe('object');
-                expect((result[0].meta as any)?._flappa?.rule).toEqual({ index: 0, patternType: 'lineStartsWith' });
+                expect((result[0].meta as any)?._flappa?.rule).toMatchObject({
+                    index: 0,
+                    patternType: 'lineStartsWith',
+                    word: '## ',
+                    wordIndex: 0,
+                });
             });
 
             it('should attach breakpoint provenance when breakpoints split a fallback segment', () => {
@@ -829,11 +844,21 @@ describe('segmenter', () => {
 
                 // First segment triggered by rule 0 (chapter)
                 expect(result[0].meta?.type).toBe('chapter');
-                expect((result[0].meta as any)?._flappa?.rule).toEqual({ index: 0, patternType: 'lineStartsWith' });
+                expect((result[0].meta as any)?._flappa?.rule).toMatchObject({
+                    index: 0,
+                    patternType: 'lineStartsWith',
+                    word: '## ',
+                    wordIndex: 0,
+                });
 
                 // Second segment triggered by rule 1 (section)
                 expect(result[1].meta?.type).toBe('section');
-                expect((result[1].meta as any)?._flappa?.rule).toEqual({ index: 1, patternType: 'lineStartsWith' });
+                expect((result[1].meta as any)?._flappa?.rule).toMatchObject({
+                    index: 1,
+                    patternType: 'lineStartsWith',
+                    word: '--- ',
+                    wordIndex: 0,
+                });
             });
 
             it('should show different patternTypes for different rule types', () => {

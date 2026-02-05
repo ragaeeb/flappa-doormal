@@ -56,7 +56,8 @@ export const hasCapturingGroup = (pattern: string) => /\((?!\?)/.test(pattern);
  * extractNamedCaptureNames('^(?<a>\\d+)(?<b>\\w+)') // ['a', 'b']
  * extractNamedCaptureNames('^\\d+') // []
  */
-export const extractNamedCaptureNames = (pattern: string) => [...pattern.matchAll(/\(\?<([^>]+)>/g)].map((m) => m[1]);
+export const extractNamedCaptureNames = (pattern: string) =>
+    [...pattern.matchAll(/\(\?<([^>]+)>/g)].map((m) => m[1]).filter((n) => !n.startsWith('_r') && !n.startsWith('_w'));
 
 /**
  * Safely compiles a regex pattern, throwing a helpful error if invalid.
@@ -99,25 +100,28 @@ export const processBreakpointPattern = (pattern: string) => {
 
 export const buildLineStartsAfterRegexSource = (patterns: string[], fuzzy: boolean, capturePrefix?: string) => {
     const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
+    const alternatives = processed.map((p, i) => `(?<_r${i}>${p.pattern})`).join('|');
     return {
         captureNames: processed.flatMap((p) => p.captureNames),
-        regex: `^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:${processed.map((p) => p.pattern).join('|')})${capturePrefix ? `(?<${capturePrefix}__content>.*)` : '(.*)'}`,
+        regex: `^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:${alternatives})${capturePrefix ? `(?<${capturePrefix}__content>.*)` : '(.*)'}`,
     };
 };
 
 export const buildLineStartsWithRegexSource = (patterns: string[], fuzzy: boolean, capturePrefix?: string) => {
     const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
+    const alternatives = processed.map((p, i) => `(?<_r${i}>${p.pattern})`).join('|');
     return {
         captureNames: processed.flatMap((p) => p.captureNames),
-        regex: `^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:${processed.map((p) => p.pattern).join('|')})`,
+        regex: `^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:${alternatives})`,
     };
 };
 
 export const buildLineEndsWithRegexSource = (patterns: string[], fuzzy: boolean, capturePrefix?: string) => {
     const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
+    const alternatives = processed.map((p, i) => `(?<_r${i}>${p.pattern})`).join('|');
     return {
         captureNames: processed.flatMap((p) => p.captureNames),
-        regex: `(?:${processed.map((p) => p.pattern).join('|')})$`,
+        regex: `(?:${alternatives})$`,
     };
 };
 

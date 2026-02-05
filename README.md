@@ -475,7 +475,9 @@ If a segment was created by one of your `rules`:
     "_flappa": {
       "rule": {
         "index": 0,                // Index of the rule in your rules array
-        "patternType": "lineStartsWith" // The type of pattern that matched
+        "patternType": "lineStartsWith", // The type of pattern that matched
+        "wordIndex": 2,            // Index of the specific pattern in the array
+        "word": "{{naql}}"         // The specific pattern string that matched
       }
     }
   }
@@ -490,8 +492,10 @@ If a segment was created by a `breakpoint` pattern (e.g. because it exceeded `ma
     "_flappa": {
       "breakpoint": {
         "index": 0,         // Index of the breakpoint in your array
-        "pattern": "\\.",   // The pattern that matched
-        "kind": "pattern"   // "pattern" or "regex"
+        "pattern": "\\.",   // The pattern (or `regex`) that matched
+        "kind": "pattern",  // "pattern", "regex", or "pageBoundary"
+        "wordIndex": 1,     // Index in `words` array (if using `words` field)
+        "word": "ثم "       // The specific word that matched
       }
     }
   }

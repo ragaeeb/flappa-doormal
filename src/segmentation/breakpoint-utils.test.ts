@@ -301,8 +301,8 @@ describe('breakpoint-utils', () => {
             const result = expandBreakpoints([{ words: ['ثم', 'ثم إن'] }], identityProcessor);
             // Longer word should come first in alternation
             const source = result[0].regex?.source ?? '';
-            const longPos = source.indexOf('ثم إن');
-            const shortPos = source.indexOf('(?:ثم)');
+            const longPos = source.indexOf('(?<_w1>ثم إن)');
+            const shortPos = source.indexOf('(?<_w0>ثم)');
             // "ثم إن" should appear before standalone "ثم"
             expect(longPos).toBeLessThan(shortPos);
         });
@@ -397,8 +397,8 @@ describe('breakpoint-utils', () => {
             const result = expandBreakpoints([{ words: ['  word'] }], identityProcessor);
             const source = result[0].regex?.source ?? '';
             // The pattern should NOT have leading whitespace before the word
-            expect(source).toContain('(?:word)'); // Pattern should be just 'word'
-            expect(source).not.toMatch(/\(\?:\s+word\)/); // No leading spaces in group
+            expect(source).toContain('(?<_w0>word)'); // Pattern should be just 'word'
+            expect(source).not.toMatch(/\(\?<_w0>\s+word\)/); // No leading spaces in group
 
             const regex = result[0].regex!;
             expect(' word'.match(regex)).not.toBeNull();
@@ -466,8 +466,8 @@ describe('breakpoint-utils', () => {
             const result = expandBreakpoints([{ words: ['ثم ', 'ثم إن'] }], identityProcessor);
             const source = result[0].regex?.source ?? '';
             // Longer word should come first in alternation
-            const longPos = source.indexOf('ثم إن');
-            const shortPos = source.indexOf('(?:ثم )');
+            const longPos = source.indexOf('(?<_w1>ثم إن)');
+            const shortPos = source.indexOf('(?<_w0>ثم )');
             expect(longPos).toBeLessThan(shortPos);
         });
 
@@ -535,94 +535,94 @@ describe('breakpoint-utils', () => {
         it('should find first match with shorter preference', () => {
             const regex = /\n\n/g;
             const result = findPatternBreakPosition('a\n\nb\n\nc', regex, 'shorter');
-            expect(result).toBe(3); // After first \n\n
+            expect(result.pos).toBe(3); // After first \n\n
         });
 
         it('should find last match with longer preference', () => {
             const regex = /\n\n/g;
             const result = findPatternBreakPosition('a\n\nb\n\nc', regex, 'longer');
-            expect(result).toBe(6); // After second \n\n
+            expect(result.pos).toBe(6); // After second \n\n
         });
 
         it('should return -1 when no matches', () => {
             const regex = /XXX/g;
-            expect(findPatternBreakPosition('No matches here', regex, 'shorter')).toBe(-1);
+            expect(findPatternBreakPosition('No matches here', regex, 'shorter').pos).toBe(-1);
         });
 
         describe('split behavior', () => {
             it('should return position AFTER match by default (splitAt=false)', () => {
                 const regex = /X/g;
                 const result = findPatternBreakPosition('aXb', regex, 'shorter', false);
-                expect(result).toBe(2); // After X (index 1 + length 1 = 2)
+                expect(result.pos).toBe(2); // After X (index 1 + length 1 = 2)
             });
 
             it('should return position AT match when splitAt=true', () => {
                 const regex = /X/g;
                 const result = findPatternBreakPosition('aXb', regex, 'shorter', true);
-                expect(result).toBe(1); // At X (index 1)
+                expect(result.pos).toBe(1); // At X (index 1)
             });
 
             it('should skip matches at position 0 with splitAt=true', () => {
                 const regex = /X/g;
                 // First X is at position 0, should skip and find second X at position 2
                 const result = findPatternBreakPosition('XaXb', regex, 'shorter', true);
-                expect(result).toBe(2); // At second X (index 2)
+                expect(result.pos).toBe(2); // At second X (index 2)
             });
 
             it('should allow matches at position 0 with splitAt=false (result is after match)', () => {
                 const regex = /X/g;
                 // First X at 0 produces position 1, which is valid
                 const result = findPatternBreakPosition('Xab', regex, 'shorter', false);
-                expect(result).toBe(1); // After X (index 0 + length 1 = 1)
+                expect(result.pos).toBe(1); // After X (index 0 + length 1 = 1)
             });
 
             it('should skip zero-length matches (lookahead patterns)', () => {
                 const regex = /(?=X)/g;
                 // Lookahead matches have length 0, should be skipped
                 const result = findPatternBreakPosition('aXb', regex, 'shorter', false);
-                expect(result).toBe(-1);
+                expect(result.pos).toBe(-1);
             });
 
             it('should skip zero-length matches with splitAt=true', () => {
                 const regex = /(?=X)/g;
                 const result = findPatternBreakPosition('aXb', regex, 'shorter', true);
-                expect(result).toBe(-1);
+                expect(result.pos).toBe(-1);
             });
 
             it('should select last valid match with prefer:longer and splitAt=true', () => {
                 const regex = /X/g;
                 const result = findPatternBreakPosition('aXbXc', regex, 'longer', true);
-                expect(result).toBe(3); // At last X (index 3)
+                expect(result.pos).toBe(3); // At last X (index 3)
             });
 
             it('should select first valid match with prefer:shorter and splitAt=true', () => {
                 const regex = /X/g;
                 const result = findPatternBreakPosition('aXbXc', regex, 'shorter', true);
-                expect(result).toBe(1); // At first X (index 1)
+                expect(result.pos).toBe(1); // At first X (index 1)
             });
 
             it('should return -1 when all matches are at position 0 with splitAt=true', () => {
                 const regex = /^X/g;
                 const result = findPatternBreakPosition('Xabc', regex, 'shorter', true);
-                expect(result).toBe(-1);
+                expect(result.pos).toBe(-1);
             });
 
             it('should return -1 when all matches are at position 0 with splitAt=true and prefer:longer', () => {
                 const regex = /^X/g;
                 const result = findPatternBreakPosition('Xabc', regex, 'longer', true);
-                expect(result).toBe(-1);
+                expect(result.pos).toBe(-1);
             });
 
             it('should return -1 when only zero-length matches exist', () => {
                 const regex = /^/g;
                 const result = findPatternBreakPosition('abc', regex, 'shorter', false);
-                expect(result).toBe(-1);
+                expect(result.pos).toBe(-1);
             });
 
             it('should return -1 for zero-length matches with prefer:longer', () => {
                 const regex = /(?=X)/g;
                 const result = findPatternBreakPosition('aXb', regex, 'longer', false);
-                expect(result).toBe(-1);
+                expect(result.pos).toBe(-1);
             });
         });
     });

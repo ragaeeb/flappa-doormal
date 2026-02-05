@@ -7,6 +7,7 @@ import {
     buildRuleRegex,
     buildTemplateRegexSource,
     compileRuleRegex,
+    extractNamedCaptureNames,
     hasCapturingGroup,
     processPattern,
 } from './rule-regex.js';
@@ -26,6 +27,20 @@ describe('rule-regex', () => {
     describe('compileRuleRegex', () => {
         it('should throw helpful error for invalid regex', () => {
             expect(() => compileRuleRegex('(unclosed')).toThrow(/Invalid regex pattern/);
+        });
+    });
+
+    describe('extractNamedCaptureNames', () => {
+        it('should extract named capture groups', () => {
+            expect(extractNamedCaptureNames('^(?<num>\\d+)')).toEqual(['num']);
+        });
+
+        it('should allow names starting with underscore (e.g. _num)', () => {
+            expect(extractNamedCaptureNames('^(?<_num>\\d+)')).toEqual(['_num']);
+        });
+
+        it('should filter out internal reserved prefixes (_r, _w)', () => {
+            expect(extractNamedCaptureNames('(?<_r0>abc)(?<_w1>def)(?<valid>ghi)')).toEqual(['valid']);
         });
     });
 
@@ -119,7 +134,9 @@ describe('rule-regex', () => {
             // {{raqms}} is not a fuzzy-default token
             const rr = buildRuleRegex({ lineStartsWith: ['{{raqms}}'], split: 'at' } as never);
             // Pattern should be exact Unicode range, not fuzzy-expanded (with zero-width prefix)
-            expect(rr.regex.source).toBe('^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:[\\u0660-\\u0669]+)');
+            expect(rr.regex.source).toBe(
+                '^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:(?<_r0>[\\u0660-\\u0669]+))',
+            );
         });
     });
 

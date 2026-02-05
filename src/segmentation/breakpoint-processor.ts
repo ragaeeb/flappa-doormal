@@ -204,6 +204,7 @@ const findBreakOffsetForWindow = (
             breakpointIndex: patternMatch.breakpointIndex,
             breakpointRule: patternMatch.rule,
             contentLengthSplit: patternMatch.contentLengthSplit,
+            wordIndex: patternMatch.wordIndex,
         };
     }
 
@@ -446,7 +447,7 @@ const handleOversizedSegmentFit = (
     isFirstPiece: boolean,
     debugMetaKey: string | undefined,
     originalMeta: Segment['meta'] | undefined,
-    lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null,
+    lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule; wordIndex?: number } | null,
     result: Segment[],
 ) => {
     const remainingSpan = computeRemainingSpan(currentFromIdx, actualRemainingEndIdx, pageIds);
@@ -486,7 +487,7 @@ const getSegmentMetaWithDebug = (
     isFirstPiece: boolean,
     debugMetaKey: string | undefined,
     originalMeta: Segment['meta'] | undefined,
-    lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null,
+    lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule; wordIndex?: number } | null,
     contentLengthSplit?: { reason: 'whitespace' | 'unicode_boundary'; maxContentLength: number },
 ) => {
     const includeMeta = isFirstPiece || Boolean(debugMetaKey);
@@ -501,7 +502,11 @@ const getSegmentMetaWithDebug = (
             meta = mergeDebugIntoMeta(
                 meta,
                 debugMetaKey,
-                buildBreakpointDebugPatch(lastBreakpoint.breakpointIndex, lastBreakpoint.rule as any),
+                buildBreakpointDebugPatch(
+                    lastBreakpoint.breakpointIndex,
+                    lastBreakpoint.rule,
+                    lastBreakpoint.wordIndex,
+                ),
             );
         }
         if (contentLengthSplit) {
@@ -657,10 +662,14 @@ const ensureProgressingBreakOffset = (
 
 const updateLastBreakpointFromFound = (
     found: ReturnType<typeof findBreakOffsetForWindow>,
-    lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null,
+    lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule; wordIndex?: number } | null,
 ) => {
     if (found.breakpointIndex !== undefined && found.breakpointRule) {
-        return { breakpointIndex: found.breakpointIndex, rule: found.breakpointRule };
+        return {
+            breakpointIndex: found.breakpointIndex,
+            rule: found.breakpointRule,
+            wordIndex: found.wordIndex,
+        };
     }
     return lastBreakpoint;
 };
@@ -781,7 +790,7 @@ type CurrentPageFitResult =
           handled: true;
           newCursorPos: number;
           newFromIdx: number;
-          newLastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null;
+          newLastBreakpoint: { breakpointIndex: number; rule: BreakpointRule; wordIndex?: number } | null;
       }
     | { handled: false };
 
@@ -803,7 +812,7 @@ const tryHandleCurrentPageFit = (
     isFirstPiece: boolean,
     debugMetaKey: string | undefined,
     segmentMeta: Record<string, unknown> | undefined,
-    lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null,
+    lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule; wordIndex?: number } | null,
     result: Segment[],
 ): CurrentPageFitResult => {
     // Only applies when maxPages=0 AND maxContentLength is set AND we span multiple pages
@@ -833,7 +842,7 @@ const tryHandleCurrentPageFit = (
 
     // Find the page boundary breakpoint ('') for debug metadata
     const pageBoundaryIdx = expandedBreakpoints.findIndex((bp) => bp.regex === null);
-    const pageBoundaryBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null =
+    const pageBoundaryBreakpoint: { breakpointIndex: number; rule: BreakpointRule; wordIndex?: number } | null =
         pageBoundaryIdx >= 0
             ? { breakpointIndex: pageBoundaryIdx, rule: { pattern: '' } as BreakpointRule }
             : lastBreakpoint;
@@ -897,7 +906,7 @@ const processOversizedSegmentIterative = (
     let cursorPos = 0;
     let currentFromIdx = fromIdx;
     let isFirstPiece = true;
-    let lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule } | null = null;
+    let lastBreakpoint: { breakpointIndex: number; rule: BreakpointRule; wordIndex?: number } | null = null;
 
     const boundaryPositions = buildBoundaryPositions(
         fullContent,

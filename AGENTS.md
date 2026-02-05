@@ -318,11 +318,15 @@ The `_flappa` object contains different fields based on why the segment was prod
 **Rule-based Splits**
 - `rule.index` (number): The index of the rule in the `rules` array.
 - `rule.patternType` (string): The type of pattern used (e.g., `'lineStartsWith'`).
+- `rule.wordIndex` (number): Index of the matching pattern in the input string array.
+- `rule.word` (string): The specific pattern string that matched.
 
 **Breakpoint-based Splits**
 - `breakpoint.index` (number): The index of the breakpoint in the `breakpoints` array.
 - `breakpoint.pattern` (string): The pattern (or `regex`) that matched.
-- `breakpoint.kind` (string): Either `'pattern'` or `'regex'`.
+- `breakpoint.kind` (string): `'pattern'`, `'regex'`, or `'pageBoundary'`.
+- `breakpoint.wordIndex` (number): Index of the matching word if `words` field was used.
+- `breakpoint.word` (string): The specific word that matched (from `words` array).
 
 **Safety Fallback Splits (`maxContentLength`)**
 - `contentLengthSplit.maxContentLength` (number): The limit that was exceeded.
