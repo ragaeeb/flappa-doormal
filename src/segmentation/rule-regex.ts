@@ -57,7 +57,7 @@ export const hasCapturingGroup = (pattern: string) => /\((?!\?)/.test(pattern);
  * extractNamedCaptureNames('^\\d+') // []
  */
 export const extractNamedCaptureNames = (pattern: string) =>
-    [...pattern.matchAll(/\(\?<([^>]+)>/g)].map((m) => m[1]).filter((n) => !n.startsWith('_'));
+    [...pattern.matchAll(/\(\?<([^>]+)>/g)].map((m) => m[1]).filter((n) => !n.startsWith('_r') && !n.startsWith('_w'));
 
 /**
  * Safely compiles a regex pattern, throwing a helpful error if invalid.
