@@ -99,11 +99,22 @@ describe('validateRules', () => {
             expect(result[0]?.template?.type).toBe('empty_pattern');
         });
 
-        it('should not validate regex patterns (raw regex)', () => {
-            // regex patterns are raw, not templates - we skip them
+        it('should allow valid regex patterns', () => {
             const result = validateRules([{ regex: 'raqms \\d+', split: 'at' }]);
             expect(result).toHaveLength(1);
             expect(result[0]).toBeUndefined();
+        });
+
+        it('should reject invalid regex patterns', () => {
+            const result = validateRules([{ regex: '([unclosed', split: 'at' }]);
+            expect(result).toHaveLength(1);
+            expect(result[0]?.regex?.type).toBe('invalid_regex');
+        });
+
+        it('should reject empty regex patterns', () => {
+            const result = validateRules([{ regex: '', split: 'at' } as never]);
+            expect(result).toHaveLength(1);
+            expect(result[0]?.regex?.type).toBe('empty_pattern');
         });
     });
 
@@ -210,5 +221,13 @@ describe('formatValidationReport', () => {
     it('handles empty/undefined inputs safely', () => {
         expect(formatValidationReport([])).toEqual([]);
         expect(formatValidationReport([undefined, undefined])).toEqual([]);
+    });
+
+    it('formats invalid regex errors', () => {
+        const issues = validateRules([{ regex: '([unclosed', split: 'at' }]);
+        const report = formatValidationReport(issues);
+        expect(report).toHaveLength(1);
+        expect(report[0]).toContain('Rule 1, regex');
+        expect(report[0]).toContain('Invalid regex');
     });
 });

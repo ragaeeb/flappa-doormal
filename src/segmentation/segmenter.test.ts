@@ -27,6 +27,18 @@ describe('segmenter', () => {
             expect(result).toHaveLength(1);
             expect(result[0].meta).toEqual({ type: 'chapter' });
         });
+
+        it('should merge meta and named captures when two split points share an index', () => {
+            const splitPoints = [
+                { index: 10, meta: { type: 'chapter' }, namedCaptures: { lemma: 'عز' } },
+                { index: 10, meta: { source: 'dictionary' }, namedCaptures: { num: '١' } },
+            ];
+
+            const result = dedupeSplitPoints(splitPoints as never);
+            expect(result).toHaveLength(1);
+            expect(result[0].meta).toEqual({ source: 'dictionary', type: 'chapter' });
+            expect(result[0].namedCaptures).toEqual({ lemma: 'عز', num: '١' });
+        });
     });
 
     describe('ensureFallbackSegment', () => {
@@ -2620,16 +2632,12 @@ describe('segmenter', () => {
                 },
             ];
 
-            const stopWords = ['وقيل', 'ويقال', 'قال', 'العجاج', 'العجّاج', 'أخاك'];
-            const stopAlternation = stopWords.join('|');
-            const lemmaChar = '[ء-غف-ي][\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]*';
-            const regex =
-                `(?:(?<=^)|(?<=\\n)|(?<=\\s)(?=و(?:ال)?))` +
-                `(?!(?:${stopAlternation}):)` +
-                `(?<lemma>(?:و)?(?:ال)?${lemmaChar}(?:${lemmaChar}){1,10}):`;
-
             const segments = segmentPages(pages, {
-                rules: [{ regex, split: 'at' }],
+                rules: [
+                    createArabicDictionaryEntryRule({
+                        stopWords: ['وقيل', 'ويقال', 'قال', 'العجاج', 'العجّاج', 'أخاك'],
+                    }),
+                ],
             });
 
             expect(segments.map((segment) => segment.content.split(/\s+/u, 1)[0])).toEqual([

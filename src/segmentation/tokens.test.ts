@@ -21,15 +21,15 @@ describe('tokens', () => {
     describe('Arabic regex fragments', () => {
         it('should expose the shared Arabic base letter and mark classes', () => {
             expect(ARABIC_BASE_LETTER_CLASS).toBe('[ء-غف-ي]');
-            expect(ARABIC_MARKS_CLASS).toBe('[\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]');
+            expect(ARABIC_MARKS_CLASS).toBe('[\\u0610-\\u061A\\u0640\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]');
         });
 
         it('should expose reusable letter and word patterns with optional marks', () => {
             expect(ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN).toBe(
-                '[ء-غف-ي][\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]*',
+                '[ء-غف-ي][\\u0610-\\u061A\\u0640\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]*',
             );
             expect(ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN).toBe(
-                '(?:[ء-غف-ي][\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]*)+',
+                '(?:[ء-غف-ي][\\u0610-\\u061A\\u0640\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]*)+',
             );
         });
     });
@@ -242,6 +242,7 @@ describe('tokens', () => {
             const regex = templateToRegex('^{{harfs}}$');
 
             expect(regex?.test('ك ش ن')).toBeTrue();
+            expect(regex?.test('كَ شُ نِ')).toBeTrue();
             expect(regex?.test('هـ ث')).toBeTrue();
             expect(regex?.test('عنبر')).toBeFalse();
         });

@@ -22,6 +22,20 @@ describe('validateSegments', () => {
             expect(report.ok).toBe(true);
             expect(report.issues).toHaveLength(0);
         });
+
+        it('should keep empty pages in joined-content validation so offsets match the segmenter', () => {
+            const pages: Page[] = [
+                { content: 'A', id: 0 },
+                { content: '', id: 1 },
+                { content: 'B', id: 2 },
+            ];
+            const segments: Segment[] = [{ content: 'A  B', from: 0, to: 2 }];
+
+            const report = validateSegments(pages, { maxPages: 2, pageJoiner: 'space', rules: [] }, segments);
+
+            expect(report.ok).toBe(true);
+            expect(report.issues).toHaveLength(0);
+        });
     });
 
     describe('Page Existence (page_not_found)', () => {
@@ -461,7 +475,7 @@ describe('validateSegments', () => {
                 { content: 'Page 2', id: 2 },
             ];
             // Segment spanning empty page (Page 1)
-            const segments: Segment[] = [{ content: 'Page 0 Page 2', from: 0, to: 2 }];
+            const segments: Segment[] = [{ content: 'Page 0  Page 2', from: 0, to: 2 }];
             // "Page 0" + space + "" + space + "Page 2" -> "Page 0  Page 2" (double space)
             // Note: If joiner logic is smart, it might behave differently, but default joins with space.
             // Wait, buildJoinedContent adds joiner between pages.

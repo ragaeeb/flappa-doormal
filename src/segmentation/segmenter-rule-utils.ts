@@ -4,7 +4,7 @@ import { normalizeArabicForComparison } from '@/utils/textUtils.js';
 import { isPageExcluded } from './breakpoint-utils.js';
 import { compileFastFuzzyTokenRule, type FastFuzzyTokenRule, matchFastFuzzyTokenAt } from './fast-fuzzy-prefix.js';
 import { extractNamedCaptureNames, hasCapturingGroup, processPattern } from './rule-regex.js';
-import { ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN } from './tokens.js';
+import { ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN, shouldDefaultToFuzzy } from './tokens.js';
 
 export type FastFuzzyRule = {
     compiled: FastFuzzyTokenRule;
@@ -15,14 +15,18 @@ export type FastFuzzyRule = {
 
 export type PartitionedRules = {
     combinableRules: Array<{ rule: SplitRule; prefix: string; index: number }>;
-    standaloneRules: SplitRule[];
+    standaloneRules: Array<{ rule: SplitRule; index: number }>;
     fastFuzzyRules: FastFuzzyRule[];
 };
 
 const tryCompileFastFuzzyRule = (
     rule: SplitRule,
 ): { compiled: FastFuzzyTokenRule; kind: 'startsWith' | 'startsAfter' } | null => {
-    const fuzzy = (rule as { fuzzy?: boolean }).fuzzy;
+    const fuzzyCandidatePatterns = [
+        ...('lineStartsWith' in rule ? rule.lineStartsWith : []),
+        ...('lineStartsAfter' in rule ? rule.lineStartsAfter : []),
+    ];
+    const fuzzy = rule.fuzzy ?? shouldDefaultToFuzzy(fuzzyCandidatePatterns);
     if (!fuzzy) {
         return null;
     }
@@ -55,7 +59,7 @@ const isCombinableRule = (rule: SplitRule): boolean => {
 
 export const partitionRulesForMatching = (rules: SplitRule[]) => {
     const combinableRules: { rule: SplitRule; prefix: string; index: number }[] = [];
-    const standaloneRules: SplitRule[] = [];
+    const standaloneRules: Array<{ rule: SplitRule; index: number }> = [];
     const fastFuzzyRules: FastFuzzyRule[] = [];
 
     for (let index = 0; index < rules.length; index++) {
@@ -75,7 +79,7 @@ export const partitionRulesForMatching = (rules: SplitRule[]) => {
         if (isCombinableRule(rule)) {
             combinableRules.push({ index, prefix: `r${index}_`, rule });
         } else {
-            standaloneRules.push(rule);
+            standaloneRules.push({ index, rule });
         }
     }
 
@@ -84,7 +88,7 @@ export const partitionRulesForMatching = (rules: SplitRule[]) => {
 
 export type PageStartGuardChecker = (rule: SplitRule, ruleIndex: number, matchStart: number) => boolean;
 
-const STRONG_SENTENCE_TERMINATORS = /[.!?؟؛]$/u;
+const STRONG_SENTENCE_TERMINATORS = /[.!?؟؛۔…]$/u;
 const TRAILING_PAGE_WRAP_NOISE = /[\s\u0660-\u0669\d«»"“”'‘’()[\]{}<>]+$/u;
 const TRAILING_WORD_DELIMITERS = /[\s\u0660-\u0669\d«»"“”'‘’()[\]{}<>.,!?؟؛،:]+$/u;
 const ARABIC_WORD_REGEX = new RegExp(ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN, 'gu');
@@ -296,7 +300,7 @@ const processFastFuzzyMatchesAt = (
             continue;
         }
 
-        if (isPageStart && !passesPageStartGuard(ffRule.rule, ffRule.ruleIndex, lineStart)) {
+        if (!passesPageStartGuard(ffRule.rule, ffRule.ruleIndex, lineStart)) {
             continue;
         }
 

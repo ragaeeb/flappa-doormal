@@ -98,13 +98,37 @@ export const dedupeSplitPoints = (splitPoints: SplitPoint[]) => {
     const byIndex = new Map<number, SplitPoint>();
     for (const p of splitPoints) {
         const existing = byIndex.get(p.index);
-        const hasMoreInfo =
-            !existing ||
-            (p.contentStartOffset !== undefined && existing.contentStartOffset === undefined) ||
-            (p.meta !== undefined && existing.meta === undefined);
-        if (hasMoreInfo) {
+        if (!existing) {
             byIndex.set(p.index, p);
+            continue;
         }
+
+        const preferred =
+            (p.contentStartOffset !== undefined && existing.contentStartOffset === undefined) ||
+            (p.meta !== undefined && existing.meta === undefined)
+                ? p
+                : existing;
+        const fallback = preferred === p ? existing : p;
+
+        byIndex.set(p.index, {
+            ...fallback,
+            ...preferred,
+            contentStartOffset: preferred.contentStartOffset ?? fallback.contentStartOffset,
+            meta:
+                existing.meta || p.meta
+                    ? {
+                          ...(existing.meta ?? {}),
+                          ...(p.meta ?? {}),
+                      }
+                    : undefined,
+            namedCaptures:
+                existing.namedCaptures || p.namedCaptures
+                    ? {
+                          ...(existing.namedCaptures ?? {}),
+                          ...(p.namedCaptures ?? {}),
+                      }
+                    : undefined,
+        });
     }
     return [...byIndex.values()].sort((a, b) => a.index - b.index);
 };
@@ -177,10 +201,10 @@ const collectSplitPointsFromRules = (
         );
     }
 
-    for (const rule of standaloneRules) {
+    for (const { rule, index } of standaloneRules) {
         processStandaloneRule(
             rule,
-            rules.indexOf(rule),
+            index,
             matchContent,
             pageMap,
             passesPageStartGuard,

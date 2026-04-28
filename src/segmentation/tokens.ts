@@ -10,7 +10,7 @@ export const ARABIC_BASE_LETTER_CLASS = '[ء-غف-ي]';
 /**
  * Arabic combining marks / annotation signs used by low-level regex helpers.
  */
-export const ARABIC_MARKS_CLASS = '[\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]';
+export const ARABIC_MARKS_CLASS = '[\\u0610-\\u061A\\u0640\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]';
 
 /**
  * A single Arabic base letter followed by zero or more combining marks.
@@ -22,7 +22,7 @@ export const ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN = `${ARABIC_BASE_LETTER_C
  */
 export const ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN = `(?:${ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN})+`;
 
-const ARABIC_SPACED_CODE_ATOM = `[أ-ي]${ARABIC_MARKS_CLASS}*ـ?`;
+const ARABIC_SPACED_CODE_ATOM = `[أ-غف-ي]${ARABIC_MARKS_CLASS}*`;
 
 /**
  * Base token definitions mapping human-readable token names to regex patterns.

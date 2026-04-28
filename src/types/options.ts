@@ -252,7 +252,7 @@ export type SegmentationOptions = {
      * - `\\n` - Break at line breaks (useful for OCR content)
      * - `''` - Break at page boundary (always works)
      *
-     * Only applied to segments exceeding `maxPages`.
+     * Applied to segments that exceed `maxPages` or `maxContentLength`.
      *
      * @example
      * // Simple patterns (backward compatible)

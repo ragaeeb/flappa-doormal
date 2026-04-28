@@ -1,8 +1,8 @@
 import type { SplitRule } from '@/types/rules.js';
 import { makeDiacriticInsensitive, normalizeArabicForComparison } from '@/utils/textUtils.js';
-import { ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN } from './tokens.js';
+import { ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN, ARABIC_MARKS_CLASS } from './tokens.js';
 
-export type ArabicDictionaryEntryRuleOptions = {
+export interface ArabicDictionaryEntryRuleOptions {
     /**
      * Words that should never be treated as lemmas when followed by a colon.
      *
@@ -64,7 +64,7 @@ export type ArabicDictionaryEntryRuleOptions = {
      * Static metadata merged into matching segments.
      */
     meta?: Record<string, unknown>;
-};
+}
 
 const uniqueNormalizedWords = (words: string[]) => {
     const seen = new Set<string>();
@@ -90,11 +90,27 @@ const buildStopAlternation = (stopWords: string[]) => {
     return unique.map((word) => makeDiacriticInsensitive(word)).join('|');
 };
 
-const buildHeadwordBody = (unit: string, allowCommaSeparated: boolean) => {
-    if (!allowCommaSeparated) {
-        return unit;
+const buildHeadwordBody = ({
+    allowCommaSeparated,
+    colonPattern,
+    stopAlternation,
+    stopwordBody,
+    unit,
+}: {
+    allowCommaSeparated: boolean;
+    colonPattern: string;
+    stopAlternation: string;
+    stopwordBody: string;
+    unit: string;
+}) => {
+    if (!stopAlternation) {
+        return allowCommaSeparated ? `${unit}(?:\\s*[،,]\\s*${unit})*` : unit;
     }
-    return `${unit}(?:[،,]\\s*${unit})*`;
+
+    const stopwordBoundary = allowCommaSeparated ? `(?:\\s*[،,]\\s*|${colonPattern})` : colonPattern;
+    const guardedUnit = `(?!(?:${stopwordBody})${stopwordBoundary})${unit}`;
+
+    return allowCommaSeparated ? `${guardedUnit}(?:\\s*[،,]\\s*${guardedUnit})*` : guardedUnit;
 };
 
 const buildBalancedMarker = ({
@@ -115,7 +131,7 @@ const buildBalancedMarker = ({
         return `${withCapture}${colon}`;
     }
 
-    return `(?:\\(${withCapture}\\)|${withCapture})${colon}`;
+    return `(?:\\(\\s*${withCapture}\\s*\\)|${withCapture})${colon}`;
 };
 
 /**
@@ -167,20 +183,27 @@ export const createArabicDictionaryEntryRule = ({
         throw new Error(`createArabicDictionaryEntryRule: invalid captureName "${captureName}"`);
     }
 
+    const zeroWidthPrefix = '[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*';
+    const wawWithMarks = `و${ARABIC_MARKS_CLASS}*`;
+    const alWithMarks = `ا${ARABIC_MARKS_CLASS}*ل${ARABIC_MARKS_CLASS}*`;
     const stem = `${ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN}(?:${ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN}){${minLetters - 1},${maxLetters - 1}}`;
-    const lemmaUnit = `(?:و)?(?:ال)?${stem}`;
-    const lemmaBody = buildHeadwordBody(lemmaUnit, allowCommaSeparated);
+    const lemmaUnit = `(?:${wawWithMarks})?(?:${alWithMarks})?${stem}`;
     const stopAlternation = buildStopAlternation(stopWords);
-    const negativeLookahead = stopAlternation
-        ? `(?!(?:${buildBalancedMarker({
-              allowParenthesized,
-              allowWhitespaceBeforeColon,
-              headwordBody: stopAlternation,
-          })}))`
-        : '';
+    const colonPattern = allowWhitespaceBeforeColon ? '\\s*:' : ':';
+    const stopwordBody = stopAlternation ? `(?:${wawWithMarks})?(?:${stopAlternation})` : '';
+    const lemmaBody = buildHeadwordBody({
+        allowCommaSeparated,
+        colonPattern,
+        stopAlternation,
+        stopwordBody,
+        unit: lemmaUnit,
+    });
+    const lineStartBoundary = `(?:(?<=^)|(?<=\\n))${zeroWidthPrefix}`;
+    const midLineTrigger = allowParenthesized
+        ? `(?<=\\s)(?=(?:\\(\\s*)?${wawWithMarks}(?:${alWithMarks})?)`
+        : `(?<=\\s)(?=${wawWithMarks}(?:${alWithMarks})?)`;
     const regex =
-        `(?:(?<=^)|(?<=\\n)|(?<=\\s)(?=و(?:ال)?))` +
-        negativeLookahead +
+        `(?:${lineStartBoundary}|${midLineTrigger})` +
         buildBalancedMarker({
             allowParenthesized,
             allowWhitespaceBeforeColon,

@@ -51,6 +51,8 @@ import type {
 } from '../dist/index.mjs';
 import * as flappa from '../dist/index.mjs';
 
+const typedEmpty = <T>() => ({} as unknown as T);
+
 describe('Build Exports Validation', () => {
     it('should export all expected functions and constants from the main bundle', () => {
         // Analysis
@@ -116,53 +118,53 @@ describe('Build Exports Validation', () => {
         // No-op assignments to verify types are exported and usable
 
         // Analysis
-        const _commonPattern: CommonLineStartPattern = {} as any;
-        const _arabicDictionaryRuleOptions: ArabicDictionaryEntryRuleOptions = {} as any;
-        const _lsOptions: LineStartAnalysisOptions = {} as any;
-        const _lsExample: LineStartPatternExample = {} as any;
-        const _rsExample: RepeatingSequenceExample = {} as any;
-        const _rsOptions: RepeatingSequenceOptions = {} as any;
-        const _rsPattern: RepeatingSequencePattern = {} as any;
+        const _commonPattern: CommonLineStartPattern = typedEmpty();
+        const _arabicDictionaryRuleOptions: ArabicDictionaryEntryRuleOptions = typedEmpty();
+        const _lsOptions: LineStartAnalysisOptions = typedEmpty();
+        const _lsExample: LineStartPatternExample = typedEmpty();
+        const _rsExample: RepeatingSequenceExample = typedEmpty();
+        const _rsOptions: RepeatingSequenceOptions = typedEmpty();
+        const _rsPattern: RepeatingSequencePattern = typedEmpty();
 
         // Detection
-        const _detected: DetectedPattern = {} as any;
+        const _detected: DetectedPattern = typedEmpty();
 
         // Optimization
-        const _optimizeRes: OptimizeResult = {} as any;
+        const _optimizeRes: OptimizeResult = typedEmpty();
 
         // Segmentation & Rule Validation
-        const _patProc: PatternProcessor = {} as any;
-        const _ruleValRes: RuleValidationResult = {} as any;
-        const _valIssue: ValidationIssue = {} as any;
-        const _valType: ValidationIssueType = {} as any;
+        const _patProc: PatternProcessor = typedEmpty();
+        const _ruleValRes: RuleValidationResult = typedEmpty();
+        const _valIssue: ValidationIssue = typedEmpty();
+        const _valType: ValidationIssueType = typedEmpty();
 
-        const _segValIssue: SegmentValidationIssue = {} as any;
-        const _segValSev: SegmentValidationIssueSeverity = {} as any;
-        const _segValType: SegmentValidationIssueType = {} as any;
-        const _segValRep: SegmentValidationReport = {} as any;
-        const _valOpts: ValidationOptions = {} as any;
+        const _segValIssue: SegmentValidationIssue = typedEmpty();
+        const _segValSev: SegmentValidationIssueSeverity = typedEmpty();
+        const _segValType: SegmentValidationIssueType = typedEmpty();
+        const _segValRep: SegmentValidationReport = typedEmpty();
+        const _valOpts: ValidationOptions = typedEmpty();
 
-        const _expRes: ExpandResult = {} as any;
-        const _tokKey: TokenKey = {} as any;
-        const _tokMap: TokenMapping = {} as any;
-        const _tokPatternName: TokenPatternName = {} as any;
+        const _expRes: ExpandResult = typedEmpty();
+        const _tokKey: TokenKey = typedEmpty();
+        const _tokMap: TokenMapping = typedEmpty();
+        const _tokPatternName: TokenPatternName = typedEmpty();
 
         // Core
-        const _bp: Breakpoint = {} as any;
-        const _bpRule: BreakpointRule = {} as any;
-        const _page: Page = {} as any;
-        const _pageRange: PageRange = {} as any;
-        const _prConstraint: PageRangeConstraint = {} as any;
-        const _prExclude: PageRangeConstraintWithExclude = {} as any;
-        const _segment: Segment = {} as any;
+        const _bp: Breakpoint = typedEmpty();
+        const _bpRule: BreakpointRule = typedEmpty();
+        const _page: Page = typedEmpty();
+        const _pageRange: PageRange = typedEmpty();
+        const _prConstraint: PageRangeConstraint = typedEmpty();
+        const _prExclude: PageRangeConstraintWithExclude = typedEmpty();
+        const _segment: Segment = typedEmpty();
 
         // Options
-        const _ceRule: CondenseEllipsisRule = {} as any;
-        const _ftwRule: FixTrailingWawRule = {} as any;
-        const _logger: Logger = {} as any;
-        const _ppTransform: PreprocessTransform = {} as any;
-        const _rzwRule: RemoveZeroWidthRule = {} as any;
-        const _segOptions: SegmentationOptions = {} as any;
+        const _ceRule: CondenseEllipsisRule = typedEmpty();
+        const _ftwRule: FixTrailingWawRule = typedEmpty();
+        const _logger: Logger = typedEmpty();
+        const _ppTransform: PreprocessTransform = typedEmpty();
+        const _rzwRule: RemoveZeroWidthRule = typedEmpty();
+        const _segOptions: SegmentationOptions = typedEmpty();
 
         // Rules
         const _ptKey: PatternTypeKey = {} as any;

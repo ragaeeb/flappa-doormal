@@ -20,7 +20,11 @@ import { buildRuleRegex, type RuleRegex } from './rule-regex.js';
 // Maximum iterations before throwing to prevent infinite loops
 const MAX_REGEX_ITERATIONS = 100000;
 
-type CombinableRule = { rule: SplitRule; prefix: string; index: number };
+interface CombinableRule {
+    rule: SplitRule;
+    prefix: string;
+    index: number;
+}
 
 type RuleRegexInfo = RuleRegex & { prefix: string; source: string };
 
@@ -56,7 +60,7 @@ const buildContentOffsets = (
         return {};
     }
 
-    const fullMatch = match.groups?.[ruleInfo.prefix] || match[0];
+    const fullMatch = match.groups?.[ruleInfo.prefix] ?? match[0];
     return { contentStartOffset: fullMatch.length - captured.length };
 };
 
@@ -92,6 +96,22 @@ const addSplitPoint = (
     arr.push(point);
 };
 
+/**
+ * Executes a combined regex over the content for combinable rules and records
+ * any resulting split points into `splitPointsByRule`.
+ *
+ * This function mutates `splitPointsByRule` in place and throws if the regex
+ * iteration guard is exceeded.
+ *
+ * @param matchContent - Concatenated content being segmented
+ * @param combinableRules - Rules that can be combined into a single alternation
+ * @param ruleRegexes - Compiled regex metadata aligned with `combinableRules`
+ * @param pageMap - Page boundary mapping utilities for the content
+ * @param passesPageStartGuard - Callback that decides whether a match is allowed
+ * @param splitPointsByRule - Mutable map collecting split points by rule index
+ * @param logger - Optional logger for iteration diagnostics
+ * @returns Nothing; results are written into `splitPointsByRule`
+ */
 export const processCombinedMatches = (
     matchContent: string,
     combinableRules: CombinableRule[],
@@ -101,6 +121,19 @@ export const processCombinedMatches = (
     splitPointsByRule: Map<number, SplitPoint[]>,
     logger?: Logger,
 ) => {
+    if (combinableRules.length !== ruleRegexes.length) {
+        throw new Error(
+            `processCombinedMatches: combinableRules/ruleRegexes length mismatch (${combinableRules.length} !== ${ruleRegexes.length})`,
+        );
+    }
+    for (let i = 0; i < combinableRules.length; i++) {
+        if (!ruleRegexes[i].source.includes(`(?<${combinableRules[i].prefix}>`)) {
+            throw new Error(
+                `processCombinedMatches: regex alignment mismatch for prefix "${combinableRules[i].prefix}" at index ${i}`,
+            );
+        }
+    }
+
     const combinedSource = ruleRegexes.map((r) => r.source).join('|');
     const combinedRegex = new RegExp(combinedSource, 'gm');
 
@@ -143,12 +176,31 @@ export const processCombinedMatches = (
     }
 };
 
+/**
+ * Builds compiled regex metadata for each combinable rule while preserving the
+ * prefix used to identify the matching branch inside a combined alternation.
+ *
+ * @param combinableRules - Rules eligible for combined-regex processing
+ * @returns Rule regex metadata aligned with the input order
+ */
 export const buildRuleRegexes = (combinableRules: CombinableRule[]) =>
     combinableRules.map(({ rule, prefix }) => {
         const built = buildRuleRegex(rule, prefix);
         return { ...built, prefix, source: `(?<${prefix}>${built.regex.source})` };
     });
 
+/**
+ * Processes a standalone rule by matching it independently and appending its
+ * resulting split points into `splitPointsByRule`.
+ *
+ * @param rule - The standalone split rule to evaluate
+ * @param ruleIndex - Original rule index in the caller's rules array
+ * @param matchContent - Concatenated content being segmented
+ * @param pageMap - Page boundary mapping utilities for the content
+ * @param passesPageStartGuard - Callback that decides whether a match is allowed
+ * @param splitPointsByRule - Mutable map collecting split points by rule index
+ * @returns Nothing; results are written into `splitPointsByRule`
+ */
 export const processStandaloneRule = (
     rule: SplitRule,
     ruleIndex: number,
@@ -207,6 +259,15 @@ const findMatchesInContent = (content: string, regex: RegExp, usesCapture: boole
 
 // Occurrence filtering
 
+/**
+ * Applies per-rule occurrence filtering and optional debug metadata patches to
+ * the collected split points.
+ *
+ * @param rules - Full rule list in original order
+ * @param splitPointsByRule - Split points grouped by originating rule index
+ * @param debugMetaKey - Optional metadata key used for debug provenance patches
+ * @returns Flattened split points after occurrence filtering and debug merging
+ */
 export const applyOccurrenceFilter = (
     rules: SplitRule[],
     splitPointsByRule: Map<number, SplitPoint[]>,

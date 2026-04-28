@@ -45,6 +45,7 @@ export const escapeTemplateBrackets = (pattern: string) => {
  * Character class matching all Arabic diacritics (Tashkeel/Harakat).
  *
  * Includes the following diacritical marks:
+ * - U+0640: ـ (tatweel / kashida)
  * - U+064B: ً (fathatan - double fatha)
  * - U+064C: ٌ (dammatan - double damma)
  * - U+064D: ٍ (kasratan - double kasra)
@@ -56,7 +57,7 @@ export const escapeTemplateBrackets = (pattern: string) => {
  *
  * @internal
  */
-const DIACRITICS_CLASS = '[\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]';
+const DIACRITICS_CLASS = '[\u0640\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]';
 
 /**
  * Groups of equivalent Arabic characters.

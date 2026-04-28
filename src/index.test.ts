@@ -334,15 +334,13 @@ describe('index', () => {
 وَقَالَ اللَّيْث: السَّدَرُ: اسْمِدْرَارُ البَصَر،`,
             ]);
 
-            const harfCodes =
-                '[أ-ي][\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]*ـ?(?:[ \\t]+[أ-ي][\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]*ـ?)*';
             const segments = segmentPages(pages, {
                 breakpoints: ['{{tarqim}}'],
                 maxPages: 1,
                 rules: [
                     { lineStartsAfter: ['## '], meta: { type: 'chapter' } },
                     { fuzzy: true, lineStartsAfter: ['{{bab}} '], meta: { type: 'chapter' } },
-                    { meta: { type: 'C' }, regex: `^(?:${harfCodes}|(?:\\(|\\[)(?:${harfCodes})(?:\\)|\\]))$` },
+                    buildTypeCRule(),
                     buildLineStartOnlyDictionaryRule(
                         createArabicDictionaryEntryRule({
                             allowCommaSeparated: true,

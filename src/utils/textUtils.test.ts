@@ -88,6 +88,8 @@ describe('escapeRegex', () => {
 });
 
 describe('makeDiacriticInsensitive', () => {
+    const marks = '[\u0640\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*';
+
     it('should create pattern that matches text with and without diacritics', () => {
         const pattern = makeDiacriticInsensitive('حدثنا');
         const regex = new RegExp(pattern, 'u');
@@ -102,7 +104,7 @@ describe('makeDiacriticInsensitive', () => {
         const pattern3 = makeDiacriticInsensitive('أ');
         const pattern4 = makeDiacriticInsensitive('إ');
 
-        const expectedClass = '[\u0627\u0622\u0623\u0625][\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*';
+        const expectedClass = `[\u0627\u0622\u0623\u0625]${marks}`;
         expect(pattern1).toBe(expectedClass);
         expect(pattern2).toBe(expectedClass);
         expect(pattern3).toBe(expectedClass);
@@ -118,7 +120,7 @@ describe('makeDiacriticInsensitive', () => {
         const pattern1 = makeDiacriticInsensitive('ة');
         const pattern2 = makeDiacriticInsensitive('ه');
 
-        const expectedClass = '[\u0629\u0647][\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*';
+        const expectedClass = `[\u0629\u0647]${marks}`;
         expect(pattern1).toBe(expectedClass);
         expect(pattern2).toBe(expectedClass);
 
@@ -132,7 +134,7 @@ describe('makeDiacriticInsensitive', () => {
         const pattern1 = makeDiacriticInsensitive('ى');
         const pattern2 = makeDiacriticInsensitive('ي');
 
-        const expectedClass = '[\u0649\u064A][\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*';
+        const expectedClass = `[\u0649\u064A]${marks}`;
         expect(pattern1).toBe(expectedClass);
         expect(pattern2).toBe(expectedClass);
 
@@ -182,31 +184,29 @@ describe('makeDiacriticInsensitive', () => {
     it('should handle basic Arabic text and generate correct pattern', () => {
         const result = makeDiacriticInsensitive('مرحبا');
         expect(result).toBe(
-            'م[\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*ر[\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*ح[\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*ب[\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*[\u0627\u0622\u0623\u0625][\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*',
+            `م${marks}ر${marks}ح${marks}ب${marks}[\u0627\u0622\u0623\u0625]${marks}`,
         );
     });
 
     it('should handle mixed equivalent characters', () => {
         const result = makeDiacriticInsensitive('مدرسة');
-        expect(result).toContain('[\u0629\u0647][\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*');
+        expect(result).toContain(`[\u0629\u0647]${marks}`);
     });
 
     it('should handle single character', () => {
         const result = makeDiacriticInsensitive('م');
-        expect(result).toBe('م[\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*');
+        expect(result).toBe(`م${marks}`);
     });
 
     it('should handle non-Arabic characters', () => {
         const result = makeDiacriticInsensitive('hello');
-        expect(result).toBe(
-            'h[\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*e[\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*l[\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*l[\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*o[\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*',
-        );
+        expect(result).toBe(`h${marks}e${marks}l${marks}l${marks}o${marks}`);
     });
 
     it('should handle mixed Arabic and English', () => {
         const result = makeDiacriticInsensitive('hello مرحبا');
-        expect(result).toContain('h[\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*');
-        expect(result).toContain('[\u0627\u0622\u0623\u0625][\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]*');
+        expect(result).toContain(`h${marks}`);
+        expect(result).toContain(`[\u0627\u0622\u0623\u0625]${marks}`);
     });
 
     it('should handle ZWJ/ZWNJ characters', () => {

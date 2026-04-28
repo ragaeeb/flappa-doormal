@@ -359,6 +359,7 @@ import { createArabicDictionaryEntryRule, segmentPages } from 'flappa-doormal';
 const rule = createArabicDictionaryEntryRule({
   stopWords: ['وقيل', 'ويقال', 'قال', 'العجاج', 'أخاك'],
   pageStartPrevWordStoplist: ['قال', 'وقيل', 'ويقال'],
+  samePagePrevWordStoplist: ['جل'],
   // Optional dictionary-specific shapes:
   allowParenthesized: true,         // e.g. (عنبر) :
   allowWhitespaceBeforeColon: true, // e.g. عنبر :
@@ -375,6 +376,7 @@ Behavior:
 - Matches mid-line subentries conservatively when they begin with `و`
 - Can match parenthesized headwords like `(عنبر) :` when enabled
 - Can match comma-separated headword lists like `سبد، دبس:` when enabled
+- Can suppress same-page false positives like `جلّ وعزّ:` with `samePagePrevWordStoplist`
 
 #### Dictionary Letter-Code Lines
 
@@ -1662,6 +1664,7 @@ type SplitRule = {
   exclude?: (number | [number, number])[]; // Single page or [start, end] range
   pageStartGuard?: string;
   pageStartPrevWordStoplist?: string[];
+  samePagePrevWordStoplist?: string[];
   meta?: Record<string, unknown>;
 };
 ```

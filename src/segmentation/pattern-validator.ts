@@ -11,7 +11,7 @@ import { getAvailableTokens } from './tokens.js';
 /**
  * Types of validation issues that can be detected.
  */
-export type ValidationIssueType = 'missing_braces' | 'unknown_token' | 'duplicate' | 'empty_pattern';
+export type ValidationIssueType = 'missing_braces' | 'unknown_token' | 'duplicate' | 'empty_pattern' | 'invalid_regex';
 
 /**
  * A validation issue found in a pattern.
@@ -35,6 +35,7 @@ export type RuleValidationResult = {
     lineStartsAfter?: (ValidationIssue | undefined)[];
     lineEndsWith?: (ValidationIssue | undefined)[];
     template?: ValidationIssue;
+    regex?: ValidationIssue;
 };
 
 // Known token names from the tokens module
@@ -131,6 +132,9 @@ const formatValidationIssue = (_type: string, issue: ValidationIssue | undefined
     if (issue.type === 'duplicate') {
         return `${loc}: Duplicate pattern "${issue.pattern}"`;
     }
+    if (issue.type === 'invalid_regex') {
+        return `${loc}: Invalid regex (${issue.message})`;
+    }
     return `${loc}: ${issue.message || issue.type}`;
 };
 
@@ -158,15 +162,34 @@ export const validateRules = (rules: SplitRule[]) =>
         const result: RuleValidationResult = {};
         let hasIssues = false;
 
-        hasIssues ||= applyRulePatternValidation(result, 'lineStartsWith', rule.lineStartsWith);
-        hasIssues ||= applyRulePatternValidation(result, 'lineStartsAfter', rule.lineStartsAfter);
-        hasIssues ||= applyRulePatternValidation(result, 'lineEndsWith', rule.lineEndsWith);
+        const startsWithIssues = applyRulePatternValidation(result, 'lineStartsWith', rule.lineStartsWith);
+        const startsAfterIssues = applyRulePatternValidation(result, 'lineStartsAfter', rule.lineStartsAfter);
+        const endsWithIssues = applyRulePatternValidation(result, 'lineEndsWith', rule.lineEndsWith);
+        hasIssues = hasIssues || startsWithIssues || startsAfterIssues || endsWithIssues;
 
         if (rule.template !== undefined) {
             const issue = validatePattern(rule.template, new Set());
             if (issue) {
                 result.template = issue;
                 hasIssues = true;
+            }
+        }
+
+        if (rule.regex !== undefined) {
+            if (!rule.regex.trim()) {
+                result.regex = { message: 'Empty pattern is not allowed', type: 'empty_pattern' };
+                hasIssues = true;
+            } else {
+                try {
+                    new RegExp(rule.regex, 'u');
+                } catch (error) {
+                    result.regex = {
+                        message: error instanceof Error ? error.message : String(error),
+                        pattern: rule.regex,
+                        type: 'invalid_regex',
+                    };
+                    hasIssues = true;
+                }
             }
         }
 
