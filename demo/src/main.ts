@@ -34,6 +34,7 @@ interface DemoRulePreset {
     min?: number;
     pageStartGuard?: string;
     pageStartPrevWordStoplist?: string[];
+    samePagePrevWordStoplist?: string[];
     pattern: string;
     patternType: PatternType;
     split?: 'at' | 'after';
@@ -102,9 +103,11 @@ const dictionaryLemmaStopWords = Array.from(
     ),
 );
 const dictionaryLemmaPrevWordStoplist = ['قال', 'وقال', 'وقيل', 'ويقال', 'يقال', 'قلت', 'فقال', 'قالوا'];
+const dictionaryLemmaSamePagePrevWordStoplist = ['جل'];
 const dictionaryLemmaRule = createArabicDictionaryEntryRule({
     captureName: 'lemma',
     pageStartPrevWordStoplist: dictionaryLemmaPrevWordStoplist,
+    samePagePrevWordStoplist: dictionaryLemmaSamePagePrevWordStoplist,
     stopWords: dictionaryLemmaStopWords,
 });
 const demoPresets: Record<string, DemoPreset> = {
@@ -145,6 +148,7 @@ const demoPresets: Record<string, DemoPreset> = {
             {
                 metaType: 'entry',
                 pageStartPrevWordStoplist: dictionaryLemmaPrevWordStoplist,
+                samePagePrevWordStoplist: dictionaryLemmaSamePagePrevWordStoplist,
                 pattern: dictionaryLemmaRule.regex,
                 patternType: 'regex',
                 split: 'at',
@@ -279,6 +283,10 @@ function createRuleElement(id: number): HTMLElement {
 	      <label>Prev Page Word Stoplist</label>
 	      <input type="text" class="rule-prev-word-stoplist" placeholder="قال, وقيل, ويقال" />
 	    </div>
+	    <div class="form-group full-width">
+	      <label>Same-Page Prev Word Stoplist</label>
+	      <input type="text" class="rule-same-page-prev-word-stoplist" placeholder="جل" />
+	    </div>
 	  `;
 
     const removeBtn = ruleItem.querySelector('.rule-remove-btn') as HTMLButtonElement;
@@ -330,11 +338,15 @@ function addRuleFromPreset(rule: DemoRulePreset): void {
     (element.querySelector('.rule-split') as HTMLSelectElement).value = rule.split ?? 'at';
     (element.querySelector('.rule-fuzzy') as HTMLInputElement).checked = rule.fuzzy ?? false;
     (element.querySelector('.rule-meta') as HTMLInputElement).value = rule.metaType ?? '';
-    (element.querySelector('.rule-min') as HTMLInputElement).value = rule.min ? String(rule.min) : '';
-    (element.querySelector('.rule-max') as HTMLInputElement).value = rule.max ? String(rule.max) : '';
+    (element.querySelector('.rule-min') as HTMLInputElement).value =
+        rule.min !== undefined && rule.min !== null ? String(rule.min) : '';
+    (element.querySelector('.rule-max') as HTMLInputElement).value =
+        rule.max !== undefined && rule.max !== null ? String(rule.max) : '';
     (element.querySelector('.rule-guard') as HTMLInputElement).value = rule.pageStartGuard ?? '';
     (element.querySelector('.rule-prev-word-stoplist') as HTMLInputElement).value =
         rule.pageStartPrevWordStoplist?.join(', ') ?? '';
+    (element.querySelector('.rule-same-page-prev-word-stoplist') as HTMLInputElement).value =
+        rule.samePagePrevWordStoplist?.join(', ') ?? '';
 }
 
 function updateRuleNumbers(): void {
@@ -378,7 +390,7 @@ function loadPreset(preset: DemoPreset): void {
         addRuleFromPreset(rule);
     }
 
-    maxPagesInput.value = preset.maxPages ? String(preset.maxPages) : '';
+    maxPagesInput.value = preset.maxPages !== undefined && preset.maxPages !== null ? String(preset.maxPages) : '';
     maxContentLengthInput.value = '';
     preferSelect.value = preset.prefer ?? 'longer';
     pageJoinerSelect.value = preset.pageJoiner ?? 'space';
@@ -406,6 +418,12 @@ function buildRuleFromElement(element: HTMLElement): SplitRule {
         .split(',')
         .map((word) => word.trim())
         .filter(Boolean);
+    const samePagePrevWordStoplist = (
+        element.querySelector('.rule-same-page-prev-word-stoplist') as HTMLInputElement
+    ).value
+        .split(',')
+        .map((word) => word.trim())
+        .filter(Boolean);
 
     const baseOptions: Partial<SplitRule> = { split };
 
@@ -426,6 +444,9 @@ function buildRuleFromElement(element: HTMLElement): SplitRule {
     }
     if (prevWordStoplist.length > 0) {
         baseOptions.pageStartPrevWordStoplist = prevWordStoplist;
+    }
+    if (samePagePrevWordStoplist.length > 0) {
+        baseOptions.samePagePrevWordStoplist = samePagePrevWordStoplist;
     }
 
     switch (patternType) {
