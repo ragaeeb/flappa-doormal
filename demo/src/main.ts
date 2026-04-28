@@ -110,6 +110,9 @@ const dictionaryLemmaRule = createArabicDictionaryEntryRule({
     samePagePrevWordStoplist: dictionaryLemmaSamePagePrevWordStoplist,
     stopWords: dictionaryLemmaStopWords,
 });
+if (!('regex' in dictionaryLemmaRule)) {
+    throw new Error('Demo preset expected createArabicDictionaryEntryRule() to return a regex-based rule');
+}
 const demoPresets: Record<string, DemoPreset> = {
     'dictionary-lemma': {
         debug: true,
