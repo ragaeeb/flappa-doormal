@@ -183,9 +183,7 @@ describe('makeDiacriticInsensitive', () => {
 
     it('should handle basic Arabic text and generate correct pattern', () => {
         const result = makeDiacriticInsensitive('مرحبا');
-        expect(result).toBe(
-            `م${marks}ر${marks}ح${marks}ب${marks}[\u0627\u0622\u0623\u0625]${marks}`,
-        );
+        expect(result).toBe(`م${marks}ر${marks}ح${marks}ب${marks}[\u0627\u0622\u0623\u0625]${marks}`);
     });
 
     it('should handle mixed equivalent characters', () => {

@@ -103,34 +103,39 @@ export const dedupeSplitPoints = (splitPoints: SplitPoint[]) => {
             continue;
         }
 
-        const preferred =
-            (p.contentStartOffset !== undefined && existing.contentStartOffset === undefined) ||
-            (p.meta !== undefined && existing.meta === undefined)
-                ? p
-                : existing;
-        const fallback = preferred === p ? existing : p;
-
-        byIndex.set(p.index, {
-            ...fallback,
-            ...preferred,
-            contentStartOffset: preferred.contentStartOffset ?? fallback.contentStartOffset,
-            meta:
-                existing.meta || p.meta
-                    ? {
-                          ...(existing.meta ?? {}),
-                          ...(p.meta ?? {}),
-                      }
-                    : undefined,
-            namedCaptures:
-                existing.namedCaptures || p.namedCaptures
-                    ? {
-                          ...(existing.namedCaptures ?? {}),
-                          ...(p.namedCaptures ?? {}),
-                      }
-                    : undefined,
-        });
+        byIndex.set(p.index, mergeSplitPoints(existing, p));
     }
     return [...byIndex.values()].sort((a, b) => a.index - b.index);
+};
+
+const prefersIncomingSplitPoint = (existing: SplitPoint, incoming: SplitPoint) =>
+    (incoming.contentStartOffset !== undefined && existing.contentStartOffset === undefined) ||
+    (incoming.meta !== undefined && existing.meta === undefined);
+
+const mergeRecord = (
+    existing: Record<string, unknown> | undefined,
+    incoming: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined =>
+    existing || incoming
+        ? {
+              ...(existing ?? {}),
+              ...(incoming ?? {}),
+          }
+        : undefined;
+
+const mergeSplitPoints = (existing: SplitPoint, incoming: SplitPoint): SplitPoint => {
+    const preferred = prefersIncomingSplitPoint(existing, incoming) ? incoming : existing;
+    const fallback = preferred === incoming ? existing : incoming;
+
+    return {
+        ...fallback,
+        ...preferred,
+        contentStartOffset: preferred.contentStartOffset ?? fallback.contentStartOffset,
+        meta: mergeRecord(existing.meta, incoming.meta),
+        namedCaptures: mergeRecord(existing.namedCaptures, incoming.namedCaptures) as
+            | Record<string, string>
+            | undefined,
+    };
 };
 
 /**
@@ -202,14 +207,7 @@ const collectSplitPointsFromRules = (
     }
 
     for (const { rule, index } of standaloneRules) {
-        processStandaloneRule(
-            rule,
-            index,
-            matchContent,
-            pageMap,
-            passesPageStartGuard,
-            splitPointsByRule,
-        );
+        processStandaloneRule(rule, index, matchContent, pageMap, passesPageStartGuard, splitPointsByRule);
     }
 
     return applyOccurrenceFilter(rules, splitPointsByRule, debugMetaKey);

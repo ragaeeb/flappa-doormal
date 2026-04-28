@@ -119,6 +119,43 @@ const applyRulePatternValidation = (
     return true;
 };
 
+const validateTemplateRule = (rule: SplitRule, result: RuleValidationResult) => {
+    if (rule.template === undefined) {
+        return false;
+    }
+
+    const issue = validatePattern(rule.template, new Set());
+    if (!issue) {
+        return false;
+    }
+
+    result.template = issue;
+    return true;
+};
+
+const validateRegexRule = (rule: SplitRule, result: RuleValidationResult) => {
+    if (rule.regex === undefined) {
+        return false;
+    }
+
+    if (!rule.regex.trim()) {
+        result.regex = { message: 'Empty pattern is not allowed', type: 'empty_pattern' };
+        return true;
+    }
+
+    try {
+        new RegExp(rule.regex, 'u');
+        return false;
+    } catch (error) {
+        result.regex = {
+            message: error instanceof Error ? error.message : String(error),
+            pattern: rule.regex,
+            type: 'invalid_regex',
+        };
+        return true;
+    }
+};
+
 const formatValidationIssue = (_type: string, issue: ValidationIssue | undefined, loc: string): string | null => {
     if (!issue) {
         return null;
@@ -160,38 +197,12 @@ const formatValidationIssue = (_type: string, issue: ValidationIssue | undefined
 export const validateRules = (rules: SplitRule[]) =>
     rules.map((rule) => {
         const result: RuleValidationResult = {};
-        let hasIssues = false;
-
         const startsWithIssues = applyRulePatternValidation(result, 'lineStartsWith', rule.lineStartsWith);
         const startsAfterIssues = applyRulePatternValidation(result, 'lineStartsAfter', rule.lineStartsAfter);
         const endsWithIssues = applyRulePatternValidation(result, 'lineEndsWith', rule.lineEndsWith);
-        hasIssues = hasIssues || startsWithIssues || startsAfterIssues || endsWithIssues;
-
-        if (rule.template !== undefined) {
-            const issue = validatePattern(rule.template, new Set());
-            if (issue) {
-                result.template = issue;
-                hasIssues = true;
-            }
-        }
-
-        if (rule.regex !== undefined) {
-            if (!rule.regex.trim()) {
-                result.regex = { message: 'Empty pattern is not allowed', type: 'empty_pattern' };
-                hasIssues = true;
-            } else {
-                try {
-                    new RegExp(rule.regex, 'u');
-                } catch (error) {
-                    result.regex = {
-                        message: error instanceof Error ? error.message : String(error),
-                        pattern: rule.regex,
-                        type: 'invalid_regex',
-                    };
-                    hasIssues = true;
-                }
-            }
-        }
+        const templateIssues = validateTemplateRule(rule, result);
+        const regexIssues = validateRegexRule(rule, result);
+        const hasIssues = startsWithIssues || startsAfterIssues || endsWithIssues || templateIssues || regexIssues;
 
         return hasIssues ? result : undefined;
     });

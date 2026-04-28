@@ -121,18 +121,7 @@ export const processCombinedMatches = (
     splitPointsByRule: Map<number, SplitPoint[]>,
     logger?: Logger,
 ) => {
-    if (combinableRules.length !== ruleRegexes.length) {
-        throw new Error(
-            `processCombinedMatches: combinableRules/ruleRegexes length mismatch (${combinableRules.length} !== ${ruleRegexes.length})`,
-        );
-    }
-    for (let i = 0; i < combinableRules.length; i++) {
-        if (!ruleRegexes[i].source.includes(`(?<${combinableRules[i].prefix}>`)) {
-            throw new Error(
-                `processCombinedMatches: regex alignment mismatch for prefix "${combinableRules[i].prefix}" at index ${i}`,
-            );
-        }
-    }
+    assertCombinedRuleAlignment(combinableRules, ruleRegexes);
 
     const combinedSource = ruleRegexes.map((r) => r.source).join('|');
     const combinedRegex = new RegExp(combinedSource, 'gm');
@@ -155,25 +144,51 @@ export const processCombinedMatches = (
             logger?.warn?.('[segmenter] high iteration count', { iterations, position: m.index });
         }
 
-        const matchedIndex = combinableRules.findIndex(({ prefix }) => m?.groups?.[prefix] !== undefined);
-        if (matchedIndex !== -1) {
-            const { rule, index: originalIndex } = combinableRules[matchedIndex];
-            if (
-                passesRuleConstraints(rule, pageMap.getId(m.index)) &&
-                passesPageStartGuard(rule, originalIndex, m.index)
-            ) {
-                addSplitPoint(
-                    splitPointsByRule,
-                    originalIndex,
-                    createSplitPointFromMatch(m, rule, ruleRegexes[matchedIndex]),
-                );
-            }
-        }
+        processCombinedMatch(combinableRules, ruleRegexes, pageMap, passesPageStartGuard, splitPointsByRule, m);
         if (m[0].length === 0) {
             combinedRegex.lastIndex++;
         }
         m = combinedRegex.exec(matchContent);
     }
+};
+
+const assertCombinedRuleAlignment = (combinableRules: CombinableRule[], ruleRegexes: RuleRegexInfo[]) => {
+    if (combinableRules.length !== ruleRegexes.length) {
+        throw new Error(
+            `processCombinedMatches: combinableRules/ruleRegexes length mismatch (${combinableRules.length} !== ${ruleRegexes.length})`,
+        );
+    }
+    for (let i = 0; i < combinableRules.length; i++) {
+        if (!ruleRegexes[i].source.includes(`(?<${combinableRules[i].prefix}>`)) {
+            throw new Error(
+                `processCombinedMatches: regex alignment mismatch for prefix "${combinableRules[i].prefix}" at index ${i}`,
+            );
+        }
+    }
+};
+
+const processCombinedMatch = (
+    combinableRules: CombinableRule[],
+    ruleRegexes: RuleRegexInfo[],
+    pageMap: PageMap,
+    passesPageStartGuard: (rule: SplitRule, index: number, pos: number) => boolean,
+    splitPointsByRule: Map<number, SplitPoint[]>,
+    match: RegExpExecArray,
+) => {
+    const matchedIndex = combinableRules.findIndex(({ prefix }) => match.groups?.[prefix] !== undefined);
+    if (matchedIndex === -1) {
+        return;
+    }
+
+    const { rule, index: originalIndex } = combinableRules[matchedIndex];
+    if (
+        !passesRuleConstraints(rule, pageMap.getId(match.index)) ||
+        !passesPageStartGuard(rule, originalIndex, match.index)
+    ) {
+        return;
+    }
+
+    addSplitPoint(splitPointsByRule, originalIndex, createSplitPointFromMatch(match, rule, ruleRegexes[matchedIndex]));
 };
 
 /**

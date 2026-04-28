@@ -214,8 +214,8 @@ export const createArabicDictionaryEntryRule = ({
     return {
         meta,
         pageStartPrevWordStoplist,
-        samePagePrevWordStoplist,
         regex,
+        samePagePrevWordStoplist,
         split: 'at',
     };
 };

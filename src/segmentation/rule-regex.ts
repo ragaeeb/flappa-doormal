@@ -196,18 +196,32 @@ export const buildTemplateRegexSource = (template: string, capturePrefix?: strin
     return { captureNames, regex: pattern };
 };
 
+const getFuzzyCandidatePatterns = (rule: SplitRule): string[] => [
+    ...('lineStartsWith' in rule && Array.isArray(rule.lineStartsWith) ? rule.lineStartsWith : []),
+    ...('lineStartsAfter' in rule && Array.isArray(rule.lineStartsAfter) ? rule.lineStartsAfter : []),
+    ...('lineEndsWith' in rule && Array.isArray(rule.lineEndsWith) ? rule.lineEndsWith : []),
+];
+
+const buildLineBasedRuleRegex = (rule: SplitRule, fuzzy: boolean, capturePrefix?: string): RuleRegexSource | null => {
+    if ('lineStartsWith' in rule && Array.isArray(rule.lineStartsWith) && rule.lineStartsWith.length > 0) {
+        return buildLineStartsWithRegexSource(rule.lineStartsWith, fuzzy, capturePrefix);
+    }
+    if ('lineEndsWith' in rule && Array.isArray(rule.lineEndsWith) && rule.lineEndsWith.length > 0) {
+        return buildLineEndsWithRegexSource(rule.lineEndsWith, fuzzy, capturePrefix);
+    }
+    if ('template' in rule && typeof rule.template === 'string') {
+        return buildTemplateRegexSource(rule.template, capturePrefix);
+    }
+    return null;
+};
+
 /**
  * Builds a compiled regex and metadata from a split rule.
  *
  * Behavior mirrors the previous implementation in `segmenter.ts`.
  */
 export const buildRuleRegex = (rule: SplitRule, capturePrefix?: string): RuleRegex => {
-    const fuzzyCandidatePatterns = [
-        ...('lineStartsWith' in rule ? rule.lineStartsWith : []),
-        ...('lineStartsAfter' in rule ? rule.lineStartsAfter : []),
-        ...('lineEndsWith' in rule ? rule.lineEndsWith : []),
-    ];
-    const fuzzy = rule.fuzzy ?? shouldDefaultToFuzzy(fuzzyCandidatePatterns);
+    const fuzzy = rule.fuzzy ?? shouldDefaultToFuzzy(getFuzzyCandidatePatterns(rule));
 
     if ('lineStartsAfter' in rule && Array.isArray(rule.lineStartsAfter) && rule.lineStartsAfter.length > 0) {
         const { regex: lsaRegex, captureNames } = buildLineStartsAfterRegexSource(
@@ -218,23 +232,11 @@ export const buildRuleRegex = (rule: SplitRule, capturePrefix?: string): RuleReg
         return { captureNames, regex: compileRuleRegex(lsaRegex), usesCapture: true, usesLineStartsAfter: true };
     }
 
-    let finalRegex: string | undefined = 'regex' in rule && typeof rule.regex === 'string' ? rule.regex : undefined;
-    let allCaptureNames: string[] = [];
-
-    if ('lineStartsWith' in rule && Array.isArray(rule.lineStartsWith) && rule.lineStartsWith.length > 0) {
-        const res = buildLineStartsWithRegexSource(rule.lineStartsWith, fuzzy, capturePrefix);
-        finalRegex = res.regex;
-        allCaptureNames = res.captureNames;
-    }
-    if ('lineEndsWith' in rule && Array.isArray(rule.lineEndsWith) && rule.lineEndsWith.length > 0) {
-        const res = buildLineEndsWithRegexSource(rule.lineEndsWith, fuzzy, capturePrefix);
-        finalRegex = res.regex;
-        allCaptureNames = res.captureNames;
-    }
-    if ('template' in rule && typeof rule.template === 'string') {
-        const res = buildTemplateRegexSource(rule.template, capturePrefix);
-        finalRegex = res.regex;
-        allCaptureNames = [...allCaptureNames, ...res.captureNames];
+    const ruleRegexSource = buildLineBasedRuleRegex(rule, fuzzy, capturePrefix);
+    let finalRegex: string | undefined = ruleRegexSource?.regex;
+    let allCaptureNames: string[] = ruleRegexSource?.captureNames ?? [];
+    if (!finalRegex && 'regex' in rule && typeof rule.regex === 'string') {
+        finalRegex = rule.regex;
     }
 
     if (!finalRegex) {

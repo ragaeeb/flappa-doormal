@@ -104,8 +104,8 @@ describe('breakpoint-utils', () => {
 
         it('should escape regex metacharacters except ()[] which are handled by processPattern', () => {
             // ()[] are NOT escaped here - processPattern handles them via escapeTemplateBrackets
-            // Concatenation avoids ending the string literal with an unescaped trailing backslash.
-            expect(escapeWordsOutsideTokens('.*+?^${}()|[]' + BACKSLASH_CHAR)).toBe(
+            // Template syntax keeps the trailing backslash readable without ending the literal on it.
+            expect(escapeWordsOutsideTokens(`.*+?^\${}()|[]${BACKSLASH_CHAR}`)).toBe(
                 '\\.\\*\\+\\?\\^\\$\\{\\}()\\|[]\\\\',
             );
         });

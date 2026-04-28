@@ -51,7 +51,7 @@ import type {
 } from '../dist/index.mjs';
 import * as flappa from '../dist/index.mjs';
 
-const typedEmpty = <T>() => ({} as unknown as T);
+const typedEmpty = <T>() => ({}) as unknown as T;
 
 describe('Build Exports Validation', () => {
     it('should export all expected functions and constants from the main bundle', () => {

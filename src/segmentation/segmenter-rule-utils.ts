@@ -111,6 +111,24 @@ const extractLastArabicWord = (pageContent: string) => {
     return matches.at(-1)?.[0] ?? '';
 };
 
+const shouldAllowPageStartMatch = (previousPageContent: string, prevWordStoplist: Set<string> | null): boolean => {
+    if (!prevWordStoplist || endsWithStrongSentenceTerminator(previousPageContent)) {
+        return true;
+    }
+
+    const lastWord = extractLastArabicWord(previousPageContent);
+    return !lastWord || !prevWordStoplist.has(normalizeArabicForComparison(lastWord));
+};
+
+const shouldAllowSamePageMatch = (contentBeforeMatch: string, stoplist: Set<string> | null): boolean => {
+    if (!stoplist) {
+        return true;
+    }
+
+    const lastWord = extractLastArabicWord(contentBeforeMatch);
+    return !lastWord || !stoplist.has(normalizeArabicForComparison(lastWord));
+};
+
 export const createPageStartGuardChecker = (matchContent: string, pageMap: PageMap) => {
     const pageStartToBoundaryIndex = new Map(pageMap.boundaries.map((b, i) => [b.start, i]));
     const compiledPageStartPrev = new Map<number, RegExp | null>();
@@ -198,7 +216,9 @@ export const createPageStartGuardChecker = (matchContent: string, pageMap: PageM
 
     return (rule: SplitRule, ruleIndex: number, matchStart: number) => {
         const boundaryIndex = pageStartToBoundaryIndex.get(matchStart);
-        if (boundaryIndex !== undefined && boundaryIndex !== 0) {
+        const isNonFirstPageStart = boundaryIndex !== undefined && boundaryIndex !== 0;
+
+        if (isNonFirstPageStart) {
             const prevReq = getPageStartPrevRegex(rule, ruleIndex);
             if (prevReq) {
                 const lastChar = getPrevPageLastNonWsChar(boundaryIndex);
@@ -207,33 +227,16 @@ export const createPageStartGuardChecker = (matchContent: string, pageMap: PageM
                 }
             }
 
-            const prevWordStoplist = getPrevWordStoplist(rule, ruleIndex);
-            if (!prevWordStoplist) {
-                return true;
-            }
-
-            const previousPageContent = getPreviousPageContent(boundaryIndex);
-            if (endsWithStrongSentenceTerminator(previousPageContent)) {
-                return true;
-            }
-
-            const lastWord = extractLastArabicWord(previousPageContent);
-            if (!lastWord) {
-                return true;
-            }
-
-            return !prevWordStoplist.has(normalizeArabicForComparison(lastWord));
+            return shouldAllowPageStartMatch(
+                getPreviousPageContent(boundaryIndex),
+                getPrevWordStoplist(rule, ruleIndex),
+            );
         }
 
-        const samePagePrevWordStoplist = getSamePagePrevWordStoplist(rule, ruleIndex);
-        if (!samePagePrevWordStoplist) {
-            return true;
-        }
-        const lastWord = extractLastArabicWord(getCurrentPageContentBeforeMatch(matchStart));
-        if (!lastWord) {
-            return true;
-        }
-        return !samePagePrevWordStoplist.has(normalizeArabicForComparison(lastWord));
+        return shouldAllowSamePageMatch(
+            getCurrentPageContentBeforeMatch(matchStart),
+            getSamePagePrevWordStoplist(rule, ruleIndex),
+        );
     };
 };
 
@@ -292,7 +295,6 @@ const processFastFuzzyMatchesAt = (
     pageId: number,
     fastFuzzyRules: FastFuzzyRule[],
     passesPageStartGuard: PageStartGuardChecker,
-    isPageStart: boolean,
     splitPointsByRule: Map<number, SplitPoint[]>,
 ) => {
     for (const ffRule of fastFuzzyRules) {
@@ -329,8 +331,6 @@ export const collectFastFuzzySplitPoints = (
         }
     };
 
-    const isPageStart = (offset: number) => offset === currentBoundary?.start;
-
     // Line starts are offset 0 and any char after '\n'
     for (let lineStart = 0; lineStart <= matchContent.length; ) {
         advanceBoundaryTo(lineStart);
@@ -346,7 +346,6 @@ export const collectFastFuzzySplitPoints = (
             pageId,
             fastFuzzyRules,
             passesPageStartGuard,
-            isPageStart(lineStart),
             splitPointsByRule,
         );
 
