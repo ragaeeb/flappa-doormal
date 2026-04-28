@@ -340,7 +340,17 @@ describe('segmenter', () => {
                 rules: [
                     { meta: { type: 'C' }, regex: `^(?:${harfCodes}|(?:\\(|\\[)(?:${harfCodes})(?:\\)|\\]))$` },
                     createArabicDictionaryEntryRule({
-                        pageStartPrevWordStoplist: ['قال', 'وقال', 'وقيل', 'ويقال', 'يقال', 'من', 'قلت', 'فقال', 'قالوا'],
+                        pageStartPrevWordStoplist: [
+                            'قال',
+                            'وقال',
+                            'وقيل',
+                            'ويقال',
+                            'يقال',
+                            'من',
+                            'قلت',
+                            'فقال',
+                            'قالوا',
+                        ],
                         samePagePrevWordStoplist: ['جل'],
                         stopWords: ['وقيل', 'ويقال', 'قال', 'العجاج', 'أخاك', 'الليث'],
                     }),

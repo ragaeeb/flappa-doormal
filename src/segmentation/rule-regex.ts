@@ -33,6 +33,11 @@ export type RuleRegex = {
     usesLineStartsAfter: boolean;
 };
 
+type RuleRegexSource = {
+    captureNames: string[];
+    regex: string;
+};
+
 /**
  * Checks if a regex pattern contains standard (anonymous) capturing groups.
  *
@@ -44,7 +49,7 @@ export type RuleRegex = {
  *
  * NOTE: Named capture groups are still captures, but they're tracked via `captureNames`.
  */
-export const hasCapturingGroup = (pattern: string) => /\((?!\?)/.test(pattern);
+export const hasCapturingGroup = (pattern: string): boolean => /\((?!\?)/.test(pattern);
 
 /**
  * Extracts named capture group names from a regex pattern.
@@ -56,7 +61,7 @@ export const hasCapturingGroup = (pattern: string) => /\((?!\?)/.test(pattern);
  * extractNamedCaptureNames('^(?<a>\\d+)(?<b>\\w+)') // ['a', 'b']
  * extractNamedCaptureNames('^\\d+') // []
  */
-export const extractNamedCaptureNames = (pattern: string) =>
+export const extractNamedCaptureNames = (pattern: string): string[] =>
     [...pattern.matchAll(/\(\?<([A-Za-z_]\w*)>/g)]
         .map((m) => m[1])
         .filter((n) => !n.startsWith('_r') && !n.startsWith('_w'));
@@ -64,7 +69,7 @@ export const extractNamedCaptureNames = (pattern: string) =>
 /**
  * Safely compiles a regex pattern, throwing a helpful error if invalid.
  */
-export const compileRuleRegex = (pattern: string) => {
+export const compileRuleRegex = (pattern: string): RegExp => {
     try {
         return new RegExp(pattern, 'gmu');
     } catch (error) {
@@ -79,7 +84,7 @@ export const compileRuleRegex = (pattern: string) => {
  *
  * Brackets `()[]` outside `{{tokens}}` are auto-escaped.
  */
-export const processPattern = (pattern: string, fuzzy: boolean, capturePrefix?: string) => {
+export const processPattern = (pattern: string, fuzzy: boolean, capturePrefix?: string): ProcessedPattern => {
     const { pattern: expanded, captureNames } = expandTokensWithCaptures(
         escapeTemplateBrackets(pattern),
         fuzzy ? makeDiacriticInsensitive : undefined,
@@ -95,12 +100,16 @@ export const processPattern = (pattern: string, fuzzy: boolean, capturePrefix?: 
  * are treated as raw regex patterns (like the `regex` rule type).
  * Users have full control over regex syntax including `(?:...)` groups.
  */
-export const processBreakpointPattern = (pattern: string) => {
+export const processBreakpointPattern = (pattern: string): string => {
     const { pattern: expanded } = expandTokensWithCaptures(pattern);
     return expanded;
 };
 
-export const buildLineStartsAfterRegexSource = (patterns: string[], fuzzy: boolean, capturePrefix?: string) => {
+export const buildLineStartsAfterRegexSource = (
+    patterns: string[],
+    fuzzy: boolean,
+    capturePrefix?: string,
+): RuleRegexSource => {
     const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
     const alternatives = processed.map((p, i) => `(?<_r${i}>${p.pattern})`).join('|');
     return {
@@ -109,7 +118,11 @@ export const buildLineStartsAfterRegexSource = (patterns: string[], fuzzy: boole
     };
 };
 
-export const buildLineStartsWithRegexSource = (patterns: string[], fuzzy: boolean, capturePrefix?: string) => {
+export const buildLineStartsWithRegexSource = (
+    patterns: string[],
+    fuzzy: boolean,
+    capturePrefix?: string,
+): RuleRegexSource => {
     const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
     const alternatives = processed.map((p, i) => `(?<_r${i}>${p.pattern})`).join('|');
     return {
@@ -118,7 +131,11 @@ export const buildLineStartsWithRegexSource = (patterns: string[], fuzzy: boolea
     };
 };
 
-export const buildLineEndsWithRegexSource = (patterns: string[], fuzzy: boolean, capturePrefix?: string) => {
+export const buildLineEndsWithRegexSource = (
+    patterns: string[],
+    fuzzy: boolean,
+    capturePrefix?: string,
+): RuleRegexSource => {
     const processed = patterns.map((p) => processPattern(p, fuzzy, capturePrefix));
     const alternatives = processed.map((p, i) => `(?<_r${i}>${p.pattern})`).join('|');
     return {
@@ -127,7 +144,7 @@ export const buildLineEndsWithRegexSource = (patterns: string[], fuzzy: boolean,
     };
 };
 
-export const buildTemplateRegexSource = (template: string, capturePrefix?: string) => {
+export const buildTemplateRegexSource = (template: string, capturePrefix?: string): RuleRegexSource => {
     const { pattern, captureNames } = expandTokensWithCaptures(
         escapeTemplateBrackets(template),
         undefined,
@@ -141,36 +158,38 @@ export const buildTemplateRegexSource = (template: string, capturePrefix?: strin
  *
  * Behavior mirrors the previous implementation in `segmenter.ts`.
  */
-export const buildRuleRegex = (rule: SplitRule, capturePrefix?: string) => {
-    const { lineStartsWith, lineStartsAfter, lineEndsWith, template, regex } = rule as any;
-    const fuzzy =
-        (rule as { fuzzy?: boolean }).fuzzy ??
-        shouldDefaultToFuzzy([...(lineStartsWith ?? []), ...(lineStartsAfter ?? []), ...(lineEndsWith ?? [])]);
+export const buildRuleRegex = (rule: SplitRule, capturePrefix?: string): RuleRegex => {
+    const fuzzyCandidatePatterns = [
+        ...('lineStartsWith' in rule ? rule.lineStartsWith : []),
+        ...('lineStartsAfter' in rule ? rule.lineStartsAfter : []),
+        ...('lineEndsWith' in rule ? rule.lineEndsWith : []),
+    ];
+    const fuzzy = rule.fuzzy ?? shouldDefaultToFuzzy(fuzzyCandidatePatterns);
 
-    if (lineStartsAfter?.length) {
+    if ('lineStartsAfter' in rule && rule.lineStartsAfter.length > 0) {
         const { regex: lsaRegex, captureNames } = buildLineStartsAfterRegexSource(
-            lineStartsAfter,
+            rule.lineStartsAfter,
             fuzzy,
             capturePrefix,
         );
         return { captureNames, regex: compileRuleRegex(lsaRegex), usesCapture: true, usesLineStartsAfter: true };
     }
 
-    let finalRegex = regex;
+    let finalRegex: string | undefined = 'regex' in rule ? rule.regex : undefined;
     let allCaptureNames: string[] = [];
 
-    if (lineStartsWith?.length) {
-        const res = buildLineStartsWithRegexSource(lineStartsWith, fuzzy, capturePrefix);
+    if ('lineStartsWith' in rule && rule.lineStartsWith.length > 0) {
+        const res = buildLineStartsWithRegexSource(rule.lineStartsWith, fuzzy, capturePrefix);
         finalRegex = res.regex;
         allCaptureNames = res.captureNames;
     }
-    if (lineEndsWith?.length) {
-        const res = buildLineEndsWithRegexSource(lineEndsWith, fuzzy, capturePrefix);
+    if ('lineEndsWith' in rule && rule.lineEndsWith.length > 0) {
+        const res = buildLineEndsWithRegexSource(rule.lineEndsWith, fuzzy, capturePrefix);
         finalRegex = res.regex;
         allCaptureNames = res.captureNames;
     }
-    if (template) {
-        const res = buildTemplateRegexSource(template, capturePrefix);
+    if ('template' in rule) {
+        const res = buildTemplateRegexSource(rule.template, capturePrefix);
         finalRegex = res.regex;
         allCaptureNames = [...allCaptureNames, ...res.captureNames];
     }
