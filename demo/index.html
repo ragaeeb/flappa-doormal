@@ -29,13 +29,34 @@
         </div>
       </header>
 
-      <main class="main-content">
-        <!-- Left: Pages & Analysis -->
-        <div class="left-panel">
-          <section class="panel pages-panel">
+	      <main class="main-content">
+	        <!-- Left: Pages & Analysis -->
+	        <div class="left-panel">
+	          <section class="panel">
+	            <div class="panel-header">
+	              <h2>Examples</h2>
+	            </div>
+	            <div class="config-section">
+	              <div class="rule-row">
+	                <div class="form-group">
+	                  <label for="example-select">Preset</label>
+	                  <select id="example-select">
+	                    <option value="">Select an example</option>
+	                    <option value="dictionary-lemma">Arabic Dictionary Lemmas</option>
+	                  </select>
+	                </div>
+	                <div class="form-group">
+	                  <label>&nbsp;</label>
+	                  <button id="load-example-btn" type="button" class="btn btn-small btn-secondary">Load Example</button>
+	                </div>
+	              </div>
+	            </div>
+	          </section>
+
+	          <section class="panel pages-panel">
             <div class="panel-header">
               <h2>Pages</h2>
-              <button id="add-page-btn" class="btn btn-small btn-secondary">+ Add</button>
+              <button id="add-page-btn" type="button" class="btn btn-small btn-secondary">+ Add</button>
             </div>
             <div id="pages-container" class="pages-container"></div>
           </section>
@@ -43,7 +64,7 @@
           <section class="panel analysis-panel">
             <div class="panel-header">
               <h2>Detected Patterns</h2>
-              <button id="analysis-config-toggle" class="btn btn-small btn-secondary">⚙️</button>
+              <button id="analysis-config-toggle" type="button" class="btn btn-small btn-secondary">⚙️</button>
             </div>
             <div id="analysis-config" class="analysis-config hidden">
               <div class="config-row config-row-4">
@@ -81,7 +102,7 @@
         <section class="panel config-panel">
           <div class="panel-header">
             <h2>Rules</h2>
-            <button id="add-rule-btn" class="btn btn-small btn-secondary">+ Add</button>
+            <button id="add-rule-btn" type="button" class="btn btn-small btn-secondary">+ Add</button>
           </div>
           <div class="config-section">
             <div id="rules-container" class="rules-list"></div>
@@ -145,8 +166,8 @@
           <!-- Breakpoints -->
           <div class="config-section">
             <div class="config-section-title">Breakpoints <span class="hint">(one per line)</span></div>
-            <textarea id="breakpoints" class="breakpoints-input" rows="3">{{tarqim}}\s*
-\n
+            <textarea id="breakpoints" class="breakpoints-input" rows="3">&#123;&#123;tarqim&#125;&#125;\s*
+
 </textarea>
           </div>
         </section>
@@ -154,7 +175,7 @@
 
       <!-- Actions -->
       <section class="actions-section">
-        <button id="segment-btn" class="btn btn-action btn-segment">✂️ Segment</button>
+        <button id="segment-btn" type="button" class="btn btn-action btn-segment">✂️ Segment</button>
       </section>
 
       <!-- Results -->

@@ -86,6 +86,45 @@ describe('segmenter-rule-utils', () => {
             const passes2 = createPageStartGuardChecker(matchContent2, pageMap2);
             expect(passes2(rule, 0, 3)).toBe(true);
         });
+
+        it('should suppress page-start matches when the previous page ends with a stoplisted word unless punctuation ends the sentence', () => {
+            const rule = {
+                lineStartsWith: ['X'],
+                pageStartPrevWordStoplist: ['قال', 'وقيل', 'ويقال'],
+            } as SplitRule;
+
+            const { matchContent, pageMap } = makePageMap([
+                { content: 'شيء قال', id: 1 },
+                { content: 'X', id: 2 },
+            ]);
+            const passes = createPageStartGuardChecker(matchContent, pageMap);
+            expect(passes(rule, 0, 8)).toBe(false);
+
+            const { matchContent: punctuatedContent, pageMap: punctuatedPageMap } = makePageMap([
+                { content: 'شيء قال.', id: 1 },
+                { content: 'X', id: 2 },
+            ]);
+            const passesWithPunctuation = createPageStartGuardChecker(punctuatedContent, punctuatedPageMap);
+            expect(passesWithPunctuation(rule, 0, 9)).toBe(true);
+        });
+
+        it('should suppress non-page-start matches when the previous same-page Arabic word is stoplisted', () => {
+            const rule = {
+                regex: 'وعزّ:',
+                samePagePrevWordStoplist: ['جل'],
+            } as SplitRule;
+
+            const { matchContent, pageMap } = makePageMap([{ content: 'قول الله جلّ وعزّ: نص', id: 1 }]);
+            const passes = createPageStartGuardChecker(matchContent, pageMap);
+
+            expect(passes(rule, 0, matchContent.indexOf('وعزّ:'))).toBe(false);
+
+            const { matchContent: allowedContent, pageMap: allowedPageMap } = makePageMap([
+                { content: 'قول الله نعم وعزّ: نص', id: 1 },
+            ]);
+            const passesAllowed = createPageStartGuardChecker(allowedContent, allowedPageMap);
+            expect(passesAllowed(rule, 0, allowedContent.indexOf('وعزّ:'))).toBe(true);
+        });
     });
 
     describe('collectFastFuzzySplitPoints', () => {

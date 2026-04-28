@@ -1,3 +1,5 @@
+import { ARABIC_MARKS_CLASS } from '@/segmentation/tokens.js';
+
 /**
  * Normalizes line endings to Unix-style (`\n`).
  *
@@ -76,6 +78,8 @@ const EQUIV_GROUPS = [
     ['\u0649', '\u064A'], // ى <-> ي
 ];
 
+const DIACRITICS_AND_MARKS_REGEX = new RegExp(ARABIC_MARKS_CLASS, 'g');
+
 /**
  * Escapes a string for safe inclusion in a regular expression.
  *
@@ -102,6 +106,32 @@ const normalizeArabicLight = (str: string) => {
         .replace(/[\u200C\u200D]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
+};
+
+/**
+ * Normalizes Arabic text for exact comparisons while tolerating common variants.
+ *
+ * This removes Arabic diacritics, collapses whitespace, removes joiners, and
+ * maps common equivalent letters to a shared canonical form:
+ * - ا/آ/أ/إ -> ا
+ * - ة/ه -> ه
+ * - ى/ي -> ي
+ */
+export const normalizeArabicForComparison = (text: string) => {
+    return Array.from(normalizeArabicLight(text).replace(DIACRITICS_AND_MARKS_REGEX, ''))
+        .map((ch) => {
+            if (ch === '\u0622' || ch === '\u0623' || ch === '\u0625') {
+                return '\u0627';
+            }
+            if (ch === '\u0629') {
+                return '\u0647';
+            }
+            if (ch === '\u0649') {
+                return '\u064A';
+            }
+            return ch;
+        })
+        .join('');
 };
 
 export const makeDiacriticInsensitive = (text: string) => {

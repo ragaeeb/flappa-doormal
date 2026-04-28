@@ -82,6 +82,101 @@ const compareBySpecificity = (a: CommonLineStartPattern, b: CommonLineStartPatte
 const compareByCount = (a: CommonLineStartPattern, b: CommonLineStartPattern): number =>
     b.count !== a.count ? b.count - a.count : compareBySpecificity(a, b);
 
+const appendPrefix = (
+    s: string,
+    pos: number,
+    out: string,
+    matchers: RegExp[],
+    ws: 'regex' | 'space',
+): { pos: number; out: string; matched: boolean } => {
+    for (const re of matchers) {
+        if (pos >= s.length) {
+            break;
+        }
+        const m = re.exec(s.slice(pos));
+        if (!m?.index && m?.[0]) {
+            out += escapeSignatureLiteral(m[0]);
+            pos += m[0].length;
+            const wsm = /^[ \t]+/u.exec(s.slice(pos));
+            if (wsm) {
+                pos += wsm[0].length;
+                out = appendWs(out, ws);
+            }
+            return { matched: true, out, pos };
+        }
+    }
+    return { matched: false, out, pos };
+};
+
+const appendToken = (
+    s: string,
+    pos: number,
+    out: string,
+    compiled: CompiledTokenRegex[],
+): { pos: number; out: string; matched: boolean } => {
+    const best = findBestTokenMatchAt(s, pos, compiled, isArabicLetter);
+    return best
+        ? { matched: true, out: `${out}{{${best.token}}}`, pos: pos + best.text.length }
+        : { matched: false, out, pos };
+};
+
+const appendDelimiter = (s: string, pos: number, out: string): { pos: number; out: string; matched: boolean } => {
+    const ch = s[pos];
+    return ch && isCommonDelimiter(ch)
+        ? { matched: true, out: `${out}${escapeSignatureLiteral(ch)}`, pos: pos + 1 }
+        : { matched: false, out, pos };
+};
+
+const appendFallbackWord = (s: string, pos: number, out: string): string | null => {
+    const word = extractFirstWord(s.slice(pos));
+    return word ? `${out}${escapeSignatureLiteral(word)}` : null;
+};
+
+const consumeLineStartStep = (
+    s: string,
+    pos: number,
+    out: string,
+    compiled: CompiledTokenRegex[],
+    opts: ResolvedOptions,
+    matchedAny: boolean,
+    matchedToken: boolean,
+): { pos: number; out: string; matchedAny: boolean; matchedToken: boolean; steps: number; done: boolean } => {
+    const ws = skipWhitespace(s, pos, out, opts.whitespace);
+    if (ws.skipped) {
+        return { done: false, matchedAny, matchedToken, out: ws.out, pos: ws.pos, steps: 0 };
+    }
+
+    const tok = appendToken(s, pos, out, compiled);
+    if (tok.matched) {
+        return { done: false, matchedAny: true, matchedToken: true, out: tok.out, pos: tok.pos, steps: 1 };
+    }
+
+    if (matchedAny) {
+        const delim = appendDelimiter(s, pos, out);
+        if (delim.matched) {
+            return { done: false, matchedAny, matchedToken, out: delim.out, pos: delim.pos, steps: 0 };
+        }
+
+        if (opts.includeFirstWordFallback && !matchedToken) {
+            const fallback = appendFallbackWord(s, pos, out);
+            if (fallback) {
+                return { done: true, matchedAny, matchedToken, out: fallback, pos, steps: 1 };
+            }
+        }
+
+        return { done: true, matchedAny, matchedToken, out, pos, steps: 0 };
+    }
+
+    if (!opts.includeFirstWordFallback) {
+        return { done: true, matchedAny, matchedToken, out, pos, steps: 0 };
+    }
+
+    const fallback = appendFallbackWord(s, pos, out);
+    return fallback
+        ? { done: true, matchedAny: true, matchedToken, out: fallback, pos, steps: 0 }
+        : { done: true, matchedAny, matchedToken, out, pos, steps: 0 };
+};
+
 // Signature building helpers
 
 /** Remove trailing whitespace placeholders */
@@ -95,57 +190,6 @@ const trimTrailingWs = (out: string, mode: 'regex' | 'space'): string => {
 
 /** Try to extract first word for fallback */
 const extractFirstWord = (s: string): string | null => (s.match(/^[^\s:،؛.?!؟]+/u) ?? [])[0] ?? null;
-
-/** Consume prefix matchers at current position */
-const consumePrefixes = (
-    s: string,
-    pos: number,
-    out: string,
-    matchers: RegExp[],
-    ws: 'regex' | 'space',
-): { pos: number; out: string; matched: boolean } => {
-    let matched = false;
-    for (const re of matchers) {
-        if (pos >= s.length) {
-            break;
-        }
-        const m = re.exec(s.slice(pos));
-        if (!m?.index && m?.[0]) {
-            out += escapeSignatureLiteral(m[0]);
-            pos += m[0].length;
-            matched = true;
-            const wsm = /^[ \t]+/u.exec(s.slice(pos));
-            if (wsm) {
-                pos += wsm[0].length;
-                out = appendWs(out, ws);
-            }
-        }
-    }
-    return { matched, out, pos };
-};
-
-/** Try to match a token at current position and append to signature */
-const tryMatchToken = (
-    s: string,
-    pos: number,
-    out: string,
-    compiled: CompiledTokenRegex[],
-): { pos: number; out: string; matched: boolean } => {
-    const best = findBestTokenMatchAt(s, pos, compiled, isArabicLetter);
-    if (!best) {
-        return { matched: false, out, pos };
-    }
-    return { matched: true, out: `${out}{{${best.token}}}`, pos: pos + best.text.length };
-};
-
-/** Try to match a delimiter at current position */
-const tryMatchDelimiter = (s: string, pos: number, out: string): { pos: number; out: string; matched: boolean } => {
-    const ch = s[pos];
-    if (!ch || !isCommonDelimiter(ch)) {
-        return { matched: false, out, pos };
-    }
-    return { matched: true, out: out + escapeSignatureLiteral(ch), pos: pos + 1 };
-};
 
 /** Skip whitespace at position */
 const skipWhitespace = (
@@ -179,61 +223,31 @@ const tokenizeLineStart = (line: string, tokenNames: string[], opts: ResolvedOpt
         steps = 0;
 
     // Consume prefixes
-    const prefix = consumePrefixes(s, pos, out, opts.prefixMatchers, opts.whitespace);
+    const prefix = appendPrefix(s, pos, out, opts.prefixMatchers, opts.whitespace);
     pos = prefix.pos;
     out = prefix.out;
     matchedAny = prefix.matched;
 
     while (steps < 6 && pos < s.length) {
-        // Skip whitespace
-        const ws = skipWhitespace(s, pos, out, opts.whitespace);
-        if (ws.skipped) {
-            pos = ws.pos;
-            out = ws.out;
-            continue;
-        }
-
-        // Try token
-        const tok = tryMatchToken(s, pos, out, compiled);
-        if (tok.matched) {
-            pos = tok.pos;
-            out = tok.out;
-            matchedAny = matchedToken = true;
-            steps++;
-            continue;
-        }
-
-        // Try delimiter (only after matching something)
-        if (matchedAny) {
-            const delim = tryMatchDelimiter(s, pos, out);
-            if (delim.matched) {
-                pos = delim.pos;
-                out = delim.out;
-                continue;
+        const next = consumeLineStartStep(s, pos, out, compiled, opts, matchedAny, matchedToken);
+        if (next.done) {
+            if (!next.matchedAny && !next.matchedToken && next.out === out && next.pos === pos) {
+                return null;
             }
-        }
-
-        // Fallback logic
-        if (matchedAny) {
-            if (opts.includeFirstWordFallback && !matchedToken) {
-                const word = extractFirstWord(s.slice(pos));
-                if (word) {
-                    out += escapeSignatureLiteral(word);
-                    steps++;
-                }
+            if (next.steps > 0) {
+                steps += next.steps;
             }
+            matchedAny = next.matchedAny;
+            matchedToken = next.matchedToken;
+            out = next.out;
             break;
         }
 
-        if (!opts.includeFirstWordFallback) {
-            return null;
-        }
-
-        const word = extractFirstWord(s.slice(pos));
-        if (!word) {
-            return null;
-        }
-        return escapeSignatureLiteral(word);
+        pos = next.pos;
+        out = next.out;
+        matchedAny = next.matchedAny;
+        matchedToken = next.matchedToken;
+        steps += next.steps;
     }
 
     return matchedAny ? trimTrailingWs(out, opts.whitespace) : null;

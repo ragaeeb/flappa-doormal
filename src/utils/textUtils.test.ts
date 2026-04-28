@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test';
-import { adjustForUnicodeBoundary, escapeRegex, escapeTemplateBrackets, makeDiacriticInsensitive } from './textUtils';
+import {
+    adjustForUnicodeBoundary,
+    escapeRegex,
+    escapeTemplateBrackets,
+    makeDiacriticInsensitive,
+    normalizeArabicForComparison,
+} from './textUtils';
 
 describe('escapeTemplateBrackets', () => {
     it('should escape parentheses outside tokens', () => {
@@ -223,6 +229,22 @@ describe('makeDiacriticInsensitive', () => {
         expect(regex.test('مرحبا')).toBeTrue();
         expect(regex.test('مرحبأ')).toBeTrue();
         expect(regex.test('مَرْحَبَا')).toBeTrue();
+    });
+});
+
+describe('normalizeArabicForComparison', () => {
+    it('should remove Arabic diacritics and joiners', () => {
+        expect(normalizeArabicForComparison('وَي\u200Dقَالُ')).toBe('ويقال');
+    });
+
+    it('should normalize common equivalent letters', () => {
+        expect(normalizeArabicForComparison('إلاه')).toBe('الاه');
+        expect(normalizeArabicForComparison('صلاة')).toBe('صلاه');
+        expect(normalizeArabicForComparison('موسى')).toBe('موسي');
+    });
+
+    it('should collapse whitespace and trim', () => {
+        expect(normalizeArabicForComparison('  قال   العجاج  ')).toBe('قال العجاج');
     });
 });
 

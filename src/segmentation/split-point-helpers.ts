@@ -79,6 +79,19 @@ const createSplitPointFromMatch = (match: RegExpExecArray, rule: SplitRule, rule
     };
 };
 
+const addSplitPoint = (
+    splitPointsByRule: Map<number, SplitPoint[]>,
+    originalIndex: number,
+    point: SplitPoint,
+): void => {
+    const arr = splitPointsByRule.get(originalIndex);
+    if (!arr) {
+        splitPointsByRule.set(originalIndex, [point]);
+        return;
+    }
+    arr.push(point);
+};
+
 export const processCombinedMatches = (
     matchContent: string,
     combinableRules: CombinableRule[],
@@ -116,14 +129,11 @@ export const processCombinedMatches = (
                 passesRuleConstraints(rule, pageMap.getId(m.index)) &&
                 passesPageStartGuard(rule, originalIndex, m.index)
             ) {
-                const arr = splitPointsByRule.get(originalIndex);
-                if (!arr) {
-                    splitPointsByRule.set(originalIndex, [
-                        createSplitPointFromMatch(m, rule, ruleRegexes[matchedIndex]),
-                    ]);
-                } else {
-                    arr.push(createSplitPointFromMatch(m, rule, ruleRegexes[matchedIndex]));
-                }
+                addSplitPoint(
+                    splitPointsByRule,
+                    originalIndex,
+                    createSplitPointFromMatch(m, rule, ruleRegexes[matchedIndex]),
+                );
             }
         }
         if (m[0].length === 0) {

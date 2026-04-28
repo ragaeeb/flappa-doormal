@@ -370,7 +370,7 @@ describe('breakpoint-processor', () => {
             // - Page 0 has 352 chars with whitespace at positions 150 and 301
             // - maxContentLength=200 forces splitting at whitespace boundaries
             // - Expected: 3 segments from page 0 (150, 150, 50), 1 from page 1 (100)
-            const page0Content = 'A'.repeat(150) + ' ' + 'B'.repeat(150) + ' ' + 'C'.repeat(50);
+            const page0Content = `${'A'.repeat(150)} ${'B'.repeat(150)} ${'C'.repeat(50)}`;
             const page1Content = 'D'.repeat(100);
             const pages = [
                 { content: page0Content, id: 0 },
@@ -426,7 +426,7 @@ describe('breakpoint-processor', () => {
             // THIS TEST FAILS WITHOUT THE FIX - it produces tiny fragments on page 0.
 
             // Page 0: 1500 chars with punctuation at 800 and 1400
-            const page0Content = 'A'.repeat(800) + '. ' + 'B'.repeat(600) + '. ' + 'C'.repeat(96);
+            const page0Content = `${'A'.repeat(800)}. ${'B'.repeat(600)}. ${'C'.repeat(96)}`;
             // Page 1: 500 chars (fits within maxContentLength)
             const page1Content = 'D'.repeat(500);
 

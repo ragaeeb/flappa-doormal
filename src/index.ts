@@ -22,8 +22,8 @@ export {
     fixTrailingWaw,
     removeZeroWidth,
 } from './preprocessing/transforms.js';
-export type { MarkerRecoveryReport, MarkerRecoveryRun, MarkerRecoverySelector } from './recovery.js';
-export { recoverMistakenLineStartsAfterMarkers, recoverMistakenMarkersForRuns } from './recovery.js';
+export type { ArabicDictionaryEntryRuleOptions } from './segmentation/arabic-dictionary-rule.js';
+export { createArabicDictionaryEntryRule } from './segmentation/arabic-dictionary-rule.js';
 export type { PatternProcessor } from './segmentation/breakpoint-utils.js';
 export { escapeWordsOutsideTokens } from './segmentation/breakpoint-utils.js';
 export { getDebugReason, getSegmentDebugReason } from './segmentation/debug-meta.js';
@@ -34,8 +34,12 @@ export type {
 } from './segmentation/pattern-validator.js';
 export { formatValidationReport, validateRules } from './segmentation/pattern-validator.js';
 export { segmentPages } from './segmentation/segmenter.js';
-export type { ExpandResult, TokenKey, TokenMapping } from './segmentation/tokens.js';
+export type { ExpandResult, TokenKey, TokenMapping, TokenPatternName } from './segmentation/tokens.js';
 export {
+    ARABIC_BASE_LETTER_CLASS,
+    ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN,
+    ARABIC_MARKS_CLASS,
+    ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN,
     applyTokenMappings,
     containsTokens,
     expandCompositeTokensInTemplate,
@@ -71,5 +75,10 @@ export type {
     SegmentationOptions,
 } from './types/options.js';
 export { PATTERN_TYPE_KEYS, type PatternTypeKey, type SplitRule } from './types/rules.js';
-export { escapeRegex, escapeTemplateBrackets, makeDiacriticInsensitive } from './utils/textUtils.js';
+export {
+    escapeRegex,
+    escapeTemplateBrackets,
+    makeDiacriticInsensitive,
+    normalizeArabicForComparison,
+} from './utils/textUtils.js';
 export { type ValidationOptions, validateSegments } from './validation/validate-segments.js';

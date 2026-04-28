@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 // Import Types to verify they are exported correctly
 import type {
     // Core Types
+    ArabicDictionaryEntryRuleOptions,
     Breakpoint,
     BreakpointRule,
     // Analysis
@@ -16,10 +17,6 @@ import type {
     LineStartAnalysisOptions,
     LineStartPatternExample,
     Logger,
-    // Recovery
-    MarkerRecoveryReport,
-    MarkerRecoveryRun,
-    MarkerRecoverySelector,
     // Optimization
     OptimizeResult,
     Page,
@@ -47,6 +44,7 @@ import type {
     SplitRule,
     TokenKey,
     TokenMapping,
+    TokenPatternName,
     ValidationIssue,
     ValidationIssueType,
     ValidationOptions,
@@ -74,12 +72,9 @@ describe('Build Exports Validation', () => {
         expect(flappa.fixTrailingWaw).toBeFunction();
         expect(flappa.removeZeroWidth).toBeFunction();
 
-        // Recovery
-        expect(flappa.recoverMistakenLineStartsAfterMarkers).toBeFunction();
-        expect(flappa.recoverMistakenMarkersForRuns).toBeFunction();
-
         // Breakpoint Utils
         expect(flappa.escapeWordsOutsideTokens).toBeFunction();
+        expect(flappa.createArabicDictionaryEntryRule).toBeFunction();
 
         // Pattern Validator
         expect(flappa.formatValidationReport).toBeFunction();
@@ -122,6 +117,7 @@ describe('Build Exports Validation', () => {
 
         // Analysis
         const _commonPattern: CommonLineStartPattern = {} as any;
+        const _arabicDictionaryRuleOptions: ArabicDictionaryEntryRuleOptions = {} as any;
         const _lsOptions: LineStartAnalysisOptions = {} as any;
         const _lsExample: LineStartPatternExample = {} as any;
         const _rsExample: RepeatingSequenceExample = {} as any;
@@ -133,11 +129,6 @@ describe('Build Exports Validation', () => {
 
         // Optimization
         const _optimizeRes: OptimizeResult = {} as any;
-
-        // Recovery
-        const _recReport: MarkerRecoveryReport = {} as any;
-        const _recRun: MarkerRecoveryRun = {} as any;
-        const _recSel: MarkerRecoverySelector = {} as any;
 
         // Segmentation & Rule Validation
         const _patProc: PatternProcessor = {} as any;
@@ -154,6 +145,7 @@ describe('Build Exports Validation', () => {
         const _expRes: ExpandResult = {} as any;
         const _tokKey: TokenKey = {} as any;
         const _tokMap: TokenMapping = {} as any;
+        const _tokPatternName: TokenPatternName = {} as any;
 
         // Core
         const _bp: Breakpoint = {} as any;
@@ -179,6 +171,7 @@ describe('Build Exports Validation', () => {
         // Just to avoid unused var errors (though TS check handles this implicitly by compiling)
         expect([
             _commonPattern,
+            _arabicDictionaryRuleOptions,
             _lsOptions,
             _lsExample,
             _rsExample,
@@ -186,9 +179,6 @@ describe('Build Exports Validation', () => {
             _rsPattern,
             _detected,
             _optimizeRes,
-            _recReport,
-            _recRun,
-            _recSel,
             _patProc,
             _ruleValRes,
             _valIssue,
@@ -201,6 +191,7 @@ describe('Build Exports Validation', () => {
             _expRes,
             _tokKey,
             _tokMap,
+            _tokPatternName,
             _bp,
             _bpRule,
             _page,

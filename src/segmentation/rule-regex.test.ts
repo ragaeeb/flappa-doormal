@@ -42,6 +42,11 @@ describe('rule-regex', () => {
         it('should filter out internal reserved prefixes (_r, _w)', () => {
             expect(extractNamedCaptureNames('(?<_r0>abc)(?<_w1>def)(?<valid>ghi)')).toEqual(['valid']);
         });
+
+        it('should ignore lookbehind assertions when extracting named groups', () => {
+            expect(extractNamedCaptureNames('(?<=^)(?<lemma>abc):')).toEqual(['lemma']);
+            expect(extractNamedCaptureNames('(?<!x)(?<lemma>abc):')).toEqual(['lemma']);
+        });
     });
 
     describe('processPattern', () => {

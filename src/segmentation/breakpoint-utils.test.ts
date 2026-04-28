@@ -102,7 +102,7 @@ describe('breakpoint-utils', () => {
 
         it('should escape regex metacharacters except ()[] which are handled by processPattern', () => {
             // ()[] are NOT escaped here - processPattern handles them via escapeTemplateBrackets
-            expect(escapeWordsOutsideTokens('.*+?^${}()|[]\\')).toBe('\\.\\*\\+\\?\\^\\$\\{\\}()\\|[]\\\\');
+            expect(escapeWordsOutsideTokens(String.raw`.*+?^\${}()|[]\\`)).toBe('\\.\\*\\+\\?\\^\\$\\{\\}()\\|[]\\\\');
         });
 
         it('should leave literal brackets for processPattern to escape', () => {

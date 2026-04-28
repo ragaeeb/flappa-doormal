@@ -1,8 +1,10 @@
 import type { SplitRule } from '@/types/rules.js';
 import type { PageMap, SplitPoint } from '@/types/segmenter.js';
+import { normalizeArabicForComparison } from '@/utils/textUtils.js';
 import { isPageExcluded } from './breakpoint-utils.js';
 import { compileFastFuzzyTokenRule, type FastFuzzyTokenRule, matchFastFuzzyTokenAt } from './fast-fuzzy-prefix.js';
 import { extractNamedCaptureNames, hasCapturingGroup, processPattern } from './rule-regex.js';
+import { ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN } from './tokens.js';
 
 export type FastFuzzyRule = {
     compiled: FastFuzzyTokenRule;
@@ -82,9 +84,35 @@ export const partitionRulesForMatching = (rules: SplitRule[]) => {
 
 export type PageStartGuardChecker = (rule: SplitRule, ruleIndex: number, matchStart: number) => boolean;
 
+const STRONG_SENTENCE_TERMINATORS = /[.!?؟؛]$/u;
+const TRAILING_PAGE_WRAP_NOISE = /[\s\u0660-\u0669\d«»"“”'‘’()[\]{}<>]+$/u;
+const TRAILING_WORD_DELIMITERS = /[\s\u0660-\u0669\d«»"“”'‘’()[\]{}<>.,!?؟؛،:]+$/u;
+const ARABIC_WORD_REGEX = new RegExp(ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN, 'gu');
+
+const trimTrailingPageWrapNoise = (text: string) => {
+    let trimmed = text.trimEnd();
+    while (trimmed !== trimmed.replace(TRAILING_PAGE_WRAP_NOISE, '')) {
+        trimmed = trimmed.replace(TRAILING_PAGE_WRAP_NOISE, '');
+    }
+    return trimmed;
+};
+
+const endsWithStrongSentenceTerminator = (pageContent: string) => {
+    return STRONG_SENTENCE_TERMINATORS.test(trimTrailingPageWrapNoise(pageContent));
+};
+
+const extractLastArabicWord = (pageContent: string) => {
+    const withoutTrailingDelimiters = trimTrailingPageWrapNoise(pageContent).replace(TRAILING_WORD_DELIMITERS, '');
+    const matches = [...withoutTrailingDelimiters.matchAll(ARABIC_WORD_REGEX)];
+    return matches.at(-1)?.[0] ?? '';
+};
+
 export const createPageStartGuardChecker = (matchContent: string, pageMap: PageMap) => {
     const pageStartToBoundaryIndex = new Map(pageMap.boundaries.map((b, i) => [b.start, i]));
     const compiledPageStartPrev = new Map<number, RegExp | null>();
+    const compiledPrevWordStoplists = new Map<number, Set<string> | null>();
+    const compiledSamePagePrevWordStoplists = new Map<number, Set<string> | null>();
+    const pageIdToBoundaryIndex = new Map(pageMap.boundaries.map((b, i) => [b.id, i]));
 
     const getPageStartPrevRegex = (rule: SplitRule, ruleIndex: number) => {
         if (compiledPageStartPrev.has(ruleIndex)) {
@@ -98,6 +126,46 @@ export const createPageStartGuardChecker = (matchContent: string, pageMap: PageM
         const re = new RegExp(`(?:${processPattern(pattern, false).pattern})$`, 'u');
         compiledPageStartPrev.set(ruleIndex, re);
         return re;
+    };
+
+    const getPrevWordStoplist = (rule: SplitRule, ruleIndex: number) => {
+        if (compiledPrevWordStoplists.has(ruleIndex)) {
+            return compiledPrevWordStoplists.get(ruleIndex) ?? null;
+        }
+
+        const stoplist = (rule as { pageStartPrevWordStoplist?: string[] }).pageStartPrevWordStoplist;
+        if (!stoplist?.length) {
+            compiledPrevWordStoplists.set(ruleIndex, null);
+            return null;
+        }
+
+        const normalized = new Set(stoplist.map((word) => normalizeArabicForComparison(word)).filter(Boolean));
+        compiledPrevWordStoplists.set(ruleIndex, normalized);
+        return normalized;
+    };
+
+    const getSamePagePrevWordStoplist = (rule: SplitRule, ruleIndex: number) => {
+        if (compiledSamePagePrevWordStoplists.has(ruleIndex)) {
+            return compiledSamePagePrevWordStoplists.get(ruleIndex) ?? null;
+        }
+
+        const stoplist = (rule as { samePagePrevWordStoplist?: string[] }).samePagePrevWordStoplist;
+        if (!stoplist?.length) {
+            compiledSamePagePrevWordStoplists.set(ruleIndex, null);
+            return null;
+        }
+
+        const normalized = new Set(stoplist.map((word) => normalizeArabicForComparison(word)).filter(Boolean));
+        compiledSamePagePrevWordStoplists.set(ruleIndex, normalized);
+        return normalized;
+    };
+
+    const getPreviousPageContent = (boundaryIndex: number) => {
+        if (boundaryIndex <= 0) {
+            return '';
+        }
+        const prevBoundary = pageMap.boundaries[boundaryIndex - 1];
+        return matchContent.slice(prevBoundary.start, prevBoundary.end);
     };
 
     const getPrevPageLastNonWsChar = (boundaryIndex: number) => {
@@ -114,17 +182,54 @@ export const createPageStartGuardChecker = (matchContent: string, pageMap: PageM
         return '';
     };
 
+    const getCurrentPageContentBeforeMatch = (matchStart: number) => {
+        const pageId = pageMap.getId(matchStart);
+        const boundaryIndex = pageIdToBoundaryIndex.get(pageId);
+        if (boundaryIndex === undefined) {
+            return '';
+        }
+        const boundary = pageMap.boundaries[boundaryIndex];
+        return matchContent.slice(boundary.start, matchStart);
+    };
+
     return (rule: SplitRule, ruleIndex: number, matchStart: number) => {
         const boundaryIndex = pageStartToBoundaryIndex.get(matchStart);
-        if (boundaryIndex === undefined || boundaryIndex === 0) {
+        if (boundaryIndex !== undefined && boundaryIndex !== 0) {
+            const prevReq = getPageStartPrevRegex(rule, ruleIndex);
+            if (prevReq) {
+                const lastChar = getPrevPageLastNonWsChar(boundaryIndex);
+                if (!lastChar || !prevReq.test(lastChar)) {
+                    return false;
+                }
+            }
+
+            const prevWordStoplist = getPrevWordStoplist(rule, ruleIndex);
+            if (!prevWordStoplist) {
+                return true;
+            }
+
+            const previousPageContent = getPreviousPageContent(boundaryIndex);
+            if (endsWithStrongSentenceTerminator(previousPageContent)) {
+                return true;
+            }
+
+            const lastWord = extractLastArabicWord(previousPageContent);
+            if (!lastWord) {
+                return true;
+            }
+
+            return !prevWordStoplist.has(normalizeArabicForComparison(lastWord));
+        }
+
+        const samePagePrevWordStoplist = getSamePagePrevWordStoplist(rule, ruleIndex);
+        if (!samePagePrevWordStoplist) {
             return true;
         }
-        const prevReq = getPageStartPrevRegex(rule, ruleIndex);
-        if (!prevReq) {
+        const lastWord = extractLastArabicWord(getCurrentPageContentBeforeMatch(matchStart));
+        if (!lastWord) {
             return true;
         }
-        const lastChar = getPrevPageLastNonWsChar(boundaryIndex);
-        return lastChar ? prevReq.test(lastChar) : false;
+        return !samePagePrevWordStoplist.has(normalizeArabicForComparison(lastWord));
     };
 };
 

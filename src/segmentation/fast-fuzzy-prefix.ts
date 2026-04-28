@@ -11,7 +11,7 @@
  * token patterns (plain text alternation via `|`), not general regex.
  */
 
-import { getTokenPattern } from './tokens.js';
+import { getTokenPattern, TOKEN_PATTERNS, type TokenPatternName } from './tokens.js';
 
 export type FastFuzzyTokenRule = {
     token: string;
@@ -78,10 +78,10 @@ export const compileFastFuzzyTokenRule = (tokenTemplate: string) => {
         return null;
     }
     const token = m[1];
-    const tokenPattern = getTokenPattern(token);
-    if (!tokenPattern) {
+    if (!(token in TOKEN_PATTERNS)) {
         return null;
     }
+    const tokenPattern = getTokenPattern(token as TokenPatternName);
     const compiled = compileLiteralAlternation(tokenPattern);
     return compiled ? { alternatives: compiled.alternatives, token } : null;
 };

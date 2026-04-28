@@ -2,7 +2,9 @@ import { describe, expect, it } from 'bun:test';
 import type { Page } from '@/types/index.js';
 import type { SplitRule } from '@/types/rules.js';
 import { FAST_PATH_THRESHOLD } from './breakpoint-constants';
+import { createArabicDictionaryEntryRule } from './arabic-dictionary-rule.js';
 import { dedupeSplitPoints, ensureFallbackSegment, segmentPages } from './segmenter';
+import { getTokenPattern } from './tokens.js';
 
 describe('segmenter', () => {
     describe('dedupeSplitPoints', () => {
@@ -248,6 +250,110 @@ describe('segmenter', () => {
                 from: 3,
                 meta: { type: 'chapter' },
             });
+        });
+
+        it('should let clients build type C rules from the spaced letter-code token', () => {
+            const pages: Page[] = [
+                {
+                    content: 'ك ش ن\nنص أول\n(هـ ث]\nنص ثان\n[خَ ف)\nنص ثالث\n[ك ش ن\nخَ ف)',
+                    id: 0,
+                },
+            ];
+
+            const harfCodes = getTokenPattern('harfs').replaceAll('\\s+', '[ \\t]+');
+            const segments = segmentPages(pages, {
+                rules: [
+                    {
+                        meta: { type: 'C' },
+                        regex: `^(?:(?<huruf>${harfCodes})|(?:\\(|\\[)(?<huruf>${harfCodes})(?:\\)|\\]))$`,
+                    },
+                ],
+            });
+
+            expect(segments).toHaveLength(3);
+            expect(segments[0]).toMatchObject({ from: 0, meta: { huruf: 'ك ش ن', type: 'C' } });
+            expect(segments[0].content).toStartWith('ك ش ن');
+            expect(segments[1]).toMatchObject({ from: 0, meta: { huruf: 'هـ ث', type: 'C' } });
+            expect(segments[1].content).toStartWith('هـ ث');
+            expect(segments[2]).toMatchObject({ from: 0, meta: { huruf: 'خَ ف', type: 'C' } });
+            expect(segments[2].content).toStartWith('خَ ف');
+        });
+
+        it('should segment a chapter heading followed by a parenthesized type C line with a shared decode-style config', () => {
+            const harfCodes = getTokenPattern('harfs').replaceAll('\\s+', '[ \\t]+');
+            const pages: Page[] = [{ content: '(بَاب الهَاء والثاء)\n(هـ ث)\nنص', id: 0 }];
+
+            const segments = segmentPages(pages, {
+                breakpoints: ['{{tarqim}}'],
+                maxPages: 1,
+                rules: [
+                    { lineStartsAfter: ['## '], meta: { type: 'chapter' } },
+                    { fuzzy: true, lineStartsAfter: ['{{bab}} '], meta: { type: 'chapter' } },
+                    { meta: { type: 'C' }, regex: `^(?:${harfCodes}|(?:\\(|\\[)(?:${harfCodes})(?:\\)|\\]))$` },
+                ],
+            });
+
+            expect(segments).toHaveLength(2);
+            expect(segments[0].content).toStartWith('(بَاب الهَاء والثاء)');
+            expect(segments[0].meta).toBeUndefined();
+            expect(segments[1]).toMatchObject({ meta: { type: 'C' } });
+            expect(segments[1].content).toStartWith('(هـ ث)');
+        });
+
+        it('should segment consecutive bare type C lines with a shared decode-style config', () => {
+            const harfCodes = getTokenPattern('harfs').replaceAll('\\s+', '[ \\t]+');
+            const pages: Page[] = [{ content: 'س ط ب\nس د ر\nنص', id: 0 }];
+
+            const segments = segmentPages(pages, {
+                breakpoints: ['{{tarqim}}'],
+                maxPages: 1,
+                rules: [{ meta: { type: 'C' }, regex: `^(?:${harfCodes}|(?:\\(|\\[)(?:${harfCodes})(?:\\)|\\]))$` }],
+            });
+
+            expect(segments).toHaveLength(2);
+            expect(segments[0]).toMatchObject({ meta: { type: 'C' } });
+            expect(segments[0].content).toBe('س ط ب');
+            expect(segments[1]).toMatchObject({ meta: { type: 'C' } });
+            expect(segments[1].content).toStartWith('س د ر');
+        });
+
+        it('should split a trailing type C line after a dictionary entry when the shared type C rule is present', () => {
+            const harfCodes = getTokenPattern('harfs').replaceAll('\\s+', '[ \\t]+');
+            const pages: Page[] = [
+                {
+                    content: `فسد: قَالَ اللَّيْث: الفَساد: نقيضُ الصَّلاح، وَالْفِعْل فَسَد يَفْسُدُ فَسَادًا.
+قلتُ: ولغة أُخْرَى: فَسُد فُسُوداً.
+وقولُ الله جلّ وعزّ: {وَيَسْعَوْنَ فِى الاَْرْضِ فَسَاداً} (الْمَائِدَة: ٣٣) ، نصب (فَسَادًا) لِأَنَّهُ مفعول لَهُ، كأنّه قَالَ: يَسعَوْن فِي الأَرْض للْفَسَاد.
+وَيُقَال: أفسَدَ فلانٌ المالَ يُفسِدُه إفساداً وَفَسَادًا {وَاللَّهُ لاَ يُحِبُّ الْفَسَادَ} (الْبَقَرَة: ٢٠٥) وفَسَّد الشيءَ: إِذا أَبارَه.
+وَقَالَ أَبُو جُنْدَب:
+وقلتُ لهمْ قد أدركَتْكُمْ كتِيبَةٌ
+مُفَسَّدةُ الأدْبارِ مَا لَمْ تُخَفّرِ
+أَي: إِذا شَدَّتْ على قوم قَطَّعَتْ أدبارهم مَا لم تُخفَّر الأدبار، أَي: مَا لم تُمنَع. واستسفد السُّلْطَان قائده: إِذا سَاءَ إِلَيْهِ حَتَّى استعصى عَلَيْهِ.
+س د ب`,
+                    id: 0,
+                },
+            ];
+
+            const segments = segmentPages(pages, {
+                breakpoints: ['{{tarqim}}'],
+                maxPages: 1,
+                rules: [
+                    { meta: { type: 'C' }, regex: `^(?:${harfCodes}|(?:\\(|\\[)(?:${harfCodes})(?:\\)|\\]))$` },
+                    createArabicDictionaryEntryRule({
+                        pageStartPrevWordStoplist: ['قال', 'وقال', 'وقيل', 'ويقال', 'يقال', 'من', 'قلت', 'فقال', 'قالوا'],
+                        samePagePrevWordStoplist: ['جل'],
+                        stopWords: ['وقيل', 'ويقال', 'قال', 'العجاج', 'أخاك', 'الليث'],
+                    }),
+                ],
+            });
+            const fasedSegment = segments.find((segment) => segment.meta?.lemma === 'فسد');
+            const typeCSegment = segments.find((segment) => segment.meta?.type === 'C');
+
+            expect(fasedSegment).toBeDefined();
+            expect(fasedSegment?.from).toBe(0);
+            expect(typeCSegment).toBeDefined();
+            expect(typeCSegment).toMatchObject({ from: 0, meta: { type: 'C' } });
+            expect(typeCSegment?.content).toBe('س د ب');
         });
 
         it('should auto-detect capture groups in regex and use captured content', () => {
@@ -2455,6 +2561,84 @@ describe('segmenter', () => {
             expect(result[0].content).toContain('أَخْبَرَنَا الزبير');
             expect(result[1].content).toContain('أَخْبَرَنَا الْقُرَشِيُّ');
             expect(result[2].content).toContain('أَخْبَرَنَا إِبْرَاهِيمُ');
+        });
+
+        it('should avoid splitting at page start when the previous page ends with a stoplisted word', () => {
+            const pages: Page[] = [
+                { content: 'هذا موضع قال', id: 1 },
+                { content: 'العجاج: شاهد من الشواهد', id: 2 },
+                { content: 'قال.', id: 3 },
+                { content: 'لع: مادة صحيحة', id: 4 },
+                { content: 'وقيل', id: 5 },
+                { content: 'والعَزُوزُ: الشاةُ الضيِّقةُ الإحْليل', id: 6 },
+            ];
+
+            const rules = [
+                {
+                    pageStartPrevWordStoplist: ['قال', 'وقيل', 'ويقال'],
+                    regex: '^(?<lemma>[ء-غف-ي][\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]*(?:[ء-غف-ي][\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]*){1,10}):',
+                    split: 'at',
+                },
+            ] as SplitRule[];
+
+            const result = segmentPages(pages, { rules });
+
+            // Page 2 would be a false positive because page 1 ends with "قال".
+            // Page 4 should still split because page 3 ends with a strong terminator.
+            // Page 6 would be a false positive because page 5 ends with "وقيل".
+            expect(result).toHaveLength(2);
+            expect(result[0]).toMatchObject({ from: 1, to: 3 });
+            expect(result[1]).toMatchObject({ from: 4, to: 6 });
+            expect(result[1].content).toStartWith('لع:');
+            expect(result[1].content).not.toContain('العجاج: شاهد من الشواهد');
+        });
+    });
+
+    describe('Arabic dictionary entry segmentation', () => {
+        it('should segment dictionary entries while ignoring false positives', () => {
+            const pages: Page[] = [
+                {
+                    content: [
+                        'عز: العزَّة لله تبارك من يشاء.',
+                        'والعزَّاءُ: السَّنة الشَّديدةُ، قال العجَّاجُ: «٢»',
+                        'وقيل: هي الشدة والعَزُوزُ: الشاةُ الضيِّقةُ الإحْليل.',
+                        'والعُلْعُلُ: اسمُ الذَّكر، وهو رأْسُ الرَّهابة أيضاً، والعَلْعَالُ: الذَّكرُ من القنابر. ويقال: عَلَّ أخاك: أي لعلَّ أخاك.',
+                        'لع: قال زائدةُ: جاءت الإبلُ تُلَعْلِعُ.',
+                        'واللُّعْلَعُ: السَّاب نفسه. واللَّعْلَعَةُ: بصيصه. والتَّلَعْلُعُ: التَّلأْلُؤُ. والتَّلَعْلُعُ: التَّكَسُّرُ، قال العجاج: «٢» .',
+                    ].join('\n'),
+                    id: 1,
+                },
+            ];
+
+            const stopWords = ['وقيل', 'ويقال', 'قال', 'العجاج', 'العجّاج', 'أخاك'];
+            const stopAlternation = stopWords.join('|');
+            const lemmaChar = '[ء-غف-ي][\\u0610-\\u061A\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]*';
+            const regex =
+                `(?:(?<=^)|(?<=\\n)|(?<=\\s)(?=و(?:ال)?))` +
+                `(?!(?:${stopAlternation}):)` +
+                `(?<lemma>(?:و)?(?:ال)?${lemmaChar}(?:${lemmaChar}){1,10}):`;
+
+            const segments = segmentPages(pages, {
+                rules: [{ regex, split: 'at' }],
+            });
+
+            expect(segments.map((segment) => segment.content.split(/\s+/u, 1)[0])).toEqual([
+                'عز:',
+                'والعزَّاءُ:',
+                'والعَزُوزُ:',
+                'والعُلْعُلُ:',
+                'والعَلْعَالُ:',
+                'لع:',
+                'واللُّعْلَعُ:',
+                'واللَّعْلَعَةُ:',
+                'والتَّلَعْلُعُ:',
+                'والتَّلَعْلُعُ:',
+            ]);
+            expect(segments.some((segment) => segment.content.startsWith('وقيل:'))).toBeFalse();
+            expect(segments.some((segment) => segment.content.startsWith('ويقال:'))).toBeFalse();
+            expect(segments.some((segment) => segment.content.startsWith('ويقالُ:'))).toBeFalse();
+            expect(segments.some((segment) => segment.content.startsWith('العجاج:'))).toBeFalse();
+            expect(segments.some((segment) => segment.content.startsWith('أخاك:'))).toBeFalse();
         });
     });
 
