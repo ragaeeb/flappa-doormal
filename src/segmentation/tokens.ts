@@ -1,4 +1,30 @@
 /**
+ * Arabic base letters used by low-level dictionary-style regex helpers.
+ *
+ * This is intentionally broader than `{{harf}}`:
+ * - includes standalone hamza `ء`
+ * - stays as a raw regex fragment rather than a template token
+ */
+export const ARABIC_BASE_LETTER_CLASS = '[ء-غف-ي]';
+
+/**
+ * Arabic combining marks / annotation signs used by low-level regex helpers.
+ */
+export const ARABIC_MARKS_CLASS = '[\\u0610-\\u061A\\u0640\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]';
+
+/**
+ * A single Arabic base letter followed by zero or more combining marks.
+ */
+export const ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN = `${ARABIC_BASE_LETTER_CLASS}${ARABIC_MARKS_CLASS}*`;
+
+/**
+ * One or more Arabic letters, where each letter may carry combining marks.
+ */
+export const ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN = `(?:${ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN})+`;
+
+const ARABIC_SPACED_CODE_ATOM = `[أ-غف-ي]${ARABIC_MARKS_CLASS}*`;
+
+/**
  * Base token definitions mapping human-readable token names to regex patterns.
  *
  * These tokens contain raw regex patterns and do not reference other tokens.
@@ -53,7 +79,7 @@ const RUMUZ_ATOM = `(?:${RUMUZ_ATOMS.join('|')})`;
 
 const RUMUZ_BLOCK = `${RUMUZ_ATOM}(?:\\s+${RUMUZ_ATOM})*`;
 
-const BASE_TOKENS: Record<string, string> = {
+const BASE_TOKENS = {
     /** Chapter marker (باب). */
     bab: 'باب',
 
@@ -72,8 +98,8 @@ const BASE_TOKENS: Record<string, string> = {
     /** Single Arabic letter (أ-ي). Does NOT include diacritics. */
     harf: '[أ-ي]',
 
-    /** One or more single Arabic letters separated by spaces. For multi-letter codes use `{{rumuz}}`. */
-    harfs: '[أ-ي](?:\\s+[أ-ي])*',
+    /** One or more single Arabic letters separated by spaces, allowing marks/tatweel on each isolated letter (e.g. `د ت س`, `هـ ث`). For multi-letter codes use `{{rumuz}}`. */
+    harfs: `${ARABIC_SPACED_CODE_ATOM}(?:\\s+${ARABIC_SPACED_CODE_ATOM})*`,
 
     /** Horizontal rule / separator: 5+ repeated dashes, underscores, equals, or tatweels. Mixed allowed. */
     hr: '[-–—ـ_=]{5,}',
@@ -104,7 +130,7 @@ const BASE_TOKENS: Record<string, string> = {
 
     /** Arabic/common punctuation: `.`, `!`, `?`, `؟`, `؛`. */
     tarqim: '[.!?؟؛]',
-};
+} as const satisfies Record<string, string>;
 
 /** Pre-defined token constants for use in patterns. */
 export const Token = {
@@ -120,7 +146,7 @@ export const Token = {
     FASL: '{{fasl}}',
     /** Single Arabic letter */
     HARF: '{{harf}}',
-    /** Multiple Arabic letters separated by spaces */
+    /** Multiple Arabic letters separated by spaces, allowing marks/tatweel on each isolated letter */
     HARFS: '{{harfs}}',
     /** Horizontal rule / separator (repeated dashes) */
     HR: '{{hr}}',
@@ -151,6 +177,11 @@ export const Token = {
  */
 export type TokenKey = keyof typeof Token;
 
+/**
+ * Type representing valid token pattern names for `getTokenPattern()`.
+ */
+export type TokenPatternName = keyof typeof TOKEN_PATTERNS;
+
 /** Wraps a token constant with a named capture: `{{token}}` → `{{token:name}}`. */
 export const withCapture = (token: string, name: string): string => {
     // Extract token name from {{token}} format
@@ -163,10 +194,10 @@ export const withCapture = (token: string, name: string): string => {
 };
 
 /** Composite tokens that reference base tokens. Pre-expanded at load time. @internal */
-const COMPOSITE_TOKENS: Record<string, string> = {
+const COMPOSITE_TOKENS = {
     /** Common hadith numbering format: Arabic-Indic digits + dash + space. */
     numbered: '{{raqms}} {{dash}} ',
-};
+} as const satisfies Record<string, string>;
 
 /** Expands composite tokens (e.g. `{{numbered}}`) to their underlying template form. */
 export const expandCompositeTokensInTemplate = (template: string) => {
@@ -217,11 +248,11 @@ const expandBaseTokens = (template: string) =>
  * // Using the numbered convenience token
  * { lineStartsAfter: ['{{numbered}}'], split: 'at' }
  */
-export const TOKEN_PATTERNS: Record<string, string> = {
+export const TOKEN_PATTERNS = {
     ...BASE_TOKENS,
     // Pre-expand composite tokens at module load time
     ...Object.fromEntries(Object.entries(COMPOSITE_TOKENS).map(([k, v]) => [k, expandBaseTokens(v)])),
-};
+} as const satisfies Record<string, string>;
 
 /**
  * Regex pattern for matching tokens with optional named capture syntax.
@@ -501,13 +532,13 @@ export const templateToRegex = (template: string) => {
  * Useful for documentation, validation, or building user interfaces
  * that show available tokens.
  *
- * @returns Array of token names (e.g., `['bab', 'basmala', 'bullet', ...]`)
+ * @returns Array of token names (e.g., `['bab', 'basmalah', 'bullet', ...]`)
  *
  * @example
  * getAvailableTokens()
- * // → ['bab', 'basmala', 'bullet', 'dash', 'harf', 'kitab', 'naql', 'raqm', 'raqms']
+ * // → ['bab', 'basmalah', 'bullet', 'dash', 'harf', 'kitab', 'naql', 'raqm', 'raqms']
  */
-export const getAvailableTokens = () => Object.keys(TOKEN_PATTERNS);
+export const getAvailableTokens = (): TokenPatternName[] => Object.keys(TOKEN_PATTERNS) as TokenPatternName[];
 
 /**
  * Gets the regex pattern for a specific token name.
@@ -515,15 +546,15 @@ export const getAvailableTokens = () => Object.keys(TOKEN_PATTERNS);
  * Returns the raw pattern string as defined in `TOKEN_PATTERNS`,
  * without any expansion or capture group wrapping.
  *
- * @param tokenName - The token name to look up (e.g., 'raqms', 'dash')
- * @returns The regex pattern string, or `undefined` if token doesn't exist
+ * @param tokenName - The token name to look up (e.g., `'raqms'`, `'dash'`, `'harfs'`)
+ * @returns The regex pattern string for that known token
  *
  * @example
  * getTokenPattern('raqms')   // → '[\\u0660-\\u0669]+'
  * getTokenPattern('dash')    // → '[-–—ـ]'
- * getTokenPattern('unknown') // → undefined
+ * getTokenPattern('harfs')     // → pattern for spaced isolated Arabic letter codes
  */
-export const getTokenPattern = (tokenName: string) => TOKEN_PATTERNS[tokenName];
+export const getTokenPattern = (tokenName: TokenPatternName) => TOKEN_PATTERNS[tokenName];
 
 /**
  * Tokens that should default to fuzzy matching when used in rules.

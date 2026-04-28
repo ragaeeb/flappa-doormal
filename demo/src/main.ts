@@ -1,6 +1,7 @@
 import './style.css';
 import {
     analyzeCommonLineStarts,
+    createArabicDictionaryEntryRule,
     getSegmentDebugReason,
     type Page,
     type Segment,
@@ -26,6 +27,28 @@ interface RuleData {
     element: HTMLElement;
 }
 
+interface DemoRulePreset {
+    fuzzy?: boolean;
+    metaType?: string;
+    max?: number;
+    min?: number;
+    pageStartGuard?: string;
+    pageStartPrevWordStoplist?: string[];
+    pattern: string;
+    patternType: PatternType;
+    split?: 'at' | 'after';
+}
+
+interface DemoPreset {
+    breakpoints?: string[];
+    debug?: boolean;
+    maxPages?: number;
+    pageJoiner?: 'space' | 'newline';
+    pages: Array<{ content: string; id: number }>;
+    prefer?: 'longer' | 'shorter';
+    rules: DemoRulePreset[];
+}
+
 type PatternType = 'lineStartsWith' | 'lineStartsAfter' | 'lineEndsWith' | 'template' | 'regex';
 
 // ============================================
@@ -47,6 +70,8 @@ const segmentBtn = document.getElementById('segment-btn')!;
 const resultsContainer = document.getElementById('results-container')!;
 const resultStats = document.getElementById('result-stats')!;
 const analysisContainer = document.getElementById('analysis-container')!;
+const exampleSelect = document.getElementById('example-select') as HTMLSelectElement;
+const loadExampleBtn = document.getElementById('load-example-btn') as HTMLButtonElement;
 
 // Analysis config
 const analysisConfigToggle = document.getElementById('analysis-config-toggle')!;
@@ -68,6 +93,65 @@ const debugToggle = document.getElementById('debug-toggle') as HTMLInputElement;
 const preRemoveZW = document.getElementById('pre-remove-zw') as HTMLInputElement;
 const preCondenseEllipsis = document.getElementById('pre-condense-ellipsis') as HTMLInputElement;
 const preFixWaw = document.getElementById('pre-fix-waw') as HTMLInputElement;
+
+const dictionaryLemmaStopWords = Array.from(
+    new Set(
+        `ويقال|الحديث|أي|قال|وقال|يقول|فيقال|وقيل|قلت|أقول|وتقول|قوله|يعني|يقولون|ويروى|يقال|فقال|وقالوا|يريد|وقوله|ويروي|وهي|وقولهم|أراد|والفعل|تقول|معناه|ومنه|وهو|أما|وجل|تعالى|والجميع|قالوا|ورأ|ويقرأ|والواحد|الواحدة|قَالَ|وَمِنْهُم|قلتُ|فَقَالَ|وَكَذَلِكَ|وَقَالَ|يَقُول|وَقيل|قُلت|يُرِيد|وَيُقَال|اللحياني|أَرَادَ|الْأَصْمَعِي|وَتقول|اللَّيْث|وَقَوله|قيل|الأصمعيّ|اللِّحياني|وَالْجمع|وأمّا|اللحيانيُّ|يَعْنِي|شمر|قَالُوا|وَأنْشد|يُقَال|مَعْنَاهُ|وَيقال|الفرّاء|قَوْله|وَيَقُول|وأنشدنا|اللِّحيانيّ|فَمَعْنَاه|فَيُقَال|الْمَعْنى|وَيَقُولُونَ|الْفراء|قَالَت|أَحدهَا|أَحدهمَا|وَقَالُوا|ويُقال|وقرىء|غَيره|وقالَ|قالَ|الأصمعيُّ|الليثُ|اللَّيث|شمِر|ويقالُ|والضَّحْك|شَمِر|ويُروَى|قُلتُ|ويُقَالُ|قُلْتُ|ثَعْلَب|ويُرْوَى|فَقَالَت|يقالُ|يقولُ|وَقَوْلهمْ|أَي|اللحيانيّ|اللّحيانيّ|إِحْدَاهمَا|وَالِاسْم|ويُروى|والواحدة|وقولُه|فَقَالُوا|غيرُه|وَمَعْنَاهُ|الْكسَائي|وَمعنى|فَقلت|شَمِرٌ|تَقول|وَالثَّانِي|يُقال|وتقولُ|والجميعُ|تقولُ|وَالْمعْنَى|وَمِنْه|والفِعْل|والإخْلاَفُ|وأَنشد|وَمثله|وأنشَد|وجَمْعُه|وتَقُولُ|وَهِي|أيْ|وَيُقالُ|ويُقالُ|وَالْفِعْل|قولُه|والطَبَق|وَالثَّالِث|قلتَ|والكَلُّ|والمكْرةُ|وَمِنْهَا|قَالَا|وأَنْشد|اللّيث|وأَنشَد|شَمر|أَراد|يُريد|الفَرّاء|والفِعل|وَجَمعهَا|الْوَاحِدَة|وَجمعه|ويُجمع|والأَلْب|والبال|وأَلْوى|والأُمّة|مِنْهُم|وفيهَا|فَمِنْهَا|العجاج|العجّاج|أخاك`.split(
+            '|',
+        ),
+    ),
+);
+const dictionaryLemmaPrevWordStoplist = ['قال', 'وقال', 'وقيل', 'ويقال', 'يقال', 'قلت', 'فقال', 'قالوا'];
+const dictionaryLemmaRule = createArabicDictionaryEntryRule({
+    captureName: 'lemma',
+    pageStartPrevWordStoplist: dictionaryLemmaPrevWordStoplist,
+    stopWords: dictionaryLemmaStopWords,
+});
+const demoPresets: Record<string, DemoPreset> = {
+    'dictionary-lemma': {
+        debug: true,
+        maxPages: 1,
+        pageJoiner: 'space',
+        pages: [
+            {
+                content: [
+                    '## باب العين والزاي (ع ز، ز ع مستعملان)',
+                    'عز: العزَّة لله تبارك وتعالى، والله العزيز يُعِزُّ من يشاء ويُذِلُّ من يشاء.',
+                    'والعزَّاءُ: السَّنة الشَّديدةُ، قال العجَّاجُ: «٢»',
+                    'وقيل: هي الشدة والعَزُوزُ: الشاةُ الضيِّقةُ الإحْليل التي لا تدرُّ بحلبة.',
+                    'والمُعازَّةُ: المُغالَبة في العِزِّ.',
+                ].join('\n'),
+                id: 66,
+            },
+            {
+                content: [
+                    '## باب العين واللام (ع ل، ل ع مستعملان)',
+                    'والعُلْعُلُ: اسمُ الذَّكر، وهو رأْسُ الرَّهابة أيضاً، والعَلْعَالُ: الذَّكرُ من القنابر.',
+                    'ويقال: عَلَّ أخاك: أي لعلَّ أخاك.',
+                    'لع: قال زائدةُ: جاءت الإبلُ تُلَعْلِعُ في كلأٍ خفيفٍ.',
+                    'واللُّعْلَعُ: السَّاب نفسه. واللَّعْلَعَةُ: بصيصه. والتَّلَعْلُعُ: التَّلأْلُؤُ.',
+                ].join('\n'),
+                id: 79,
+            },
+        ],
+        prefer: 'longer',
+        rules: [
+            {
+                metaType: 'chapter',
+                pattern: '## ',
+                patternType: 'lineStartsAfter',
+                split: 'at',
+            },
+            {
+                metaType: 'entry',
+                pageStartPrevWordStoplist: dictionaryLemmaPrevWordStoplist,
+                pattern: dictionaryLemmaRule.regex,
+                patternType: 'regex',
+                split: 'at',
+            },
+        ],
+    },
+};
 
 // ============================================
 // Page Management
@@ -93,7 +177,7 @@ function createPageElement(id: number): HTMLElement {
     idInput.addEventListener('change', () => {
         const pageData = pages.find((p) => p.element === pageItem);
         if (pageData) {
-            pageData.id = parseInt(idInput.value) || 1;
+            pageData.id = parseInt(idInput.value, 10) || 1;
         }
     });
 
@@ -181,17 +265,21 @@ function createRuleElement(id: number): HTMLElement {
         <input type="text" class="rule-meta" placeholder="hadith" />
       </div>
     </div>
-    <div class="rule-row">
-      <div class="checkbox-inline">
-        <input type="checkbox" class="rule-fuzzy" id="fuzzy-${id}" />
-        <label for="fuzzy-${id}">Fuzzy</label>
-      </div>
-      <div class="form-group">
-        <label>Page Guard</label>
-        <input type="text" class="rule-guard" placeholder="{{tarqim}}" />
-      </div>
-    </div>
-  `;
+	    <div class="rule-row">
+	      <div class="checkbox-inline">
+	        <input type="checkbox" class="rule-fuzzy" id="fuzzy-${id}" />
+	        <label for="fuzzy-${id}">Fuzzy</label>
+	      </div>
+	      <div class="form-group">
+	        <label>Page Guard</label>
+	        <input type="text" class="rule-guard" placeholder="{{tarqim}}" />
+	      </div>
+	    </div>
+	    <div class="form-group full-width">
+	      <label>Prev Page Word Stoplist</label>
+	      <input type="text" class="rule-prev-word-stoplist" placeholder="قال, وقيل, ويقال" />
+	    </div>
+	  `;
 
     const removeBtn = ruleItem.querySelector('.rule-remove-btn') as HTMLButtonElement;
     removeBtn.addEventListener('click', () => {
@@ -231,6 +319,24 @@ function addRuleWithPattern(pattern: string): void {
     rulesContainer.scrollTop = rulesContainer.scrollHeight;
 }
 
+function addRuleFromPreset(rule: DemoRulePreset): void {
+    const id = ruleIdCounter++;
+    const element = createRuleElement(id);
+    rulesContainer.appendChild(element);
+    rules.push({ element, id });
+
+    (element.querySelector('.rule-pattern-type') as HTMLSelectElement).value = rule.patternType;
+    (element.querySelector('.rule-pattern') as HTMLInputElement).value = rule.pattern;
+    (element.querySelector('.rule-split') as HTMLSelectElement).value = rule.split ?? 'at';
+    (element.querySelector('.rule-fuzzy') as HTMLInputElement).checked = rule.fuzzy ?? false;
+    (element.querySelector('.rule-meta') as HTMLInputElement).value = rule.metaType ?? '';
+    (element.querySelector('.rule-min') as HTMLInputElement).value = rule.min ? String(rule.min) : '';
+    (element.querySelector('.rule-max') as HTMLInputElement).value = rule.max ? String(rule.max) : '';
+    (element.querySelector('.rule-guard') as HTMLInputElement).value = rule.pageStartGuard ?? '';
+    (element.querySelector('.rule-prev-word-stoplist') as HTMLInputElement).value =
+        rule.pageStartPrevWordStoplist?.join(', ') ?? '';
+}
+
 function updateRuleNumbers(): void {
     rules.forEach((rule, index) => {
         const title = rule.element.querySelector('.rule-title');
@@ -238,6 +344,53 @@ function updateRuleNumbers(): void {
             title.textContent = `Rule ${index + 1}`;
         }
     });
+}
+
+function clearPages(): void {
+    pages.length = 0;
+    pagesContainer.innerHTML = '';
+}
+
+function clearRules(): void {
+    rules.length = 0;
+    rulesContainer.innerHTML = '';
+}
+
+function loadPreset(preset: DemoPreset): void {
+    clearPages();
+    clearRules();
+
+    pageIdCounter = 1;
+    ruleIdCounter = 1;
+
+    for (const page of preset.pages) {
+        const element = createPageElement(page.id);
+        pagesContainer.appendChild(element);
+        const textarea = element.querySelector('.page-textarea') as HTMLTextAreaElement;
+        const idInput = element.querySelector('.page-id-input') as HTMLInputElement;
+        textarea.value = page.content;
+        idInput.value = String(page.id);
+        pages.push({ content: page.content, element, id: page.id });
+        pageIdCounter = Math.max(pageIdCounter, page.id + 1);
+    }
+
+    for (const rule of preset.rules) {
+        addRuleFromPreset(rule);
+    }
+
+    maxPagesInput.value = preset.maxPages ? String(preset.maxPages) : '';
+    maxContentLengthInput.value = '';
+    preferSelect.value = preset.prefer ?? 'longer';
+    pageJoinerSelect.value = preset.pageJoiner ?? 'space';
+    debugToggle.checked = preset.debug ?? true;
+    breakpointsTextarea.value = preset.breakpoints?.join('\n') ?? '';
+    preRemoveZW.checked = false;
+    preCondenseEllipsis.checked = false;
+    preFixWaw.checked = false;
+
+    updateRuleNumbers();
+    updateAnalysis();
+    clearResults();
 }
 
 function buildRuleFromElement(element: HTMLElement): SplitRule {
@@ -249,6 +402,10 @@ function buildRuleFromElement(element: HTMLElement): SplitRule {
     const metaType = (element.querySelector('.rule-meta') as HTMLInputElement).value.trim();
     const fuzzy = (element.querySelector('.rule-fuzzy') as HTMLInputElement).checked;
     const guard = (element.querySelector('.rule-guard') as HTMLInputElement).value.trim();
+    const prevWordStoplist = (element.querySelector('.rule-prev-word-stoplist') as HTMLInputElement).value
+        .split(',')
+        .map((word) => word.trim())
+        .filter(Boolean);
 
     const baseOptions: Partial<SplitRule> = { split };
 
@@ -256,16 +413,19 @@ function buildRuleFromElement(element: HTMLElement): SplitRule {
         baseOptions.fuzzy = true;
     }
     if (min) {
-        baseOptions.min = parseInt(min);
+        baseOptions.min = parseInt(min, 10);
     }
     if (max) {
-        baseOptions.max = parseInt(max);
+        baseOptions.max = parseInt(max, 10);
     }
     if (metaType) {
         baseOptions.meta = { type: metaType };
     }
     if (guard) {
         baseOptions.pageStartGuard = guard;
+    }
+    if (prevWordStoplist.length > 0) {
+        baseOptions.pageStartPrevWordStoplist = prevWordStoplist;
     }
 
     switch (patternType) {
@@ -297,11 +457,11 @@ function buildOptions(): SegmentationOptions {
     };
 
     if (maxPagesInput.value) {
-        options.maxPages = parseInt(maxPagesInput.value);
+        options.maxPages = parseInt(maxPagesInput.value, 10);
     }
 
     if (maxContentLengthInput.value) {
-        options.maxContentLength = parseInt(maxContentLengthInput.value);
+        options.maxContentLength = parseInt(maxContentLengthInput.value, 10);
     }
 
     const preprocess: any[] = [];
@@ -349,9 +509,9 @@ function updateAnalysis(): void {
         try {
             const patterns = analyzeCommonLineStarts(pageData, {
                 maxExamples: 2,
-                minCount: parseInt(minCountInput.value) || 1,
+                minCount: parseInt(minCountInput.value, 10) || 1,
                 sortBy: sortBySelect.value as 'count' | 'specificity',
-                topK: parseInt(topKInput.value) || 10,
+                topK: parseInt(topKInput.value, 10) || 10,
                 whitespace: whitespaceSelect.value as 'regex' | 'space',
             });
 
@@ -484,6 +644,12 @@ function init(): void {
     addPageBtn.addEventListener('click', addPage);
     addRuleBtn.addEventListener('click', addRule);
     segmentBtn.addEventListener('click', handleSegment);
+    loadExampleBtn.addEventListener('click', () => {
+        const preset = demoPresets[exampleSelect.value];
+        if (preset) {
+            loadPreset(preset);
+        }
+    });
 
     // Analysis config toggle
     analysisConfigToggle.addEventListener('click', () => {

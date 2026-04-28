@@ -53,7 +53,6 @@ src/
 ├── utils/                      # Low-level helpers
 │   └── textUtils.ts            # Diacritics, Unicode, and bracket escaping
 ├── index.ts                    # Public barrel exports
-├── recovery.ts                 # Mistaken stripping recovery logic
 ├── detection.ts                # Pattern auto-detection (standalone)
 └── *.test.ts                   # Unit and integration tests (co-located)
 
@@ -64,19 +63,14 @@ src/
    - Returns array of `{content, from, to?, meta?}` segments
    - Orchestrates rule matching, optimization, and breakpoint processing
 
-2. **`recoverMistakenLineStartsAfterMarkers(...)`** - Recovery helper (`src/recovery.ts`)
-   - Use when a client mistakenly used `lineStartsAfter` where `lineStartsWith` was intended
-   - Deterministic mode reruns segmentation with selected rules converted to `lineStartsWith` and merges recovered `content` back into the provided segments
-   - Optional `mode: 'best_effort_then_rerun'` attempts a conservative anchor-based recovery first, then falls back to rerun for unresolved segments
-
-3. **`tokens.ts`** - Template system (`src/segmentation/tokens.ts`)
+2. **`tokens.ts`** - Template system (`src/segmentation/tokens.ts`)
    - `TOKEN_PATTERNS` - Map of token names to regex patterns
    - `expandTokensWithCaptures()` - Expands `{{token:name}}` syntax
    - `shouldDefaultToFuzzy()` - Auto-enables fuzzy matching for `bab`, `basmalah`, `fasl`, `kitab`, `naql`
    - `applyTokenMappings()` - Applies named captures (`{{token:name}}`) to raw templates
    - `stripTokenMappings()` - Strips named captures (reverts to `{{token}}`)
 
-4. **`rule-regex.ts`** - Rule compiler (`src/segmentation/rule-regex.ts`)
+3. **`rule-regex.ts`** - Rule compiler (`src/segmentation/rule-regex.ts`)
    - `buildRuleRegex()` - Compiles various rule types to executable RegExp
    - `processPattern()` - Token expansion, auto-escaping, and fuzzy application
    - `extractNamedCaptureNames()` - Extract metadata field names from raw regex
@@ -463,48 +457,33 @@ bunx biome lint .
 
 13. **ASCII vs Arabic-Indic Numerals**: While most classical Arabic texts use Arabic-Indic digits (`٠-٩`), modern digitizers often mix them with ASCII digits (`0-9`). Providing separate tokens (`{{raqms}}` for Arabic and `{{nums}}` for ASCII) allows better precision in rule definitions while keeping patterns readable. Always check which digit set is used in the source text before authoring rules.
 
-### For Future AI Agents (Recovery + Repo gotchas)
+### For Future AI Agents (Repo gotchas)
 
-1. **`lineStartsAfter` vs `lineStartsWith` is not “cosmetic”**: `lineStartsAfter` changes output by stripping the matched marker via an internal `contentStartOffset` during segment construction. If a client used it by accident, you cannot reconstruct the exact stripped prefix from output alone without referencing the original pages and re-matching the marker.
+1. **Fuzzy defaults are easy to miss**: Some tokens auto-enable fuzzy matching unless `fuzzy: false` is set (`bab`, `basmalah`, `fasl`, `kitab`, `naql`). If you are validating markers or re-matching prefixes, use the same compilation path as segmentation (`buildRuleRegex` / `processPattern`) so diacritics and token expansion behave identically.
 
-2. **Page joining differs between matching and output**:
-   - Matching always happens on pages concatenated with `\\n` separators.
-   - Output segments may normalize page boundaries (`pageJoiner: 'space' | 'newline'`) and breakpoints post-processing uses its own join normalization utilities.
-   Recovery code must be explicit about which representation it’s searching.
+2. **Auto-escaping applies to template-like patterns**: `lineStartsWith`, `lineStartsAfter`, `lineEndsWith`, and `template` auto-escape `()[]` outside `{{tokens}}`. Raw `regex` does not. If you compare patterns by string equality, be careful about escaping and whitespace.
 
-3. **Breakpoints can produce “pieces” that were never marker-stripped**: When `maxPages` + `breakpoints` are enabled, only the piece that starts at the original structural boundary could have lost a marker due to `lineStartsAfter`. Mid-segment breakpoint pieces should not be “recovered” unless you can anchor them confidently.
+3. **TypeScript union pitfalls with `SplitRule`**: `SplitRule` is a union where only one pattern type should exist. Avoid mutating rules in-place with `delete` on fields (TS often narrows unions and then complains). Prefer rebuilding converted rules via destructuring (e.g. `{ lineStartsAfter, ...rest }` then create `{...rest, lineStartsWith: lineStartsAfter}`).
 
-4. **Fuzzy defaults are easy to miss**: Some tokens auto-enable fuzzy matching unless `fuzzy: false` is set (`bab`, `basmalah`, `fasl`, `kitab`, `naql`). If you are validating markers or re-matching prefixes, use the same compilation path as segmentation (`buildRuleRegex` / `processPattern`) so diacritics and token expansion behave identically.
+4. **Biome lint constraints shape implementation**: The repo enforces low function complexity. Expect to extract helpers to keep Biome happy. Also, Biome can flag regex character-class usage as misleading; prefer alternation (e.g. `(?:\\u200C|\\u200D|\\uFEFF)`) when removing specific codepoints.
 
-5. **Auto-escaping applies to template-like patterns**: `lineStartsWith`, `lineStartsAfter`, `lineEndsWith`, and `template` auto-escape `()[]` outside `{{tokens}}`. Raw `regex` does not. If you compare patterns by string equality, be careful about escaping and whitespace.
+5. **Prefer library utilities for UI tasks**: Instead of re-implementing rule merging, validation, or token mapping in client code, use `optimizeRules`, `validateRules`/`formatValidationReport`, and `applyTokenMappings`. They handle edge cases (like duplicate patterns, regex safety, or diacritic handling) that ad-hoc implementations might miss.
 
-6. **TypeScript union pitfalls with `SplitRule`**: `SplitRule` is a union where only one pattern type should exist. Avoid mutating rules in-place with `delete` on fields (TS often narrows unions and then complains). Prefer rebuilding converted rules via destructuring (e.g. `{ lineStartsAfter, ...rest }` then create `{...rest, lineStartsWith: lineStartsAfter}`).
+6. **Safety Fallback (Search-back)**: When forced to split at a hard character limit, searching backward for whitespace/punctuation (`[\s\n.,;!?؛،۔]`) prevents word-chopping and improves readability significantly.
 
-7. **Biome lint constraints shape implementation**: The repo enforces low function complexity. Expect to extract helpers (alignment, selector resolution, anchoring) to keep Biome happy. Also, Biome can flag regex character-class usage as misleading; prefer alternation (e.g. `(?:\\u200C|\\u200D|\\uFEFF)`) when removing specific codepoints.
+7. **Unicode Boundary Safety (Surrogates + Graphemes)**: Multi-byte characters (like emojis) can be corrupted if split in the middle of a surrogate pair. Similarly, Arabic diacritics (combining marks), ZWJ/ZWNJ, and variation selectors can be orphaned if a hard split lands in the middle of a grapheme cluster. Use `adjustForUnicodeBoundary` when forced to hard-split near a limit.
 
-8. **When debugging recovery, start here**:
-   - `src/segmentation/segmenter.ts` (how content is sliced/trimmed and how `from/to` are computed)
-   - `src/segmentation/rule-regex.ts` + `src/segmentation/tokens.ts` (token expansion + fuzzy behavior)
-   - `src/preprocessing/transforms.ts` (preprocessing transforms: removeZeroWidth, condenseEllipsis, fixTrailingWaw)
-   - `src/recovery.ts` (recovery implementation)
+8. **Recursion/Iteration Safety**: Using a progress-based guard (comparing `cursorPos` before and after loop iteration) is safer than fixed iteration limits for supporting arbitrary-sized content without truncation risks.
 
-9. **Prefer library utilities for UI tasks**: Instead of re-implementing rule merging, validation, or token mapping in client code, use `optimizeRules`, `validateRules`/`formatValidationReport`, and `applyTokenMappings`. They handle edge cases (like duplicate patterns, regex safety, or diacritic handling) that ad-hoc implementations might miss.
+9. **Accidental File Overwrites**: Be extremely careful when using tools like `replace_file_content` with large ranges. Verify file integrity frequently (e.g., `git diff`) to catch accidental deletions of existing code or tests. Merging new tests into existing files is a high-risk operation for AI agents.
 
-10. **Safety Fallback (Search-back)**: When forced to split at a hard character limit, searching backward for whitespace/punctuation (`[\s\n.,;!?؛،۔]`) prevents word-chopping and improves readability significantly.
+10. **Invisible Unicode Marks Break Regex Anchors**: Arabic text often contains invisible formatting marks like Left-to-Right Mark (`U+200E`), Right-to-Left Mark (`U+200F`), Arabic Letter Mark (`U+061C`), Zero-Width Space (`U+200B`), Zero-Width Non-Joiner (`U+200C`), Zero-Width Joiner (`U+200D`), or BOM (`U+FEFF`). These can appear at line starts after `\n` but before visible characters, breaking `^` anchored patterns. Solution: include an optional zero-width character class prefix in line-start patterns: `^[\u200E\u200F\u061C\u200B\u200C\u200D\uFEFF]*(?:pattern)`. The library now handles this automatically in `buildLineStartsWithRegexSource` and `buildLineStartsAfterRegexSource`.
 
-11. **Unicode Boundary Safety (Surrogates + Graphemes)**: Multi-byte characters (like emojis) can be corrupted if split in the middle of a surrogate pair. Similarly, Arabic diacritics (combining marks), ZWJ/ZWNJ, and variation selectors can be orphaned if a hard split lands in the middle of a grapheme cluster. Use `adjustForUnicodeBoundary` when forced to hard-split near a limit.
+11. **Large Segment Performance & Debugging Strategy**: When processing large books (1000+ pages), avoid O(n²) algorithms. The library uses a fast-path threshold (1000 pages) to switch from accurate string-search boundary detection to cumulative-offset-based slicing. Even on the iterative path (e.g. debug mode), we **slice only the active window (+padding)** per iteration (never `fullContent.slice(cursorPos)`), to avoid quadratic allocation/GC churn. To diagnose performance bottlenecks: (1) Look for logs with "Using iterative path" or "Using accurate string-search path" with large `pageCount` values, (2) Check `iterations` count in completion logs, (3) Strategic logs are placed at operation boundaries (start/end) NOT inside tight loops to avoid log-induced performance regression.
 
-12. **Recursion/Iteration Safety**: Using a progress-based guard (comparing `cursorPos` before and after loop iteration) is safer than fixed iteration limits for supporting arbitrary-sized content without truncation risks.
+12. **`maxPages=0` is a hard invariant**: When `maxPages=0`, breakpoint windows must never scan beyond the current page boundary. Relying purely on boundary detection (string search) can fail near page ends for long Arabic text + space joiners, letting the window “see” into the next page and creating multi-page segments. The safe fix is to clamp the breakpoint window to the current page’s end using `boundaryPositions` in breakpoint processing.
 
-13. **Accidental File Overwrites**: Be extremely careful when using tools like `replace_file_content` with large ranges. Verify file integrity frequently (e.g., `git diff`) to catch accidental deletions of existing code or tests. Merging new tests into existing files is a high-risk operation for AI agents.
-
-14. **Invisible Unicode Marks Break Regex Anchors**: Arabic text often contains invisible formatting marks like Left-to-Right Mark (`U+200E`), Right-to-Left Mark (`U+200F`), Arabic Letter Mark (`U+061C`), Zero-Width Space (`U+200B`), Zero-Width Non-Joiner (`U+200C`), Zero-Width Joiner (`U+200D`), or BOM (`U+FEFF`). These can appear at line starts after `\n` but before visible characters, breaking `^` anchored patterns. Solution: include an optional zero-width character class prefix in line-start patterns: `^[\u200E\u200F\u061C\u200B\u200C\u200D\uFEFF]*(?:pattern)`. The library now handles this automatically in `buildLineStartsWithRegexSource` and `buildLineStartsAfterRegexSource`.
-
-15. **Large Segment Performance & Debugging Strategy**: When processing large books (1000+ pages), avoid O(n²) algorithms. The library uses a fast-path threshold (1000 pages) to switch from accurate string-search boundary detection to cumulative-offset-based slicing. Even on the iterative path (e.g. debug mode), we **slice only the active window (+padding)** per iteration (never `fullContent.slice(cursorPos)`), to avoid quadratic allocation/GC churn. To diagnose performance bottlenecks: (1) Look for logs with "Using iterative path" or "Using accurate string-search path" with large `pageCount` values, (2) Check `iterations` count in completion logs, (3) Strategic logs are placed at operation boundaries (start/end) NOT inside tight loops to avoid log-induced performance regression.
-
-16. **`maxPages=0` is a hard invariant**: When `maxPages=0`, breakpoint windows must never scan beyond the current page boundary. Relying purely on boundary detection (string search) can fail near page ends for long Arabic text + space joiners, letting the window “see” into the next page and creating multi-page segments. The safe fix is to clamp the breakpoint window to the current page’s end using `boundaryPositions` in breakpoint processing.
-
-17. **`''` breakpoint semantics depend on whether the window is page-bounded vs length-bounded**: `''` means “page boundary fallback”, but it’s intentionally **mode-dependent**:
+13. **`''` breakpoint semantics depend on whether the window is page-bounded vs length-bounded**: `''` means “page boundary fallback”, but it’s intentionally **mode-dependent**:
 
    - **Page-bounded window (maxPages-driven)**: `''` should “swallow the remainder of the current page” (i.e. break at the **next page boundary**, not at an arbitrary character limit). This prevents accidentally consuming part of the next page when no other breakpoint patterns match.
    - **Length-bounded window (maxContentLength-driven)**: `''` should **not** force an early page-boundary break. In this mode we want the best split *near the length limit* (safe-break fallback → Unicode-safe hard split) even if that means a piece can cross a page boundary.
@@ -805,5 +784,3 @@ Key functions: `applyBreakpoints()` → `processOversizedSegment()` → `findBre
 ## Known Issues
 
 - **Binary Search Gap (Theoretical)**: `findBoundaryIdForOffset` returns `undefined` if the search offset falls exactly on a joiner character (e.g., a space or newline) between two pages. This is mathematically correct (the gap belongs to neither page) but may cause validation errors if a segment consists _only_ of such a gap or matches content starting/ending strictly within the gap. We have marked this as "accept" behavior for now, with a documented skipped test case.
-
-

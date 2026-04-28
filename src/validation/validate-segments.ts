@@ -54,16 +54,15 @@ const normalizePages = (pages: Page[], options: SegmentationOptions): Page[] => 
  */
 const buildJoinedContent = (pages: Page[], joiner: string) => {
     const boundaries: JoinedBoundary[] = [];
-    const nonEmptyPages = pages.filter((p) => p.content);
-    const joined = nonEmptyPages.map((p) => p.content).join(joiner);
+    const joined = pages.map((p) => p.content).join(joiner);
 
     let offset = 0;
-    for (let i = 0; i < nonEmptyPages.length; i++) {
-        const content = nonEmptyPages[i].content;
+    for (let i = 0; i < pages.length; i++) {
+        const content = pages[i].content;
         const start = offset;
-        const end = start + content.length - 1;
-        boundaries.push({ end, id: nonEmptyPages[i].id, start });
-        offset = end + 1 + (i < nonEmptyPages.length - 1 ? joiner.length : 0);
+        const end = start + content.length;
+        boundaries.push({ end, id: pages[i].id, start });
+        offset += content.length + (i < pages.length - 1 ? joiner.length : 0);
     }
     return { boundaries, joined };
 };

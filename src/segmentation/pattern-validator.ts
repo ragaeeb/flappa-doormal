@@ -11,7 +11,7 @@ import { getAvailableTokens } from './tokens.js';
 /**
  * Types of validation issues that can be detected.
  */
-export type ValidationIssueType = 'missing_braces' | 'unknown_token' | 'duplicate' | 'empty_pattern';
+export type ValidationIssueType = 'missing_braces' | 'unknown_token' | 'duplicate' | 'empty_pattern' | 'invalid_regex';
 
 /**
  * A validation issue found in a pattern.
@@ -35,6 +35,7 @@ export type RuleValidationResult = {
     lineStartsAfter?: (ValidationIssue | undefined)[];
     lineEndsWith?: (ValidationIssue | undefined)[];
     template?: ValidationIssue;
+    regex?: ValidationIssue;
 };
 
 // Known token names from the tokens module
@@ -102,6 +103,78 @@ const validatePatternArray = (patterns: string[]) => {
     return issues.some(Boolean) ? issues : undefined;
 };
 
+const applyRulePatternValidation = (
+    result: RuleValidationResult,
+    key: 'lineStartsWith' | 'lineStartsAfter' | 'lineEndsWith',
+    patterns: string[] | undefined,
+): boolean => {
+    if (!patterns) {
+        return false;
+    }
+    const issues = validatePatternArray(patterns);
+    if (!issues) {
+        return false;
+    }
+    result[key] = issues;
+    return true;
+};
+
+const validateTemplateRule = (rule: SplitRule, result: RuleValidationResult) => {
+    if (rule.template === undefined) {
+        return false;
+    }
+
+    const issue = validatePattern(rule.template, new Set());
+    if (!issue) {
+        return false;
+    }
+
+    result.template = issue;
+    return true;
+};
+
+const validateRegexRule = (rule: SplitRule, result: RuleValidationResult) => {
+    if (rule.regex === undefined) {
+        return false;
+    }
+
+    if (!rule.regex.trim()) {
+        result.regex = { message: 'Empty pattern is not allowed', type: 'empty_pattern' };
+        return true;
+    }
+
+    try {
+        new RegExp(rule.regex, 'u');
+        return false;
+    } catch (error) {
+        result.regex = {
+            message: error instanceof Error ? error.message : String(error),
+            pattern: rule.regex,
+            type: 'invalid_regex',
+        };
+        return true;
+    }
+};
+
+const formatValidationIssue = (_type: string, issue: ValidationIssue | undefined, loc: string): string | null => {
+    if (!issue) {
+        return null;
+    }
+    if (issue.type === 'missing_braces') {
+        return `${loc}: Missing {{}} around token "${issue.token}"`;
+    }
+    if (issue.type === 'unknown_token') {
+        return `${loc}: Unknown token "{{${issue.token}}}"`;
+    }
+    if (issue.type === 'duplicate') {
+        return `${loc}: Duplicate pattern "${issue.pattern}"`;
+    }
+    if (issue.type === 'invalid_regex') {
+        return `${loc}: Invalid regex (${issue.message})`;
+    }
+    return `${loc}: ${issue.message || issue.type}`;
+};
+
 /**
  * Validates split rules for common pattern issues.
  *
@@ -124,25 +197,12 @@ const validatePatternArray = (patterns: string[]) => {
 export const validateRules = (rules: SplitRule[]) =>
     rules.map((rule) => {
         const result: RuleValidationResult = {};
-        let hasIssues = false;
-
-        for (const key of ['lineStartsWith', 'lineStartsAfter', 'lineEndsWith'] as const) {
-            if (key in rule && (rule as any)[key]) {
-                const issues = validatePatternArray((rule as any)[key]);
-                if (issues) {
-                    result[key] = issues;
-                    hasIssues = true;
-                }
-            }
-        }
-
-        if ('template' in rule && rule.template !== undefined) {
-            const issue = validatePattern(rule.template, new Set());
-            if (issue) {
-                result.template = issue;
-                hasIssues = true;
-            }
-        }
+        const startsWithIssues = applyRulePatternValidation(result, 'lineStartsWith', rule.lineStartsWith);
+        const startsAfterIssues = applyRulePatternValidation(result, 'lineStartsAfter', rule.lineStartsAfter);
+        const endsWithIssues = applyRulePatternValidation(result, 'lineEndsWith', rule.lineEndsWith);
+        const templateIssues = validateTemplateRule(rule, result);
+        const regexIssues = validateRegexRule(rule, result);
+        const hasIssues = startsWithIssues || startsAfterIssues || endsWithIssues || templateIssues || regexIssues;
 
         return hasIssues ? result : undefined;
     });
@@ -164,24 +224,9 @@ export const formatValidationReport = (results: (RuleValidationResult | undefine
         if (!result) {
             return [];
         }
-        return Object.entries(result)
-            .flatMap(([type, issues]) =>
-                (Array.isArray(issues) ? issues : [issues]).map((issue) => {
-                    if (!issue) {
-                        return null;
-                    }
-                    const loc = `Rule ${i + 1}, ${type}`;
-                    if (issue.type === 'missing_braces') {
-                        return `${loc}: Missing {{}} around token "${issue.token}"`;
-                    }
-                    if (issue.type === 'unknown_token') {
-                        return `${loc}: Unknown token "{{${issue.token}}}"`;
-                    }
-                    if (issue.type === 'duplicate') {
-                        return `${loc}: Duplicate pattern "${issue.pattern}"`;
-                    }
-                    return `${loc}: ${issue.message || issue.type}`;
-                }),
-            )
-            .filter((msg): msg is string => msg !== null);
+        return Object.entries(result).flatMap(([type, issues]) =>
+            (Array.isArray(issues) ? issues : [issues])
+                .map((issue) => formatValidationIssue(type, issue, `Rule ${i + 1}, ${type}`))
+                .filter((msg): msg is string => msg !== null),
+        );
     });

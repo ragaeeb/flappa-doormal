@@ -5,6 +5,10 @@ on:
         branches:
             - main
 
+# Least-privilege default for the workflow; job overrides as needed
+permissions:
+    contents: read
+
 jobs:
     semantic-release:
         runs-on: ubuntu-latest
@@ -12,6 +16,7 @@ jobs:
             contents: write
             issues: write
             pull-requests: none
+            id-token: write
         steps:
             - uses: actions/checkout@v6
               with:
@@ -21,7 +26,7 @@ jobs:
             - name: Set up Node.js
               uses: actions/setup-node@v6
               with:
-                  node-version: '24'
+                  node-version: '25'
 
             - name: Set up Bun
               uses: oven-sh/setup-bun@v2
@@ -38,4 +43,3 @@ jobs:
               run: bun x semantic-release
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-                  NPM_TOKEN: ${{ secrets.PUBLISH_NPM_TOKEN }}

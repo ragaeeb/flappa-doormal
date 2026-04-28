@@ -30,6 +30,8 @@ import {
     normalizeBreakpoint,
 } from './breakpoint-utils.js';
 
+const BACKSLASH_CHAR = '\\';
+
 describe('breakpoint-utils', () => {
     describe('normalizeBreakpoint', () => {
         it('should convert string to BreakpointRule object', () => {
@@ -102,7 +104,10 @@ describe('breakpoint-utils', () => {
 
         it('should escape regex metacharacters except ()[] which are handled by processPattern', () => {
             // ()[] are NOT escaped here - processPattern handles them via escapeTemplateBrackets
-            expect(escapeWordsOutsideTokens('.*+?^${}()|[]\\')).toBe('\\.\\*\\+\\?\\^\\$\\{\\}()\\|[]\\\\');
+            // Template syntax keeps the trailing backslash readable without ending the literal on it.
+            expect(escapeWordsOutsideTokens(`.*+?^\${}()|[]${BACKSLASH_CHAR}`)).toBe(
+                '\\.\\*\\+\\?\\^\\$\\{\\}()\\|[]\\\\',
+            );
         });
 
         it('should leave literal brackets for processPattern to escape', () => {

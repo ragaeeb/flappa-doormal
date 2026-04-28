@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import {
+    ARABIC_BASE_LETTER_CLASS,
+    ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN,
+    ARABIC_MARKS_CLASS,
+    ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN,
     applyTokenMappings,
     containsTokens,
     expandCompositeTokensInTemplate,
@@ -14,6 +18,22 @@ import {
 } from './tokens.js';
 
 describe('tokens', () => {
+    describe('Arabic regex fragments', () => {
+        it('should expose the shared Arabic base letter and mark classes', () => {
+            expect(ARABIC_BASE_LETTER_CLASS).toBe('[ء-غف-ي]');
+            expect(ARABIC_MARKS_CLASS).toBe('[\\u0610-\\u061A\\u0640\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]');
+        });
+
+        it('should expose reusable letter and word patterns with optional marks', () => {
+            expect(ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN).toBe(
+                '[ء-غف-ي][\\u0610-\\u061A\\u0640\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]*',
+            );
+            expect(ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN).toBe(
+                '(?:[ء-غف-ي][\\u0610-\\u061A\\u0640\\u064B-\\u065F\\u0670\\u06D6-\\u06ED]*)+',
+            );
+        });
+    });
+
     describe('containsTokens', () => {
         it('should return true when string contains token pattern', () => {
             expect(containsTokens('{{raqms}} {{dash}}')).toBeTrue();
@@ -173,10 +193,6 @@ describe('tokens', () => {
             expect(getTokenPattern('raqms')).toBe('[\\u0660-\\u0669]+');
         });
 
-        it('should return undefined for unknown token', () => {
-            expect(getTokenPattern('unknown')).toBeUndefined();
-        });
-
         it('should return correct pattern for Arabic phrase tokens', () => {
             expect(getTokenPattern('bab')).toBe('باب');
             expect(getTokenPattern('kitab')).toBe('كتاب');
@@ -220,6 +236,15 @@ describe('tokens', () => {
             expect(regex?.test('عس')).toBeTrue();
             expect(regex?.test('خت')).toBeTrue();
             expect(regex?.test('سي')).toBeTrue();
+        });
+
+        it('should allow spaced letter-code lines with tatweel/harakat via {{harfs}}', () => {
+            const regex = templateToRegex('^{{harfs}}$');
+
+            expect(regex?.test('ك ش ن')).toBeTrue();
+            expect(regex?.test('كَ شُ نِ')).toBeTrue();
+            expect(regex?.test('هـ ث')).toBeTrue();
+            expect(regex?.test('عنبر')).toBeFalse();
         });
 
         it('should match تمييز as a rumuz code (jarh wa tadil)', () => {

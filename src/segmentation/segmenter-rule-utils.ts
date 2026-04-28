@@ -1,8 +1,10 @@
 import type { SplitRule } from '@/types/rules.js';
 import type { PageMap, SplitPoint } from '@/types/segmenter.js';
+import { normalizeArabicForComparison } from '@/utils/textUtils.js';
 import { isPageExcluded } from './breakpoint-utils.js';
 import { compileFastFuzzyTokenRule, type FastFuzzyTokenRule, matchFastFuzzyTokenAt } from './fast-fuzzy-prefix.js';
 import { extractNamedCaptureNames, hasCapturingGroup, processPattern } from './rule-regex.js';
+import { ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN, shouldDefaultToFuzzy } from './tokens.js';
 
 export type FastFuzzyRule = {
     compiled: FastFuzzyTokenRule;
@@ -13,14 +15,18 @@ export type FastFuzzyRule = {
 
 export type PartitionedRules = {
     combinableRules: Array<{ rule: SplitRule; prefix: string; index: number }>;
-    standaloneRules: SplitRule[];
+    standaloneRules: Array<{ rule: SplitRule; index: number }>;
     fastFuzzyRules: FastFuzzyRule[];
 };
 
 const tryCompileFastFuzzyRule = (
     rule: SplitRule,
 ): { compiled: FastFuzzyTokenRule; kind: 'startsWith' | 'startsAfter' } | null => {
-    const fuzzy = (rule as { fuzzy?: boolean }).fuzzy;
+    const fuzzyCandidatePatterns = [
+        ...('lineStartsWith' in rule ? rule.lineStartsWith : []),
+        ...('lineStartsAfter' in rule ? rule.lineStartsAfter : []),
+    ];
+    const fuzzy = rule.fuzzy ?? shouldDefaultToFuzzy(fuzzyCandidatePatterns);
     if (!fuzzy) {
         return null;
     }
@@ -53,7 +59,7 @@ const isCombinableRule = (rule: SplitRule): boolean => {
 
 export const partitionRulesForMatching = (rules: SplitRule[]) => {
     const combinableRules: { rule: SplitRule; prefix: string; index: number }[] = [];
-    const standaloneRules: SplitRule[] = [];
+    const standaloneRules: Array<{ rule: SplitRule; index: number }> = [];
     const fastFuzzyRules: FastFuzzyRule[] = [];
 
     for (let index = 0; index < rules.length; index++) {
@@ -73,7 +79,7 @@ export const partitionRulesForMatching = (rules: SplitRule[]) => {
         if (isCombinableRule(rule)) {
             combinableRules.push({ index, prefix: `r${index}_`, rule });
         } else {
-            standaloneRules.push(rule);
+            standaloneRules.push({ index, rule });
         }
     }
 
@@ -82,9 +88,53 @@ export const partitionRulesForMatching = (rules: SplitRule[]) => {
 
 export type PageStartGuardChecker = (rule: SplitRule, ruleIndex: number, matchStart: number) => boolean;
 
+const STRONG_SENTENCE_TERMINATORS = /[.!?؟؛۔…]$/u;
+const TRAILING_PAGE_WRAP_NOISE = /[\s\u0660-\u0669\d«»"“”'‘’()[\]{}<>]+$/u;
+const TRAILING_WORD_DELIMITERS = /[\s\u0660-\u0669\d«»"“”'‘’()[\]{}<>.,!?؟؛،:]+$/u;
+const ARABIC_WORD_REGEX = new RegExp(ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN, 'gu');
+
+const trimTrailingPageWrapNoise = (text: string) => {
+    let trimmed = text.trimEnd();
+    while (trimmed !== trimmed.replace(TRAILING_PAGE_WRAP_NOISE, '')) {
+        trimmed = trimmed.replace(TRAILING_PAGE_WRAP_NOISE, '');
+    }
+    return trimmed;
+};
+
+const endsWithStrongSentenceTerminator = (pageContent: string) => {
+    return STRONG_SENTENCE_TERMINATORS.test(trimTrailingPageWrapNoise(pageContent));
+};
+
+const extractLastArabicWord = (pageContent: string) => {
+    const withoutTrailingDelimiters = trimTrailingPageWrapNoise(pageContent).replace(TRAILING_WORD_DELIMITERS, '');
+    const matches = [...withoutTrailingDelimiters.matchAll(ARABIC_WORD_REGEX)];
+    return matches.at(-1)?.[0] ?? '';
+};
+
+const shouldAllowPageStartMatch = (previousPageContent: string, prevWordStoplist: Set<string> | null): boolean => {
+    if (!prevWordStoplist || endsWithStrongSentenceTerminator(previousPageContent)) {
+        return true;
+    }
+
+    const lastWord = extractLastArabicWord(previousPageContent);
+    return !lastWord || !prevWordStoplist.has(normalizeArabicForComparison(lastWord));
+};
+
+const shouldAllowSamePageMatch = (contentBeforeMatch: string, stoplist: Set<string> | null): boolean => {
+    if (!stoplist) {
+        return true;
+    }
+
+    const lastWord = extractLastArabicWord(contentBeforeMatch);
+    return !lastWord || !stoplist.has(normalizeArabicForComparison(lastWord));
+};
+
 export const createPageStartGuardChecker = (matchContent: string, pageMap: PageMap) => {
     const pageStartToBoundaryIndex = new Map(pageMap.boundaries.map((b, i) => [b.start, i]));
     const compiledPageStartPrev = new Map<number, RegExp | null>();
+    const compiledPrevWordStoplists = new Map<number, Set<string> | null>();
+    const compiledSamePagePrevWordStoplists = new Map<number, Set<string> | null>();
+    const pageIdToBoundaryIndex = new Map(pageMap.boundaries.map((b, i) => [b.id, i]));
 
     const getPageStartPrevRegex = (rule: SplitRule, ruleIndex: number) => {
         if (compiledPageStartPrev.has(ruleIndex)) {
@@ -98,6 +148,46 @@ export const createPageStartGuardChecker = (matchContent: string, pageMap: PageM
         const re = new RegExp(`(?:${processPattern(pattern, false).pattern})$`, 'u');
         compiledPageStartPrev.set(ruleIndex, re);
         return re;
+    };
+
+    const getPrevWordStoplist = (rule: SplitRule, ruleIndex: number) => {
+        if (compiledPrevWordStoplists.has(ruleIndex)) {
+            return compiledPrevWordStoplists.get(ruleIndex) ?? null;
+        }
+
+        const stoplist = (rule as { pageStartPrevWordStoplist?: string[] }).pageStartPrevWordStoplist;
+        if (!stoplist?.length) {
+            compiledPrevWordStoplists.set(ruleIndex, null);
+            return null;
+        }
+
+        const normalized = new Set(stoplist.map((word) => normalizeArabicForComparison(word)).filter(Boolean));
+        compiledPrevWordStoplists.set(ruleIndex, normalized);
+        return normalized;
+    };
+
+    const getSamePagePrevWordStoplist = (rule: SplitRule, ruleIndex: number) => {
+        if (compiledSamePagePrevWordStoplists.has(ruleIndex)) {
+            return compiledSamePagePrevWordStoplists.get(ruleIndex) ?? null;
+        }
+
+        const stoplist = (rule as { samePagePrevWordStoplist?: string[] }).samePagePrevWordStoplist;
+        if (!stoplist?.length) {
+            compiledSamePagePrevWordStoplists.set(ruleIndex, null);
+            return null;
+        }
+
+        const normalized = new Set(stoplist.map((word) => normalizeArabicForComparison(word)).filter(Boolean));
+        compiledSamePagePrevWordStoplists.set(ruleIndex, normalized);
+        return normalized;
+    };
+
+    const getPreviousPageContent = (boundaryIndex: number) => {
+        if (boundaryIndex <= 0) {
+            return '';
+        }
+        const prevBoundary = pageMap.boundaries[boundaryIndex - 1];
+        return matchContent.slice(prevBoundary.start, prevBoundary.end);
     };
 
     const getPrevPageLastNonWsChar = (boundaryIndex: number) => {
@@ -114,17 +204,39 @@ export const createPageStartGuardChecker = (matchContent: string, pageMap: PageM
         return '';
     };
 
+    const getCurrentPageContentBeforeMatch = (matchStart: number) => {
+        const pageId = pageMap.getId(matchStart);
+        const boundaryIndex = pageIdToBoundaryIndex.get(pageId);
+        if (boundaryIndex === undefined) {
+            return '';
+        }
+        const boundary = pageMap.boundaries[boundaryIndex];
+        return matchContent.slice(boundary.start, matchStart);
+    };
+
     return (rule: SplitRule, ruleIndex: number, matchStart: number) => {
         const boundaryIndex = pageStartToBoundaryIndex.get(matchStart);
-        if (boundaryIndex === undefined || boundaryIndex === 0) {
-            return true;
+        const isNonFirstPageStart = boundaryIndex !== undefined && boundaryIndex !== 0;
+
+        if (isNonFirstPageStart) {
+            const prevReq = getPageStartPrevRegex(rule, ruleIndex);
+            if (prevReq) {
+                const lastChar = getPrevPageLastNonWsChar(boundaryIndex);
+                if (!lastChar || !prevReq.test(lastChar)) {
+                    return false;
+                }
+            }
+
+            return shouldAllowPageStartMatch(
+                getPreviousPageContent(boundaryIndex),
+                getPrevWordStoplist(rule, ruleIndex),
+            );
         }
-        const prevReq = getPageStartPrevRegex(rule, ruleIndex);
-        if (!prevReq) {
-            return true;
-        }
-        const lastChar = getPrevPageLastNonWsChar(boundaryIndex);
-        return lastChar ? prevReq.test(lastChar) : false;
+
+        return shouldAllowSamePageMatch(
+            getCurrentPageContentBeforeMatch(matchStart),
+            getSamePagePrevWordStoplist(rule, ruleIndex),
+        );
     };
 };
 
@@ -183,7 +295,6 @@ const processFastFuzzyMatchesAt = (
     pageId: number,
     fastFuzzyRules: FastFuzzyRule[],
     passesPageStartGuard: PageStartGuardChecker,
-    isPageStart: boolean,
     splitPointsByRule: Map<number, SplitPoint[]>,
 ) => {
     for (const ffRule of fastFuzzyRules) {
@@ -191,7 +302,7 @@ const processFastFuzzyMatchesAt = (
             continue;
         }
 
-        if (isPageStart && !passesPageStartGuard(ffRule.rule, ffRule.ruleIndex, lineStart)) {
+        if (!passesPageStartGuard(ffRule.rule, ffRule.ruleIndex, lineStart)) {
             continue;
         }
 
@@ -220,8 +331,6 @@ export const collectFastFuzzySplitPoints = (
         }
     };
 
-    const isPageStart = (offset: number) => offset === currentBoundary?.start;
-
     // Line starts are offset 0 and any char after '\n'
     for (let lineStart = 0; lineStart <= matchContent.length; ) {
         advanceBoundaryTo(lineStart);
@@ -237,7 +346,6 @@ export const collectFastFuzzySplitPoints = (
             pageId,
             fastFuzzyRules,
             passesPageStartGuard,
-            isPageStart(lineStart),
             splitPointsByRule,
         );
 

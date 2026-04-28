@@ -226,6 +226,32 @@ const buildExample = (page: Page, window: TokenStreamItem[], contextChars: numbe
     };
 };
 
+const recordPattern = (
+    page: Page,
+    window: TokenStreamItem[],
+    opts: ResolvedOptions,
+    stats: Map<string, PatternStats>,
+): void => {
+    if (opts.requireToken && !hasTokenInWindow(window)) {
+        return;
+    }
+
+    const pattern = buildPattern(window, opts.whitespace);
+    let entry = stats.get(pattern);
+    if (!entry) {
+        if (stats.size >= opts.maxUniquePatterns) {
+            return;
+        }
+        entry = { count: 0, examples: [], ...computeWindowStats(window) };
+        stats.set(pattern, entry);
+    }
+
+    entry.count++;
+    if (entry.examples.length < opts.maxExamples) {
+        entry.examples.push(buildExample(page, window, opts.contextChars));
+    }
+};
+
 /** Extract N-grams from a single page */
 const extractPageNgrams = (
     page: Page,
@@ -234,28 +260,9 @@ const extractPageNgrams = (
     stats: Map<string, PatternStats>,
 ): void => {
     for (let i = 0; i <= items.length - opts.minElements; i++) {
-        for (let n = opts.minElements; n <= Math.min(opts.maxElements, items.length - i); n++) {
-            const window = items.slice(i, i + n);
-
-            if (opts.requireToken && !hasTokenInWindow(window)) {
-                continue;
-            }
-
-            const pattern = buildPattern(window, opts.whitespace);
-
-            if (!stats.has(pattern)) {
-                if (stats.size >= opts.maxUniquePatterns) {
-                    continue;
-                }
-                stats.set(pattern, { count: 0, examples: [], ...computeWindowStats(window) });
-            }
-
-            const entry = stats.get(pattern)!;
-            entry.count++;
-
-            if (entry.examples.length < opts.maxExamples) {
-                entry.examples.push(buildExample(page, window, opts.contextChars));
-            }
+        const maxWindowSize = Math.min(opts.maxElements, items.length - i);
+        for (let n = opts.minElements; n <= maxWindowSize; n++) {
+            recordPattern(page, items.slice(i, i + n), opts, stats);
         }
     }
 };

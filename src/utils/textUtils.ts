@@ -1,3 +1,5 @@
+import { ARABIC_MARKS_CLASS } from '@/segmentation/tokens.js';
+
 /**
  * Normalizes line endings to Unix-style (`\n`).
  *
@@ -43,6 +45,7 @@ export const escapeTemplateBrackets = (pattern: string) => {
  * Character class matching all Arabic diacritics (Tashkeel/Harakat).
  *
  * Includes the following diacritical marks:
+ * - U+0640: ـ (tatweel / kashida)
  * - U+064B: ً (fathatan - double fatha)
  * - U+064C: ٌ (dammatan - double damma)
  * - U+064D: ٍ (kasratan - double kasra)
@@ -54,7 +57,7 @@ export const escapeTemplateBrackets = (pattern: string) => {
  *
  * @internal
  */
-const DIACRITICS_CLASS = '[\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]';
+const DIACRITICS_CLASS = '[\u0640\u064B\u064C\u064D\u064E\u064F\u0650\u0651\u0652]';
 
 /**
  * Groups of equivalent Arabic characters.
@@ -75,6 +78,8 @@ const EQUIV_GROUPS = [
     ['\u0629', '\u0647'], // ة <-> ه
     ['\u0649', '\u064A'], // ى <-> ي
 ];
+
+const DIACRITICS_AND_MARKS_REGEX = new RegExp(ARABIC_MARKS_CLASS, 'g');
 
 /**
  * Escapes a string for safe inclusion in a regular expression.
@@ -102,6 +107,32 @@ const normalizeArabicLight = (str: string) => {
         .replace(/[\u200C\u200D]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
+};
+
+/**
+ * Normalizes Arabic text for exact comparisons while tolerating common variants.
+ *
+ * This removes Arabic diacritics, collapses whitespace, removes joiners, and
+ * maps common equivalent letters to a shared canonical form:
+ * - ا/آ/أ/إ -> ا
+ * - ة/ه -> ه
+ * - ى/ي -> ي
+ */
+export const normalizeArabicForComparison = (text: string) => {
+    return Array.from(normalizeArabicLight(text).replace(DIACRITICS_AND_MARKS_REGEX, ''))
+        .map((ch) => {
+            if (ch === '\u0622' || ch === '\u0623' || ch === '\u0625') {
+                return '\u0627';
+            }
+            if (ch === '\u0629') {
+                return '\u0647';
+            }
+            if (ch === '\u0649') {
+                return '\u064A';
+            }
+            return ch;
+        })
+        .join('');
 };
 
 export const makeDiacriticInsensitive = (text: string) => {

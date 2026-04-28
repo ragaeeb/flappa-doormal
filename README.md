@@ -135,7 +135,7 @@ Replace regex with readable tokens:
 | `{{num}}` | Single ASCII digit | `\\d` |
 | `{{dash}}` | Dash variants | `[-–—ـ]` |
 | `{{harf}}` | Arabic letter | `[أ-ي]` |
-| `{{harfs}}` | Single-letter codes separated by spaces | `[أ-ي](?:\s+[أ-ي])*` |
+| `{{harfs}}` | Single-letter codes separated by spaces, with optional marks/tatweel on each isolated letter | e.g. `د ت س ي ق`, `هـ ث` |
 | `{{rumuz}}` | Source abbreviations (rijāl/takhrīj rumuz), incl. multi-code blocks | e.g. `خت ٤`, `خ سي`, `خ فق`, `د ت سي ق`, `دت عس ق` |
 | `{{numbered}}` | Hadith numbering `٢٢ - ` | `{{raqms}} {{dash}} ` |
 | `{{fasl}}` | Section markers | `فصل\|مسألة` |
@@ -322,6 +322,93 @@ const segments = segmentPages(pages, {
 ```
 
 This guard applies **only at page starts**. Mid-page line starts are unaffected.
+
+#### Previous-Word Page-Start Stoplist
+
+For dictionary-like content, page wraps can split a phrase across pages and create
+false positives at the top of the next page. Example:
+
+- Page N ends with `قال`
+- Page N+1 starts with `العجاج:`
+
+Use `pageStartPrevWordStoplist` to suppress page-start matches when the previous
+page's last Arabic word is in a stoplist. Matching is Arabic-normalized and
+diacritic-insensitive.
+
+```typescript
+const segments = segmentPages(pages, {
+  rules: [{
+    regex: '^(?<lemma>[ء-غف-ي]+):',
+    split: 'at',
+    pageStartPrevWordStoplist: ['قال', 'وقيل', 'ويقال']
+  }]
+});
+```
+
+If the previous page ends with strong sentence punctuation (`.`, `!`, `?`, `؟`, `؛`),
+the stoplist guard is skipped and the page-start match is allowed.
+
+#### Arabic Dictionary Helper
+
+Use `createArabicDictionaryEntryRule()` to build a conservative rule for Arabic
+dictionaries with lemma capture, stopword filtering, and page-wrap protection:
+
+```typescript
+import { createArabicDictionaryEntryRule, segmentPages } from 'flappa-doormal';
+
+const rule = createArabicDictionaryEntryRule({
+  stopWords: ['وقيل', 'ويقال', 'قال', 'العجاج', 'أخاك'],
+  pageStartPrevWordStoplist: ['قال', 'وقيل', 'ويقال'],
+  samePagePrevWordStoplist: ['جل'],
+  // Optional dictionary-specific shapes:
+  allowParenthesized: true,         // e.g. (عنبر) :
+  allowWhitespaceBeforeColon: true, // e.g. عنبر :
+  allowCommaSeparated: true,        // e.g. سبد، دبس:
+});
+
+const segments = segmentPages(pages, { rules: [rule] });
+```
+
+Behavior:
+- Keeps the lemma marker in `segment.content`
+- Stores the matched lemma in `segment.meta.lemma`
+- Matches root entries at true line/page starts like `عز:` and `لع:`
+- Matches mid-line subentries conservatively when they begin with `و`
+- Can match parenthesized headwords like `(عنبر) :` when enabled
+- Can match comma-separated headword lists like `سبد، دبس:` when enabled
+- Can suppress same-page false positives like `جلّ وعزّ:` with `samePagePrevWordStoplist`
+
+#### Dictionary Letter-Code Lines
+
+For dictionary-specific letter-code lines like `ك ش ن` or `(هـ ث)`, use
+`{{harfs}}` and decide the metadata shape in client code:
+
+```typescript
+import { getTokenPattern, segmentPages } from 'flappa-doormal';
+
+const harfCodes = getTokenPattern('harfs').replaceAll('\\s+', '[ \\t]+');
+
+const segments = segmentPages(pages, {
+  rules: [{
+    regex: `^(?:\\((?<huruf>${harfCodes})\\)|(?<huruf>${harfCodes}))$`,
+    split: 'at',
+    meta: { type: 'C' },
+  }],
+});
+```
+
+Here `huruf` is just a named capture group chosen by the client, not a built-in
+regex primitive.
+
+This client-side rule can be used for:
+- chapter-adjacent code lines like `(هـ ث)`
+- consecutive bare code lines like `س ط ب` then `س د ر`
+
+The `replaceAll('\\s+', '[ \\t]+')` step is intentional:
+- `{{harfs}}` itself uses `\s+`
+- but when embedding it in a raw full-line regex, horizontal whitespace is usually
+  safer than unrestricted `\s+`, because it prevents accidental matching across
+  newlines
 
 ### 5. Auto-Escaping Brackets
 
@@ -1382,66 +1469,6 @@ const options: SegmentationOptions = {
 const segments: Segment[] = segmentPages(pages, options);
 ```
 
-### Marker recovery (when `lineStartsAfter` was used by accident)
-
-If you accidentally used `lineStartsAfter` for markers that should have been preserved (e.g. Arabic connective phrases like `وروى` / `وذكر`), you can recover those missing prefixes from existing segments.
-
-#### `recoverMistakenLineStartsAfterMarkers(pages, segments, options, selector, opts?)`
-
-This function returns new segments with recovered `content` plus a `report` describing what happened.
-
-**Recommended (deterministic) mode**: rerun segmentation with selected rules converted to `lineStartsWith`, then merge recovered content back.
-
-```ts
-import { recoverMistakenLineStartsAfterMarkers, segmentPages } from 'flappa-doormal';
-
-const pages = [{ id: 1, content: 'وروى أحمد\nوذكر خالد' }];
-const options = { rules: [{ lineStartsAfter: ['وروى '] }, { lineStartsAfter: ['وذكر '] }] };
-
-const segments = segmentPages(pages, options);
-// segments[0].content === 'أحمد' (marker stripped)
-
-const { segments: recovered, report } = recoverMistakenLineStartsAfterMarkers(
-  pages,
-  segments,
-  options,
-  { type: 'rule_indices', indices: [0] }, // recover only the first rule
-);
-
-// recovered[0].content === 'وروى أحمد'
-// recovered[1].content === 'خالد'  (unchanged)
-console.log(report.summary);
-```
-
-**Optional**: best-effort anchoring mode attempts to recover without rerunning first, then falls back to rerun for unresolved segments:
-
-```ts
-const { segments: recovered } = recoverMistakenLineStartsAfterMarkers(
-  pages,
-  segments,
-  options,
-  { type: 'rule_indices', indices: [0] },
-  { mode: 'best_effort_then_rerun' }
-);
-```
-
-Notes:
-- Recovery is **explicitly scoped** by the `selector`; it will not “guess” which rules are mistaken.
-- If your segments were heavily post-processed (trimmed/normalized/reordered), recovery may return unresolved items; see the report for details.
-
-#### `recoverMistakenMarkersForRuns(runs, opts?)`
-
-Batch version of `recoverMistakenLineStartsAfterMarkers`. Processes multiple independent segmentation runs (e.g. from different books) and returns a consolidated report.
-
-```typescript
-import { recoverMistakenMarkersForRuns } from 'flappa-doormal';
-
-const results = recoverMistakenMarkersForRuns([
-  { pages: pages1, segments: segments1, options: options1, selector: selector1 },
-  { pages: pages2, segments: segments2, options: options2, selector: selector2 },
-]);
-```
-
 ### `validateSegments(pages, options, segments, validationOptions?)`
 
 Validates that segments correctly map back to the source pages and adhere to constraints.
@@ -1635,7 +1662,9 @@ type SplitRule = {
   min?: number;
   max?: number;
   exclude?: (number | [number, number])[]; // Single page or [start, end] range
-  skipWhen?: string; // Regex pattern (tokens supported)
+  pageStartGuard?: string;
+  pageStartPrevWordStoplist?: string[];
+  samePagePrevWordStoplist?: string[];
   meta?: Record<string, unknown>;
 };
 ```

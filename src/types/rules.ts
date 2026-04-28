@@ -273,6 +273,47 @@ type RuleConstraints = PageRangeConstraintWithExclude & {
      * { lineStartsWith: ['{{naql}}'], fuzzy: true, pageStartGuard: '{{tarqim}}' }
      */
     pageStartGuard?: string;
+
+    /**
+     * Suppress page-start matches when the previous page's last Arabic word
+     * is in this stoplist, unless that page ends with strong sentence punctuation.
+     *
+     * This is useful for dictionary-like content where a page break can split
+     * a phrase such as `قال` / `العجاج:` across two pages, causing a false entry
+     * start at the top of the next page.
+     *
+     * Notes:
+     * - Applies ONLY at page starts, not to mid-page matches.
+     * - Matching is exact after Arabic normalization:
+     *   diacritics are ignored and common variants like ا/أ/إ/آ are tolerated.
+     *
+     * @example
+     * {
+     *   regex: '^(?<lemma>[ء-غف-ي]+):',
+     *   pageStartPrevWordStoplist: ['قال', 'وقيل', 'ويقال']
+     * }
+     */
+    pageStartPrevWordStoplist?: string[];
+
+    /**
+     * Suppress matches when the immediately previous Arabic word on the SAME page
+     * is in this stoplist.
+     *
+     * This is useful for dictionary-like content where phrases such as
+     * `جلّ وعزّ:` should not be treated as a new entry starting at `وعزّ:`.
+     *
+     * Notes:
+     * - Applies only to non-page-start matches.
+     * - Matching is exact after Arabic normalization:
+     *   diacritics are ignored and common variants like ا/أ/إ/آ are tolerated.
+     *
+     * @example
+     * {
+     *   regex: '(?<lemma>وعزّ):',
+     *   samePagePrevWordStoplist: ['جل']
+     * }
+     */
+    samePagePrevWordStoplist?: string[];
 };
 
 // Combined Rule Type

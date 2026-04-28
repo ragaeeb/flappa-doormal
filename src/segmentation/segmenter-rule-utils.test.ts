@@ -63,7 +63,18 @@ describe('segmenter-rule-utils', () => {
             expect(fastFuzzyRules[1].kind).toBe('startsAfter');
 
             expect(standaloneRules).toHaveLength(2);
+            expect(standaloneRules.map((entry) => entry.index)).toEqual([2, 3]);
             expect(combinableRules.map((r) => r.index)).toEqual([4]);
+        });
+
+        it('should auto-enable fast-fuzzy partitioning for tokens that default to fuzzy', () => {
+            const rules: SplitRule[] = [{ lineStartsWith: ['{{naql}}'] }];
+
+            const { fastFuzzyRules } = partitionRulesForMatching(rules);
+
+            expect(fastFuzzyRules).toHaveLength(1);
+            expect(fastFuzzyRules[0].ruleIndex).toBe(0);
+            expect(fastFuzzyRules[0].kind).toBe('startsWith');
         });
     });
 
@@ -85,6 +96,66 @@ describe('segmenter-rule-utils', () => {
             ]);
             const passes2 = createPageStartGuardChecker(matchContent2, pageMap2);
             expect(passes2(rule, 0, 3)).toBe(true);
+        });
+
+        it('should suppress page-start matches when the previous page ends with a stoplisted word unless punctuation ends the sentence', () => {
+            const rule = {
+                lineStartsWith: ['X'],
+                pageStartPrevWordStoplist: ['قال', 'وقيل', 'ويقال'],
+            } as SplitRule;
+
+            const { matchContent, pageMap } = makePageMap([
+                { content: 'شيء قال', id: 1 },
+                { content: 'X', id: 2 },
+            ]);
+            const passes = createPageStartGuardChecker(matchContent, pageMap);
+            expect(passes(rule, 0, 8)).toBe(false);
+
+            const { matchContent: punctuatedContent, pageMap: punctuatedPageMap } = makePageMap([
+                { content: 'شيء قال.', id: 1 },
+                { content: 'X', id: 2 },
+            ]);
+            const passesWithPunctuation = createPageStartGuardChecker(punctuatedContent, punctuatedPageMap);
+            expect(passesWithPunctuation(rule, 0, 9)).toBe(true);
+        });
+
+        it('should treat Arabic full stop and ellipsis as strong sentence terminators for page-start stoplists', () => {
+            const rule = {
+                lineStartsWith: ['X'],
+                pageStartPrevWordStoplist: ['قال'],
+            } as SplitRule;
+
+            const { matchContent: arabicFullStopContent, pageMap: arabicFullStopPageMap } = makePageMap([
+                { content: 'شيء قال۔', id: 1 },
+                { content: 'X', id: 2 },
+            ]);
+            const passesArabicFullStop = createPageStartGuardChecker(arabicFullStopContent, arabicFullStopPageMap);
+            expect(passesArabicFullStop(rule, 0, 9)).toBe(true);
+
+            const { matchContent: ellipsisContent, pageMap: ellipsisPageMap } = makePageMap([
+                { content: 'شيء قال…', id: 1 },
+                { content: 'X', id: 2 },
+            ]);
+            const passesEllipsis = createPageStartGuardChecker(ellipsisContent, ellipsisPageMap);
+            expect(passesEllipsis(rule, 0, 9)).toBe(true);
+        });
+
+        it('should suppress non-page-start matches when the previous same-page Arabic word is stoplisted', () => {
+            const rule = {
+                regex: 'وعزّ:',
+                samePagePrevWordStoplist: ['جل'],
+            } as SplitRule;
+
+            const { matchContent, pageMap } = makePageMap([{ content: 'قول الله جلّ وعزّ: نص', id: 1 }]);
+            const passes = createPageStartGuardChecker(matchContent, pageMap);
+
+            expect(passes(rule, 0, matchContent.indexOf('وعزّ:'))).toBe(false);
+
+            const { matchContent: allowedContent, pageMap: allowedPageMap } = makePageMap([
+                { content: 'قول الله نعم وعزّ: نص', id: 1 },
+            ]);
+            const passesAllowed = createPageStartGuardChecker(allowedContent, allowedPageMap);
+            expect(passesAllowed(rule, 0, allowedContent.indexOf('وعزّ:'))).toBe(true);
         });
     });
 
@@ -109,6 +180,22 @@ describe('segmenter-rule-utils', () => {
             expect(startsAfterPoints?.[0].index).toBe(0);
             expect(startsAfterPoints?.[0].contentStartOffset).toBeDefined();
             expect(matchContent.slice(0 + (startsAfterPoints?.[0].contentStartOffset ?? 0))).toStartWith(' ');
+        });
+
+        it('should apply same-page previous-word stoplists to fast-fuzzy mid-page matches too', () => {
+            const { matchContent, pageMap } = makePageMap([{ content: 'قول الله جلّ\nبَابُ الفصل', id: 1 }]);
+            const rules: SplitRule[] = [
+                {
+                    lineStartsWith: ['{{bab}}'],
+                    samePagePrevWordStoplist: ['جل'],
+                },
+            ];
+            const { fastFuzzyRules } = partitionRulesForMatching(rules);
+            const passes = createPageStartGuardChecker(matchContent, pageMap);
+
+            const byRule = collectFastFuzzySplitPoints(matchContent, pageMap, fastFuzzyRules, passes);
+
+            expect(byRule.get(0)).toBeUndefined();
         });
     });
 });

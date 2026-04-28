@@ -99,6 +99,18 @@ describe('debug-meta', () => {
             });
         });
 
+        it('buildBreakpointDebugPatch should mark regex breakpoints correctly', () => {
+            const rule = { regex: '\\.' };
+            const patch = buildBreakpointDebugPatch(1, rule);
+            expect(patch).toEqual({
+                breakpoint: {
+                    index: 1,
+                    kind: 'regex',
+                    pattern: '\\.',
+                },
+            });
+        });
+
         it('buildContentLengthDebugPatch', () => {
             const patch = buildContentLengthDebugPatch(100, 150, 'whitespace');
             expect(patch).toEqual({

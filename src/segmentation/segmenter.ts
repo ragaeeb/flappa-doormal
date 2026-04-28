@@ -98,15 +98,44 @@ export const dedupeSplitPoints = (splitPoints: SplitPoint[]) => {
     const byIndex = new Map<number, SplitPoint>();
     for (const p of splitPoints) {
         const existing = byIndex.get(p.index);
-        const hasMoreInfo =
-            !existing ||
-            (p.contentStartOffset !== undefined && existing.contentStartOffset === undefined) ||
-            (p.meta !== undefined && existing.meta === undefined);
-        if (hasMoreInfo) {
+        if (!existing) {
             byIndex.set(p.index, p);
+            continue;
         }
+
+        byIndex.set(p.index, mergeSplitPoints(existing, p));
     }
     return [...byIndex.values()].sort((a, b) => a.index - b.index);
+};
+
+const prefersIncomingSplitPoint = (existing: SplitPoint, incoming: SplitPoint) =>
+    (incoming.contentStartOffset !== undefined && existing.contentStartOffset === undefined) ||
+    (incoming.meta !== undefined && existing.meta === undefined);
+
+const mergeRecord = (
+    existing: Record<string, unknown> | undefined,
+    incoming: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined =>
+    existing || incoming
+        ? {
+              ...(existing ?? {}),
+              ...(incoming ?? {}),
+          }
+        : undefined;
+
+const mergeSplitPoints = (existing: SplitPoint, incoming: SplitPoint): SplitPoint => {
+    const preferred = prefersIncomingSplitPoint(existing, incoming) ? incoming : existing;
+    const fallback = preferred === incoming ? existing : incoming;
+
+    return {
+        ...fallback,
+        ...preferred,
+        contentStartOffset: preferred.contentStartOffset ?? fallback.contentStartOffset,
+        meta: mergeRecord(existing.meta, incoming.meta),
+        namedCaptures: mergeRecord(existing.namedCaptures, incoming.namedCaptures) as
+            | Record<string, string>
+            | undefined,
+    };
 };
 
 /**
@@ -177,15 +206,8 @@ const collectSplitPointsFromRules = (
         );
     }
 
-    for (const rule of standaloneRules) {
-        processStandaloneRule(
-            rule,
-            rules.indexOf(rule),
-            matchContent,
-            pageMap,
-            passesPageStartGuard,
-            splitPointsByRule,
-        );
+    for (const { rule, index } of standaloneRules) {
+        processStandaloneRule(rule, index, matchContent, pageMap, passesPageStartGuard, splitPointsByRule);
     }
 
     return applyOccurrenceFilter(rules, splitPointsByRule, debugMetaKey);
@@ -244,7 +266,7 @@ const convertPageBreaks = (
     pageBreaks: number[],
     pageJoiner: 'space' | 'newline',
 ) => {
-    if (!content || !content.includes('\n')) {
+    if (!content?.includes('\n')) {
         return content;
     }
 
@@ -405,6 +427,14 @@ const buildSegments = (
     rules: SplitRule[],
     pageJoiner: 'space' | 'newline',
 ) => {
+    const getActualStart = (start: number, contentStartOffset?: number) => start + (contentStartOffset ?? 0);
+    const trimSegmentText = (sliced: string, capturedContent?: string, contentStartOffset?: number) =>
+        capturedContent?.trim() ?? (contentStartOffset ? sliced.trim() : sliced.replace(/[\s\n]+$/, ''));
+    const getAdjustedStart = (actualStart: number, sliced: string, contentStartOffset?: number) =>
+        actualStart + (contentStartOffset ? sliced.length - sliced.trimStart().length : 0);
+    const applyMeta = (meta?: Record<string, unknown>, namedCaptures?: Record<string, string>) =>
+        meta || namedCaptures ? { ...meta, ...namedCaptures } : undefined;
+
     /**
      * Creates a single segment from a content range.
      */
@@ -416,9 +446,9 @@ const buildSegments = (
         namedCaptures?: Record<string, string>,
         contentStartOffset?: number,
     ) => {
-        const actualStart = start + (contentStartOffset ?? 0);
+        const actualStart = getActualStart(start, contentStartOffset);
         const sliced = content.slice(actualStart, end);
-        let text = capturedContent?.trim() ?? (contentStartOffset ? sliced.trim() : sliced.replace(/[\s\n]+$/, ''));
+        let text = trimSegmentText(sliced, capturedContent, contentStartOffset);
         if (!text) {
             return null;
         }
@@ -430,8 +460,7 @@ const buildSegments = (
         // Calculate how much leading whitespace was trimmed to get the correct 'from' page.
         // This is critical for lineStartsAfter rules where the content after the marker
         // may start on a different page than where the marker was matched.
-        const leadingTrimmed = contentStartOffset ? sliced.length - sliced.trimStart().length : 0;
-        const adjustedStart = actualStart + leadingTrimmed;
+        const adjustedStart = getAdjustedStart(actualStart, sliced, contentStartOffset);
 
         const from = pageMap.getId(adjustedStart);
         const to = capturedContent ? pageMap.getId(end - 1) : pageMap.getId(adjustedStart + text.length - 1);
@@ -439,8 +468,9 @@ const buildSegments = (
         if (to !== from) {
             seg.to = to;
         }
-        if (meta || namedCaptures) {
-            seg.meta = { ...meta, ...namedCaptures };
+        const mergedMeta = applyMeta(meta, namedCaptures);
+        if (mergedMeta) {
+            seg.meta = mergedMeta;
         }
         return seg;
     };

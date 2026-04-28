@@ -58,7 +58,7 @@ export const buildRuleDebugPatch = (ruleIndex: number, rule: SplitRule, wordInde
 export const buildBreakpointDebugPatch = (breakpointIndex: number, rule: BreakpointRule, wordIndex?: number) => ({
     breakpoint: {
         index: breakpointIndex,
-        kind: rule.pattern === '' ? 'pageBoundary' : 'pattern',
+        kind: rule.pattern === '' ? 'pageBoundary' : rule.regex ? 'regex' : 'pattern',
         pattern: rule.pattern ?? rule.regex,
         ...(wordIndex !== undefined ? { wordIndex } : {}),
         ...(wordIndex !== undefined && rule.words ? { word: rule.words[wordIndex] } : {}),
