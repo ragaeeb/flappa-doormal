@@ -167,6 +167,41 @@ describe('optimizeRules', () => {
             const { rules: result } = optimizeRules(rules);
             expect((result[0] as any).regex).toBe('^[a-z]+\\s*\\d+');
         });
+
+        it('gives dictionaryEntry rules a non-zero specificity score so they do not sort like empty patterns', () => {
+            const rules: SplitRule[] = [
+                { regex: '^a' },
+                { dictionaryEntry: { allowCommaSeparated: true, stopWords: ['قال'] } },
+            ];
+            const { rules: result } = optimizeRules(rules);
+            expect('dictionaryEntry' in result[0]).toBeTrue();
+        });
+
+        it('ranks narrower dictionaryEntry rules ahead of broader ones', () => {
+            const rules: SplitRule[] = [
+                {
+                    dictionaryEntry: {
+                        allowCommaSeparated: true,
+                        midLineSubentries: true,
+                        stopWords: ['قال'],
+                    },
+                },
+                {
+                    dictionaryEntry: {
+                        allowCommaSeparated: false,
+                        midLineSubentries: false,
+                        stopWords: ['قال'],
+                    },
+                },
+            ];
+            const { rules: result } = optimizeRules(rules);
+            expect(result[0]).toMatchObject({
+                dictionaryEntry: {
+                    allowCommaSeparated: false,
+                    midLineSubentries: false,
+                },
+            });
+        });
     });
 
     describe('edge cases', () => {

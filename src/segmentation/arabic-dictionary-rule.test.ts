@@ -1,13 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { Page } from '@/types/index.js';
 import { createArabicDictionaryEntryRule } from './arabic-dictionary-rule.js';
+import { buildRuleRegex } from './rule-regex.js';
 import { segmentPages } from './segmenter.js';
 
 const getRegex = (rule: ReturnType<typeof createArabicDictionaryEntryRule>) => {
-    if (!('regex' in rule)) {
-        throw new Error('Expected dictionary rule to expose a regex pattern');
-    }
-    return rule.regex;
+    return buildRuleRegex(rule).regex.source;
 };
 
 describe('arabic-dictionary-rule', () => {
@@ -18,11 +16,14 @@ describe('arabic-dictionary-rule', () => {
             });
 
             expect(rule).toMatchObject({
+                dictionaryEntry: {
+                    captureName: 'lemma',
+                    stopWords: ['وقيل', 'ويقال', 'قال'],
+                },
                 pageStartPrevWordStoplist: undefined,
-                split: 'at',
             });
-            expect('regex' in rule && rule.regex).toContain('(?<lemma>');
-            expect('regex' in rule && rule.regex).toContain('(?:(?<=^)|(?<=\\n))');
+            expect(getRegex(rule)).toContain('(?<lemma>');
+            expect(getRegex(rule)).toContain('(?:(?<=^)|(?<=\\n))');
         });
 
         it('should include custom metadata, capture names, and page-start stoplists', () => {
@@ -35,12 +36,15 @@ describe('arabic-dictionary-rule', () => {
             });
 
             expect(rule).toMatchObject({
+                dictionaryEntry: {
+                    captureName: 'headword',
+                    stopWords: ['وقيل', 'ويقال'],
+                },
                 meta: { type: 'entry' },
                 pageStartPrevWordStoplist: ['قال', 'وقيل'],
                 samePagePrevWordStoplist: ['جل'],
-                split: 'at',
             });
-            expect('regex' in rule && rule.regex).toContain('(?<headword>');
+            expect(getRegex(rule)).toContain('(?<headword>');
         });
 
         it('should respect minLetters and maxLetters in the generated lemma stem', () => {
@@ -50,7 +54,13 @@ describe('arabic-dictionary-rule', () => {
                 stopWords: ['وقيل'],
             });
 
-            expect('regex' in rule && rule.regex).toContain('{2,4}');
+            expect(rule).toMatchObject({
+                dictionaryEntry: {
+                    maxLetters: 5,
+                    minLetters: 3,
+                },
+            });
+            expect(getRegex(rule)).toContain('{2,4}');
         });
 
         it('should deduplicate stopwords that differ only by diacritics or equivalent letters', () => {
@@ -61,7 +71,7 @@ describe('arabic-dictionary-rule', () => {
                 stopWords: ['أي', 'أيْ', 'أراد', 'أَرَادَ', 'العجاج', 'العجّاج'],
             });
 
-            expect('regex' in canonical && canonical.regex).toBe('regex' in duplicated && duplicated.regex);
+            expect(canonical).toEqual(duplicated);
         });
 
         it('should block stopwords across vocalized variants, not just the exact first-seen spelling', () => {
@@ -157,7 +167,101 @@ describe('arabic-dictionary-rule', () => {
                 stopWords: [],
             });
 
-            expect('regex' in rule && rule.regex).not.toContain('(?!');
+            expect(getRegex(rule)).not.toContain('(?!');
+        });
+
+        it('should serialize to a readable dictionaryEntry rule instead of a compiled regex blob', () => {
+            const rule = createArabicDictionaryEntryRule({
+                allowCommaSeparated: true,
+                pageStartPrevWordStoplist: ['قال'],
+                samePagePrevWordStoplist: ['جل'],
+                stopWords: ['العجاج', 'قال'],
+            });
+
+            expect(JSON.parse(JSON.stringify(rule))).toMatchObject({
+                dictionaryEntry: {
+                    allowCommaSeparated: true,
+                    captureName: 'lemma',
+                    stopWords: ['العجاج', 'قال'],
+                },
+                pageStartPrevWordStoplist: ['قال'],
+                samePagePrevWordStoplist: ['جل'],
+            });
+        });
+
+        it('should disable mid-line subentry matching when midLineSubentries is false', () => {
+            const pages: Page[] = [{ content: 'عز: أصل الباب. والعَزُوزُ: صفة معروفة.', id: 1 }];
+
+            const segments = segmentPages(pages, {
+                rules: [
+                    createArabicDictionaryEntryRule({
+                        midLineSubentries: false,
+                        stopWords: [],
+                    }),
+                ],
+            });
+
+            expect(segments.map((segment) => segment.meta?.lemma)).toEqual(['عز']);
+        });
+
+        it('should support direct dictionaryEntry rules for JSON-authored configs', () => {
+            const pages: Page[] = [{ content: 'عز: أصل الباب. والعَزُوزُ: صفة معروفة.', id: 1 }];
+
+            const segments = segmentPages(pages, {
+                rules: [
+                    {
+                        dictionaryEntry: {
+                            captureName: 'lemma',
+                            midLineSubentries: false,
+                            stopWords: [],
+                        },
+                        meta: { type: 'entry' },
+                    },
+                ],
+            });
+
+            expect(segments).toHaveLength(1);
+            expect(segments[0].meta?.type).toBe('entry');
+            expect(segments[0].meta?.lemma).toBe('عز');
+        });
+
+        it('should preserve behavior after JSON round-trip of a dictionaryEntry rule descriptor', () => {
+            const originalRule = createArabicDictionaryEntryRule({
+                allowCommaSeparated: true,
+                pageStartPrevWordStoplist: ['قال'],
+                samePagePrevWordStoplist: ['جل'],
+                stopWords: ['العجاج', 'قال'],
+            });
+            const roundTrippedRule = JSON.parse(JSON.stringify(originalRule));
+            const pages: Page[] = [
+                {
+                    content: 'عز: أصل الباب. وقال العجّاج: شاهد. والعَزُوزُ: صفة معروفة. جلّ وعزّ: تعظيم.',
+                    id: 1,
+                },
+            ];
+
+            const segments = segmentPages(pages, {
+                rules: [roundTrippedRule],
+            });
+
+            expect(segments.map((segment) => segment.meta?.lemma)).toEqual(['عز', 'والعَزُوزُ']);
+        });
+
+        it('should not split parenthesized mid-line forms when midLineSubentries is false', () => {
+            const pages: Page[] = [{ content: 'تمهيد (والعَزُوزُ) : تعريفٌ واضح.', id: 1 }];
+
+            const segments = segmentPages(pages, {
+                rules: [
+                    createArabicDictionaryEntryRule({
+                        allowParenthesized: true,
+                        allowWhitespaceBeforeColon: true,
+                        midLineSubentries: false,
+                        stopWords: [],
+                    }),
+                ],
+            });
+
+            expect(segments.filter((segment) => segment.meta?.lemma)).toHaveLength(0);
         });
 
         it('should reject invalid minLetters values', () => {
@@ -248,7 +352,7 @@ describe('arabic-dictionary-rule', () => {
             const entrySegments = segments.filter((segment) => segment.meta?.lemma);
 
             expect(entrySegments).toHaveLength(1);
-            expect(entrySegments[0].content).toStartWith('عنبر');
+            expect(entrySegments[0].content).toStartWith('(عنبر) :');
             expect(entrySegments[0].meta?.lemma).toBe('عنبر');
         });
 
@@ -297,7 +401,7 @@ describe('arabic-dictionary-rule', () => {
 
             expect(entrySegments).toHaveLength(1);
             expect(entrySegments[0].meta?.lemma).toBe('والعَزُوزُ');
-            expect(entrySegments[0].content).toStartWith('والعَزُوزُ');
+            expect(entrySegments[0].content).toStartWith('(والعَزُوزُ) :');
         });
 
         it('should tolerate tatweel in lemmas and stopwords', () => {

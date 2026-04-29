@@ -285,6 +285,7 @@ const rules = [{
 | `lineEndsWith` | ✅ Included | Match patterns at end of line |
 | `template` | Depends | Custom pattern with full control |
 | `regex` | Depends | Raw regex for complex cases |
+| `dictionaryEntry` | ✅ Included | Serializable Arabic dictionary headword rule |
 
 #### Building UIs with Pattern Type Keys
 
@@ -293,7 +294,7 @@ The library exports `PATTERN_TYPE_KEYS` (a const array) and `PatternTypeKey` (a 
 ```typescript
 import { PATTERN_TYPE_KEYS, type PatternTypeKey } from 'flappa-doormal';
 
-// PATTERN_TYPE_KEYS = ['lineStartsWith', 'lineStartsAfter', 'lineEndsWith', 'template', 'regex']
+// PATTERN_TYPE_KEYS = ['lineStartsWith', 'lineStartsAfter', 'lineEndsWith', 'template', 'regex', 'dictionaryEntry']
 
 // Build a dropdown/select
 PATTERN_TYPE_KEYS.map(key => <option value={key}>{key}</option>)
@@ -351,7 +352,9 @@ the stoplist guard is skipped and the page-start match is allowed.
 #### Arabic Dictionary Helper
 
 Use `createArabicDictionaryEntryRule()` to build a conservative rule for Arabic
-dictionaries with lemma capture, stopword filtering, and page-wrap protection:
+dictionaries with lemma capture, stopword filtering, and page-wrap protection.
+The helper now returns a serializable native `dictionaryEntry` rule rather than
+an eagerly-compiled regex blob:
 
 ```typescript
 import { createArabicDictionaryEntryRule, segmentPages } from 'flappa-doormal';
@@ -364,9 +367,27 @@ const rule = createArabicDictionaryEntryRule({
   allowParenthesized: true,         // e.g. (عنبر) :
   allowWhitespaceBeforeColon: true, // e.g. عنبر :
   allowCommaSeparated: true,        // e.g. سبد، دبس:
+  midLineSubentries: false,         // line/page starts only
 });
 
 const segments = segmentPages(pages, { rules: [rule] });
+```
+
+Equivalent direct JSON-authored rule:
+
+```typescript
+const rule = {
+  dictionaryEntry: {
+    stopWords: ['وقيل', 'ويقال', 'قال', 'العجاج', 'أخاك'],
+    allowParenthesized: true,
+    allowWhitespaceBeforeColon: true,
+    allowCommaSeparated: true,
+    midLineSubentries: false,
+  },
+  pageStartPrevWordStoplist: ['قال', 'وقيل', 'ويقال'],
+  samePagePrevWordStoplist: ['جل'],
+  meta: { type: 'entry' },
+};
 ```
 
 Behavior:
@@ -374,6 +395,7 @@ Behavior:
 - Stores the matched lemma in `segment.meta.lemma`
 - Matches root entries at true line/page starts like `عز:` and `لع:`
 - Matches mid-line subentries conservatively when they begin with `و`
+- Supports disabling mid-line subentries entirely with `midLineSubentries: false`
 - Can match parenthesized headwords like `(عنبر) :` when enabled
 - Can match comma-separated headword lists like `سبد، دبس:` when enabled
 - Can suppress same-page false positives like `جلّ وعزّ:` with `samePagePrevWordStoplist`

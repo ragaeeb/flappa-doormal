@@ -142,17 +142,6 @@ const ARABIC_DICTIONARY_PAGE_START_PREV_WORD_STOPLIST = [
     'قالوا',
 ];
 
-const buildLineStartOnlyDictionaryRule = (rule: ReturnType<typeof createArabicDictionaryEntryRule>) => {
-    if (!('regex' in rule)) {
-        return rule;
-    }
-
-    return {
-        ...rule,
-        regex: rule.regex.replace('(?:(?<=^)|(?<=\\n)|(?<=\\s)(?=و(?:ال)?))', '(?:(?<=^)|(?<=\\n))'),
-    };
-};
-
 const buildTypeCRule = () => {
     const harfCodes = getTokenPattern('harfs').replaceAll('\\s+', '[ \\t]+');
 
@@ -213,13 +202,12 @@ describe('index', () => {
                         meta: { type: 'chapter' },
                     },
                     buildTypeCRule(),
-                    buildLineStartOnlyDictionaryRule(
-                        createArabicDictionaryEntryRule({
-                            allowCommaSeparated: true,
-                            pageStartPrevWordStoplist: ARABIC_DICTIONARY_PAGE_START_PREV_WORD_STOPLIST,
-                            stopWords: ARABIC_DICTIONARY_STOP_WORDS,
-                        }),
-                    ),
+                    createArabicDictionaryEntryRule({
+                        allowCommaSeparated: true,
+                        midLineSubentries: false,
+                        pageStartPrevWordStoplist: ARABIC_DICTIONARY_PAGE_START_PREV_WORD_STOPLIST,
+                        stopWords: ARABIC_DICTIONARY_STOP_WORDS,
+                    }),
                     createArabicDictionaryEntryRule({
                         pageStartPrevWordStoplist: ARABIC_DICTIONARY_PAGE_START_PREV_WORD_STOPLIST,
                         samePagePrevWordStoplist: ['جل'],
@@ -341,13 +329,12 @@ describe('index', () => {
                     { lineStartsAfter: ['## '], meta: { type: 'chapter' } },
                     { fuzzy: true, lineStartsAfter: ['{{bab}} '], meta: { type: 'chapter' } },
                     buildTypeCRule(),
-                    buildLineStartOnlyDictionaryRule(
-                        createArabicDictionaryEntryRule({
-                            allowCommaSeparated: true,
-                            pageStartPrevWordStoplist: ARABIC_DICTIONARY_PAGE_START_PREV_WORD_STOPLIST,
-                            stopWords: ARABIC_DICTIONARY_STOP_WORDS,
-                        }),
-                    ),
+                    createArabicDictionaryEntryRule({
+                        allowCommaSeparated: true,
+                        midLineSubentries: false,
+                        pageStartPrevWordStoplist: ARABIC_DICTIONARY_PAGE_START_PREV_WORD_STOPLIST,
+                        stopWords: ARABIC_DICTIONARY_STOP_WORDS,
+                    }),
                     createArabicDictionaryEntryRule({
                         pageStartPrevWordStoplist: ARABIC_DICTIONARY_PAGE_START_PREV_WORD_STOPLIST,
                         samePagePrevWordStoplist: ['جل'],

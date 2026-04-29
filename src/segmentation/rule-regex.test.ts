@@ -143,6 +143,23 @@ describe('rule-regex', () => {
                 '^[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*(?:(?<_r0>[\\u0660-\\u0669]+))',
             );
         });
+
+        it('should compile dictionaryEntry rules through the standard rule compiler', () => {
+            const rr = buildRuleRegex({
+                dictionaryEntry: {
+                    allowCommaSeparated: true,
+                    captureName: 'lemma',
+                    stopWords: ['قال'],
+                },
+                pageStartPrevWordStoplist: ['قال'],
+            } as never);
+
+            rr.regex.lastIndex = 0;
+            expect(rr.captureNames).toEqual(['lemma']);
+            expect(rr.regex.test('سبد، دبس:')).toBe(true);
+            rr.regex.lastIndex = 0;
+            expect(rr.regex.test('قال:')).toBe(false);
+        });
     });
 
     describe('zero-width prefix matching (ZWJ/ZWNJ)', () => {

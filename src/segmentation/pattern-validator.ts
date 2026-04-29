@@ -5,13 +5,19 @@
  * for segmentation.
  */
 
-import type { SplitRule } from '@/types/rules.js';
+import type { DictionaryEntryPatternOptions, SplitRule } from '@/types/rules.js';
 import { getAvailableTokens } from './tokens.js';
 
 /**
  * Types of validation issues that can be detected.
  */
-export type ValidationIssueType = 'missing_braces' | 'unknown_token' | 'duplicate' | 'empty_pattern' | 'invalid_regex';
+export type ValidationIssueType =
+    | 'missing_braces'
+    | 'unknown_token'
+    | 'duplicate'
+    | 'empty_pattern'
+    | 'invalid_regex'
+    | 'invalid_option';
 
 /**
  * A validation issue found in a pattern.
@@ -36,6 +42,7 @@ export type RuleValidationResult = {
     lineEndsWith?: (ValidationIssue | undefined)[];
     template?: ValidationIssue;
     regex?: ValidationIssue;
+    dictionaryEntry?: Partial<Record<keyof DictionaryEntryPatternOptions, ValidationIssue>>;
 };
 
 // Known token names from the tokens module
@@ -156,6 +163,63 @@ const validateRegexRule = (rule: SplitRule, result: RuleValidationResult) => {
     }
 };
 
+const invalidDictionaryEntryIssue = (message: string): ValidationIssue => ({
+    message,
+    type: 'invalid_option',
+});
+
+const validateDictionaryEntryRule = (rule: SplitRule, result: RuleValidationResult) => {
+    if (!('dictionaryEntry' in rule) || !rule.dictionaryEntry) {
+        return false;
+    }
+
+    const issues: Partial<Record<keyof DictionaryEntryPatternOptions, ValidationIssue>> = {};
+    const {
+        allowCommaSeparated,
+        allowParenthesized,
+        allowWhitespaceBeforeColon,
+        captureName,
+        maxLetters,
+        midLineSubentries,
+        minLetters,
+        stopWords,
+    } = rule.dictionaryEntry;
+
+    if (!Array.isArray(stopWords) || stopWords.some((word) => typeof word !== 'string' || !word.trim())) {
+        issues.stopWords = invalidDictionaryEntryIssue('stopWords must be a string[] with non-empty entries');
+    }
+    if (allowCommaSeparated !== undefined && typeof allowCommaSeparated !== 'boolean') {
+        issues.allowCommaSeparated = invalidDictionaryEntryIssue('allowCommaSeparated must be a boolean');
+    }
+    if (allowParenthesized !== undefined && typeof allowParenthesized !== 'boolean') {
+        issues.allowParenthesized = invalidDictionaryEntryIssue('allowParenthesized must be a boolean');
+    }
+    if (allowWhitespaceBeforeColon !== undefined && typeof allowWhitespaceBeforeColon !== 'boolean') {
+        issues.allowWhitespaceBeforeColon = invalidDictionaryEntryIssue('allowWhitespaceBeforeColon must be a boolean');
+    }
+    if (midLineSubentries !== undefined && typeof midLineSubentries !== 'boolean') {
+        issues.midLineSubentries = invalidDictionaryEntryIssue('midLineSubentries must be a boolean');
+    }
+    if (captureName !== undefined && !captureName.match(/^[A-Za-z_]\w*$/)) {
+        issues.captureName = invalidDictionaryEntryIssue(
+            `captureName must match /^[A-Za-z_]\\w*$/, got "${captureName}"`,
+        );
+    }
+    if (minLetters !== undefined && (!Number.isInteger(minLetters) || minLetters < 1)) {
+        issues.minLetters = invalidDictionaryEntryIssue('minLetters must be an integer >= 1');
+    }
+    if (maxLetters !== undefined && (!Number.isInteger(maxLetters) || maxLetters < (minLetters ?? 2))) {
+        issues.maxLetters = invalidDictionaryEntryIssue(`maxLetters must be an integer >= ${minLetters ?? 2}`);
+    }
+
+    if (Object.keys(issues).length === 0) {
+        return false;
+    }
+
+    result.dictionaryEntry = issues;
+    return true;
+};
+
 const formatValidationIssue = (_type: string, issue: ValidationIssue | undefined, loc: string): string | null => {
     if (!issue) {
         return null;
@@ -202,7 +266,14 @@ export const validateRules = (rules: SplitRule[]) =>
         const endsWithIssues = applyRulePatternValidation(result, 'lineEndsWith', rule.lineEndsWith);
         const templateIssues = validateTemplateRule(rule, result);
         const regexIssues = validateRegexRule(rule, result);
-        const hasIssues = startsWithIssues || startsAfterIssues || endsWithIssues || templateIssues || regexIssues;
+        const dictionaryEntryIssues = validateDictionaryEntryRule(rule, result);
+        const hasIssues =
+            startsWithIssues ||
+            startsAfterIssues ||
+            endsWithIssues ||
+            templateIssues ||
+            regexIssues ||
+            dictionaryEntryIssues;
 
         return hasIssues ? result : undefined;
     });
@@ -224,9 +295,25 @@ export const formatValidationReport = (results: (RuleValidationResult | undefine
         if (!result) {
             return [];
         }
-        return Object.entries(result).flatMap(([type, issues]) =>
-            (Array.isArray(issues) ? issues : [issues])
-                .map((issue) => formatValidationIssue(type, issue, `Rule ${i + 1}, ${type}`))
-                .filter((msg): msg is string => msg !== null),
-        );
+        return Object.entries(result).flatMap(([type, issues]) => formatValidationIssues(type, issues, i + 1));
     });
+
+const formatValidationIssues = (type: string, issues: unknown, ruleNumber: number) => {
+    if (type === 'dictionaryEntry' && issues && typeof issues === 'object' && !Array.isArray(issues)) {
+        return Object.entries(issues)
+            .map(([field, issue]) =>
+                formatValidationIssue(
+                    type,
+                    issue as ValidationIssue | undefined,
+                    `Rule ${ruleNumber}, ${type}.${field}`,
+                ),
+            )
+            .filter((msg): msg is string => msg !== null);
+    }
+
+    return (Array.isArray(issues) ? issues : [issues])
+        .map((issue) =>
+            formatValidationIssue(type, issue as ValidationIssue | undefined, `Rule ${ruleNumber}, ${type}`),
+        )
+        .filter((msg): msg is string => msg !== null);
+};

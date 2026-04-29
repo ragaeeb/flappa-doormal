@@ -11,6 +11,7 @@ import type {
     CondenseEllipsisRule,
     // Detection
     DetectedPattern,
+    DictionaryEntryPatternOptions,
     // Segmenter
     ExpandResult,
     FixTrailingWawRule,
@@ -102,6 +103,7 @@ describe('Build Exports Validation', () => {
 
         // Rules
         expect(flappa.PATTERN_TYPE_KEYS).toBeArray();
+        expect(flappa.PATTERN_TYPE_KEYS).toContain('dictionaryEntry');
 
         // Utils
         expect(flappa.escapeRegex).toBeFunction();
@@ -160,6 +162,7 @@ describe('Build Exports Validation', () => {
 
         // Options
         const _ceRule: CondenseEllipsisRule = typedEmpty();
+        const _dictionaryEntryPatternOptions: DictionaryEntryPatternOptions = typedEmpty();
         const _ftwRule: FixTrailingWawRule = typedEmpty();
         const _logger: Logger = typedEmpty();
         const _ppTransform: PreprocessTransform = typedEmpty();
@@ -167,8 +170,8 @@ describe('Build Exports Validation', () => {
         const _segOptions: SegmentationOptions = typedEmpty();
 
         // Rules
-        const _ptKey: PatternTypeKey = {} as any;
-        const _splitRule: SplitRule = {} as any;
+        const _ptKey: PatternTypeKey = typedEmpty();
+        const _splitRule: SplitRule = typedEmpty();
 
         // Just to avoid unused var errors (though TS check handles this implicitly by compiling)
         expect([
@@ -202,6 +205,7 @@ describe('Build Exports Validation', () => {
             _prExclude,
             _segment,
             _ceRule,
+            _dictionaryEntryPatternOptions,
             _ftwRule,
             _logger,
             _ppTransform,

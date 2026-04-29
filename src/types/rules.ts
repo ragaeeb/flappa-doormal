@@ -147,6 +147,82 @@ type LineEndsWithPattern = {
 };
 
 /**
+ * Dictionary entry pattern options for Arabic lexicon-style headword matching.
+ *
+ * This captures authoring intent in a serializable shape and is compiled into
+ * a regex internally by the rule compiler.
+ */
+export interface DictionaryEntryPatternOptions {
+    /**
+     * Words that should never be treated as lemmas when followed by a colon.
+     *
+     * Matching is Arabic-normalized, diacritic-insensitive, and exact. Callers
+     * should provide canonical forms only; vocalized variants do not need to be
+     * listed separately.
+     */
+    stopWords: string[];
+
+    /**
+     * Allow balanced parenthesized headwords like `(عنبر):` or `(عنبر) :`.
+     * @default false
+     */
+    allowParenthesized?: boolean;
+
+    /**
+     * Allow optional whitespace before the trailing colon.
+     * @default false
+     */
+    allowWhitespaceBeforeColon?: boolean;
+
+    /**
+     * Allow comma-separated headword lists like `سبد، دبس:`.
+     * @default false
+     */
+    allowCommaSeparated?: boolean;
+
+    /**
+     * Allow conservative mid-line subentries that begin with `و`.
+     * Disable this when the rule should only split true line/page starts.
+     * @default true
+     */
+    midLineSubentries?: boolean;
+
+    /**
+     * Named capture key for the matched lemma metadata.
+     * @default 'lemma'
+     */
+    captureName?: string;
+
+    /**
+     * Minimum number of Arabic base letters in a lemma.
+     * @default 2
+     */
+    minLetters?: number;
+
+    /**
+     * Maximum number of Arabic base letters in a lemma.
+     * @default 10
+     */
+    maxLetters?: number;
+}
+
+/**
+ * Arabic dictionary entry pattern rule - serializable headword matcher compiled internally.
+ *
+ * @example
+ * {
+ *   dictionaryEntry: {
+ *     stopWords: ['قال', 'وقيل'],
+ *     allowCommaSeparated: true,
+ *   },
+ *   meta: { type: 'entry' }
+ * }
+ */
+type DictionaryEntryPattern = {
+    dictionaryEntry: DictionaryEntryPatternOptions;
+};
+
+/**
  * Union of all pattern types for split rules.
  *
  * Each rule must have exactly ONE pattern type:
@@ -155,13 +231,15 @@ type LineEndsWithPattern = {
  * - `lineStartsWith` - Match line beginnings (marker included)
  * - `lineStartsAfter` - Match line beginnings (marker excluded)
  * - `lineEndsWith` - Match line endings
+ * - `dictionaryEntry` - Arabic dictionary headword matching
  */
 type PatternType =
     | RegexPattern
     | TemplatePattern
     | LineStartsWithPattern
     | LineStartsAfterPattern
-    | LineEndsWithPattern;
+    | LineEndsWithPattern
+    | DictionaryEntryPattern;
 
 /**
  * Pattern type key names for split rules.
@@ -178,7 +256,14 @@ type PatternType =
  * const validateKey = (k: string): k is PatternTypeKey =>
  *   (PATTERN_TYPE_KEYS as readonly string[]).includes(k);
  */
-export const PATTERN_TYPE_KEYS = ['lineStartsWith', 'lineStartsAfter', 'lineEndsWith', 'template', 'regex'] as const;
+export const PATTERN_TYPE_KEYS = [
+    'lineStartsWith',
+    'lineStartsAfter',
+    'lineEndsWith',
+    'template',
+    'regex',
+    'dictionaryEntry',
+] as const;
 
 /**
  * String union of pattern type key names.
@@ -323,7 +408,7 @@ type RuleConstraints = PageRangeConstraintWithExclude & {
  *
  * Each rule must specify:
  * - **Pattern** (exactly one): `regex`, `template`, `lineStartsWith`,
- *   `lineStartsAfter`, or `lineEndsWith`
+ *   `lineStartsAfter`, `lineEndsWith`, or `dictionaryEntry`
  * - **Split behavior**: `split` (optional, defaults to `'at'`), `occurrence`, `fuzzy`
  * - **Constraints** (optional): `min`, `max`, `meta`
  *

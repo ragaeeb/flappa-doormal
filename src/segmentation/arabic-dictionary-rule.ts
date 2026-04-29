@@ -1,35 +1,8 @@
-import type { SplitRule } from '@/types/rules.js';
+import type { DictionaryEntryPatternOptions, SplitRule } from '@/types/rules.js';
 import { makeDiacriticInsensitive, normalizeArabicForComparison } from '@/utils/textUtils.js';
 import { ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN, ARABIC_MARKS_CLASS } from './tokens.js';
 
-export interface ArabicDictionaryEntryRuleOptions {
-    /**
-     * Words that should never be treated as lemmas when followed by a colon.
-     *
-     * Matching is Arabic-normalized, diacritic-insensitive, and exact. Callers
-     * should provide canonical forms only; vocalized variants do not need to be
-     * listed separately.
-     */
-    stopWords: string[];
-
-    /**
-     * Allow balanced parenthesized headwords like `(عنبر):` or `(عنبر) :`.
-     * @default false
-     */
-    allowParenthesized?: boolean;
-
-    /**
-     * Allow optional whitespace before the trailing colon.
-     * @default false
-     */
-    allowWhitespaceBeforeColon?: boolean;
-
-    /**
-     * Allow comma-separated headword lists like `سبد، دبس:`.
-     * @default false
-     */
-    allowCommaSeparated?: boolean;
-
+export interface ArabicDictionaryEntryRuleOptions extends DictionaryEntryPatternOptions {
     /**
      * Suppress page-start matches when the previous page's last Arabic word
      * is in this stoplist, unless that page ends with strong sentence punctuation.
@@ -43,30 +16,17 @@ export interface ArabicDictionaryEntryRuleOptions {
     samePagePrevWordStoplist?: string[];
 
     /**
-     * Named capture key for the matched lemma.
-     * @default 'lemma'
-     */
-    captureName?: string;
-
-    /**
-     * Minimum number of Arabic base letters in a lemma.
-     * @default 2
-     */
-    minLetters?: number;
-
-    /**
-     * Maximum number of Arabic base letters in a lemma.
-     * @default 10
-     */
-    maxLetters?: number;
-
-    /**
      * Static metadata merged into matching segments.
      */
     meta?: Record<string, unknown>;
 }
 
-const uniqueNormalizedWords = (words: string[]) => {
+type DictionaryEntryRegexSource = {
+    captureNames: string[];
+    regex: string;
+};
+
+const uniqueCanonicalWords = (words: string[]) => {
     const seen = new Set<string>();
     const result: string[] = [];
 
@@ -76,18 +36,18 @@ const uniqueNormalizedWords = (words: string[]) => {
             continue;
         }
         seen.add(normalized);
-        result.push(normalized);
+        result.push(word);
     }
 
     return result;
 };
 
 const buildStopAlternation = (stopWords: string[]) => {
-    const unique = uniqueNormalizedWords(stopWords);
+    const unique = uniqueCanonicalWords(stopWords);
     if (unique.length === 0) {
         return '';
     }
-    return unique.map((word) => makeDiacriticInsensitive(word)).join('|');
+    return unique.map((word) => makeDiacriticInsensitive(normalizeArabicForComparison(word))).join('|');
 };
 
 const buildHeadwordBody = ({
@@ -121,11 +81,11 @@ const buildBalancedMarker = ({
 }: {
     allowParenthesized: boolean;
     allowWhitespaceBeforeColon: boolean;
-    captureName?: string;
+    captureName: string;
     headwordBody: string;
 }) => {
     const colon = allowWhitespaceBeforeColon ? '\\s*:' : ':';
-    const withCapture = captureName ? `(?<${captureName}>${headwordBody})` : `(?:${headwordBody})`;
+    const withCapture = `(?<${captureName}>${headwordBody})`;
 
     if (!allowParenthesized) {
         return `${withCapture}${colon}`;
@@ -134,16 +94,80 @@ const buildBalancedMarker = ({
     return `(?:\\(\\s*${withCapture}\\s*\\)|${withCapture})${colon}`;
 };
 
+const validateDictionaryEntryOptions = ({
+    captureName = 'lemma',
+    maxLetters = 10,
+    minLetters = 2,
+}: Pick<DictionaryEntryPatternOptions, 'captureName' | 'maxLetters' | 'minLetters'>) => {
+    if (!Number.isInteger(minLetters) || minLetters < 1) {
+        throw new Error(`createArabicDictionaryEntryRule: minLetters must be an integer >= 1, got ${minLetters}`);
+    }
+    if (!Number.isInteger(maxLetters) || maxLetters < minLetters) {
+        throw new Error(
+            `createArabicDictionaryEntryRule: maxLetters must be an integer >= minLetters, got ${maxLetters}`,
+        );
+    }
+    if (!captureName.match(/^[A-Za-z_]\w*$/)) {
+        throw new Error(`createArabicDictionaryEntryRule: invalid captureName "${captureName}"`);
+    }
+};
+
+export const buildArabicDictionaryEntryRegexSource = (
+    {
+        allowCommaSeparated = false,
+        allowParenthesized = false,
+        allowWhitespaceBeforeColon = false,
+        captureName = 'lemma',
+        maxLetters = 10,
+        midLineSubentries = true,
+        minLetters = 2,
+        stopWords,
+    }: DictionaryEntryPatternOptions,
+    capturePrefix?: string,
+): DictionaryEntryRegexSource => {
+    validateDictionaryEntryOptions({ captureName, maxLetters, minLetters });
+
+    const zeroWidthPrefix = '[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*';
+    const wawWithMarks = `و${ARABIC_MARKS_CLASS}*`;
+    const alWithMarks = `ا${ARABIC_MARKS_CLASS}*ل${ARABIC_MARKS_CLASS}*`;
+    const stem = `${ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN}(?:${ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN}){${minLetters - 1},${maxLetters - 1}}`;
+    const lemmaUnit = `(?:${wawWithMarks})?(?:${alWithMarks})?${stem}`;
+    const stopAlternation = buildStopAlternation(stopWords);
+    const colonPattern = allowWhitespaceBeforeColon ? '\\s*:' : ':';
+    const stopwordBody = stopAlternation ? `(?:${wawWithMarks})?(?:${stopAlternation})` : '';
+    const lemmaBody = buildHeadwordBody({
+        allowCommaSeparated,
+        colonPattern,
+        stopAlternation,
+        stopwordBody,
+        unit: lemmaUnit,
+    });
+    const lineStartBoundary = `(?:(?<=^)|(?<=\\n))${zeroWidthPrefix}`;
+    const midLineTrigger = allowParenthesized
+        ? `(?<=\\s)(?=(?:\\(\\s*)?${wawWithMarks}(?:${alWithMarks})?)`
+        : `(?<=\\s)(?=${wawWithMarks}(?:${alWithMarks})?)`;
+    const prefixedCaptureName = capturePrefix ? `${capturePrefix}${captureName}` : captureName;
+    const regex =
+        `(?:${lineStartBoundary}${midLineSubentries ? `|${midLineTrigger}` : ''})` +
+        buildBalancedMarker({
+            allowParenthesized,
+            allowWhitespaceBeforeColon,
+            captureName: prefixedCaptureName,
+            headwordBody: lemmaBody,
+        });
+
+    return {
+        captureNames: [prefixedCaptureName],
+        regex,
+    };
+};
+
 /**
  * Creates a reusable split rule for Arabic dictionary entries.
  *
- * The generated rule:
- * - keeps the lemma marker in `segment.content`
- * - stores the lemma in `segment.meta[captureName]`
- * - matches root entries at true line/page starts
- * - matches mid-line subentries conservatively when they begin with `و`
- * - can optionally support parenthesized headwords like `(عنبر) :`
- * - can optionally support comma-separated headword lists like `سبد، دبس:`
+ * The returned rule preserves authoring intent as a serializable
+ * `{ dictionaryEntry: ... }` pattern rather than eagerly compiling to a raw
+ * regex string.
  *
  * @example
  * createArabicDictionaryEntryRule({
@@ -166,56 +190,27 @@ export const createArabicDictionaryEntryRule = ({
     captureName = 'lemma',
     maxLetters = 10,
     meta,
+    midLineSubentries = true,
     minLetters = 2,
     pageStartPrevWordStoplist,
     samePagePrevWordStoplist,
     stopWords,
 }: ArabicDictionaryEntryRuleOptions): SplitRule => {
-    if (!Number.isInteger(minLetters) || minLetters < 1) {
-        throw new Error(`createArabicDictionaryEntryRule: minLetters must be an integer >= 1, got ${minLetters}`);
-    }
-    if (!Number.isInteger(maxLetters) || maxLetters < minLetters) {
-        throw new Error(
-            `createArabicDictionaryEntryRule: maxLetters must be an integer >= minLetters, got ${maxLetters}`,
-        );
-    }
-    if (!captureName.match(/^[A-Za-z_]\w*$/)) {
-        throw new Error(`createArabicDictionaryEntryRule: invalid captureName "${captureName}"`);
-    }
+    validateDictionaryEntryOptions({ captureName, maxLetters, minLetters });
 
-    const zeroWidthPrefix = '[\\u200E\\u200F\\u061C\\u200B\\u200C\\u200D\\uFEFF]*';
-    const wawWithMarks = `و${ARABIC_MARKS_CLASS}*`;
-    const alWithMarks = `ا${ARABIC_MARKS_CLASS}*ل${ARABIC_MARKS_CLASS}*`;
-    const stem = `${ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN}(?:${ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN}){${minLetters - 1},${maxLetters - 1}}`;
-    const lemmaUnit = `(?:${wawWithMarks})?(?:${alWithMarks})?${stem}`;
-    const stopAlternation = buildStopAlternation(stopWords);
-    const colonPattern = allowWhitespaceBeforeColon ? '\\s*:' : ':';
-    const stopwordBody = stopAlternation ? `(?:${wawWithMarks})?(?:${stopAlternation})` : '';
-    const lemmaBody = buildHeadwordBody({
-        allowCommaSeparated,
-        colonPattern,
-        stopAlternation,
-        stopwordBody,
-        unit: lemmaUnit,
-    });
-    const lineStartBoundary = `(?:(?<=^)|(?<=\\n))${zeroWidthPrefix}`;
-    const midLineTrigger = allowParenthesized
-        ? `(?<=\\s)(?=(?:\\(\\s*)?${wawWithMarks}(?:${alWithMarks})?)`
-        : `(?<=\\s)(?=${wawWithMarks}(?:${alWithMarks})?)`;
-    const regex =
-        `(?:${lineStartBoundary}|${midLineTrigger})` +
-        buildBalancedMarker({
+    return {
+        dictionaryEntry: {
+            allowCommaSeparated,
             allowParenthesized,
             allowWhitespaceBeforeColon,
             captureName,
-            headwordBody: lemmaBody,
-        });
-
-    return {
+            maxLetters,
+            midLineSubentries,
+            minLetters,
+            stopWords: uniqueCanonicalWords(stopWords),
+        },
         meta,
         pageStartPrevWordStoplist,
-        regex,
         samePagePrevWordStoplist,
-        split: 'at',
     };
 };

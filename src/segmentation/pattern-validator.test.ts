@@ -116,6 +116,37 @@ describe('validateRules', () => {
             expect(result).toHaveLength(1);
             expect(result[0]?.regex?.type).toBe('empty_pattern');
         });
+
+        it('should allow valid dictionaryEntry patterns', () => {
+            const result = validateRules([
+                {
+                    dictionaryEntry: {
+                        allowCommaSeparated: true,
+                        stopWords: ['قال', 'وقيل'],
+                    },
+                    pageStartPrevWordStoplist: ['قال'],
+                },
+            ]);
+            expect(result).toHaveLength(1);
+            expect(result[0]).toBeUndefined();
+        });
+
+        it('should reject invalid dictionaryEntry options', () => {
+            const result = validateRules([
+                {
+                    dictionaryEntry: {
+                        captureName: 'not-valid',
+                        maxLetters: 1,
+                        minLetters: 2,
+                        stopWords: ['قال', ''],
+                    },
+                } as never,
+            ]);
+            expect(result).toHaveLength(1);
+            expect(result[0]?.dictionaryEntry?.captureName?.type).toBe('invalid_option');
+            expect(result[0]?.dictionaryEntry?.maxLetters?.type).toBe('invalid_option');
+            expect(result[0]?.dictionaryEntry?.stopWords?.type).toBe('invalid_option');
+        });
     });
 
     describe('empty patterns', () => {
@@ -229,5 +260,20 @@ describe('formatValidationReport', () => {
         expect(report).toHaveLength(1);
         expect(report[0]).toContain('Rule 1, regex');
         expect(report[0]).toContain('Invalid regex');
+    });
+
+    it('formats dictionaryEntry option errors', () => {
+        const issues = validateRules([
+            {
+                dictionaryEntry: {
+                    captureName: 'not-valid',
+                    stopWords: [''],
+                },
+            } as never,
+        ]);
+        const report = formatValidationReport(issues);
+        expect(report).toHaveLength(2);
+        expect(report.some((line) => line.includes('Rule 1, dictionaryEntry.captureName'))).toBeTrue();
+        expect(report.some((line) => line.includes('Rule 1, dictionaryEntry.stopWords'))).toBeTrue();
     });
 });

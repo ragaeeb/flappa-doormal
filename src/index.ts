@@ -74,7 +74,12 @@ export type {
     RemoveZeroWidthRule,
     SegmentationOptions,
 } from './types/options.js';
-export { PATTERN_TYPE_KEYS, type PatternTypeKey, type SplitRule } from './types/rules.js';
+export {
+    type DictionaryEntryPatternOptions,
+    PATTERN_TYPE_KEYS,
+    type PatternTypeKey,
+    type SplitRule,
+} from './types/rules.js';
 export {
     escapeRegex,
     escapeTemplateBrackets,

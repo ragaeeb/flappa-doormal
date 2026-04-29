@@ -50,7 +50,7 @@ interface DemoPreset {
     rules: DemoRulePreset[];
 }
 
-type PatternType = 'lineStartsWith' | 'lineStartsAfter' | 'lineEndsWith' | 'template' | 'regex';
+type PatternType = 'lineStartsWith' | 'lineStartsAfter' | 'lineEndsWith' | 'template' | 'regex' | 'dictionaryEntry';
 
 // ============================================
 // State
@@ -104,15 +104,6 @@ const dictionaryLemmaStopWords = Array.from(
 );
 const dictionaryLemmaPrevWordStoplist = ['قال', 'وقال', 'وقيل', 'ويقال', 'يقال', 'قلت', 'فقال', 'قالوا'];
 const dictionaryLemmaSamePagePrevWordStoplist = ['جل'];
-const dictionaryLemmaRule = createArabicDictionaryEntryRule({
-    captureName: 'lemma',
-    pageStartPrevWordStoplist: dictionaryLemmaPrevWordStoplist,
-    samePagePrevWordStoplist: dictionaryLemmaSamePagePrevWordStoplist,
-    stopWords: dictionaryLemmaStopWords,
-});
-if (!('regex' in dictionaryLemmaRule)) {
-    throw new Error('Demo preset expected createArabicDictionaryEntryRule() to return a regex-based rule');
-}
 const demoPresets: Record<string, DemoPreset> = {
     'dictionary-lemma': {
         debug: true,
@@ -151,9 +142,9 @@ const demoPresets: Record<string, DemoPreset> = {
             {
                 metaType: 'entry',
                 pageStartPrevWordStoplist: dictionaryLemmaPrevWordStoplist,
+                pattern: dictionaryLemmaStopWords.join(', '),
+                patternType: 'dictionaryEntry',
                 samePagePrevWordStoplist: dictionaryLemmaSamePagePrevWordStoplist,
-                pattern: dictionaryLemmaRule.regex,
-                patternType: 'regex',
                 split: 'at',
             },
         ],
@@ -244,6 +235,7 @@ function createRuleElement(id: number): HTMLElement {
           <option value="lineEndsWith">lineEndsWith</option>
           <option value="template">template</option>
           <option value="regex">regex</option>
+          <option value="dictionaryEntry">dictionaryEntry</option>
         </select>
       </div>
       <div class="form-group">
@@ -463,6 +455,18 @@ function buildRuleFromElement(element: HTMLElement): SplitRule {
             return { ...baseOptions, template: pattern } as SplitRule;
         case 'regex':
             return { ...baseOptions, regex: pattern } as SplitRule;
+        case 'dictionaryEntry':
+            return {
+                ...baseOptions,
+                ...createArabicDictionaryEntryRule({
+                    pageStartPrevWordStoplist: prevWordStoplist,
+                    samePagePrevWordStoplist,
+                    stopWords: pattern
+                        .split(',')
+                        .map((word) => word.trim())
+                        .filter(Boolean),
+                }),
+            } as SplitRule;
         default:
             return { ...baseOptions, lineStartsAfter: [pattern] } as SplitRule;
     }

@@ -7,6 +7,7 @@
 
 import type { SplitRule } from '@/types/rules.js';
 import { escapeTemplateBrackets, makeDiacriticInsensitive } from '@/utils/textUtils.js';
+import { buildArabicDictionaryEntryRegexSource } from './arabic-dictionary-rule.js';
 import { expandTokensWithCaptures, shouldDefaultToFuzzy } from './tokens.js';
 
 /**
@@ -212,6 +213,9 @@ const buildLineBasedRuleRegex = (rule: SplitRule, fuzzy: boolean, capturePrefix?
     if ('template' in rule && typeof rule.template === 'string') {
         return buildTemplateRegexSource(rule.template, capturePrefix);
     }
+    if ('dictionaryEntry' in rule && rule.dictionaryEntry) {
+        return buildArabicDictionaryEntryRegexSource(rule.dictionaryEntry, capturePrefix);
+    }
     return null;
 };
 
@@ -241,7 +245,7 @@ export const buildRuleRegex = (rule: SplitRule, capturePrefix?: string): RuleReg
 
     if (!finalRegex) {
         throw new Error(
-            'Rule must specify exactly one pattern type: regex, template, lineStartsWith, lineStartsAfter, or lineEndsWith',
+            'Rule must specify exactly one pattern type: regex, template, lineStartsWith, lineStartsAfter, lineEndsWith, or dictionaryEntry',
         );
     }
     if (allCaptureNames.length === 0) {

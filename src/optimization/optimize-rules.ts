@@ -25,14 +25,49 @@ const getPatternArray = (rule: SplitRule, key: PatternTypeKey) => {
 
 const getPatternString = (rule: SplitRule, key: PatternTypeKey) => {
     const value = (rule as Record<string, unknown>)[key];
-    return typeof value === 'string' ? value : Array.isArray(value) ? value.join('\n') : '';
+    return typeof value === 'string'
+        ? value
+        : Array.isArray(value)
+          ? value.join('\n')
+          : value
+            ? JSON.stringify(value)
+            : '';
 };
 
 const normalizePatterns = (patterns: string[]) =>
     [...new Set(patterns)].sort((a, b) => b.length - a.length || a.localeCompare(b));
 
+const getDictionaryEntrySpecificityScore = (rule: SplitRule) => {
+    if (!('dictionaryEntry' in rule)) {
+        return 0;
+    }
+
+    const {
+        allowCommaSeparated = false,
+        allowParenthesized = false,
+        allowWhitespaceBeforeColon = false,
+        maxLetters = 10,
+        midLineSubentries = true,
+        minLetters = 2,
+        stopWords,
+    } = rule.dictionaryEntry;
+
+    return (
+        minLetters * 20 +
+        maxLetters +
+        (allowCommaSeparated ? 0 : 120) +
+        (allowParenthesized ? 0 : 60) +
+        (allowWhitespaceBeforeColon ? 0 : 20) +
+        (midLineSubentries ? 0 : 160) +
+        Math.min(stopWords.length, 25)
+    );
+};
+
 const getSpecificityScore = (rule: SplitRule) => {
     const key = getPatternKey(rule);
+    if (key === 'dictionaryEntry') {
+        return getDictionaryEntrySpecificityScore(rule);
+    }
     return MERGEABLE_KEYS.has(key)
         ? getPatternArray(rule, key).reduce((max, p) => Math.max(max, p.length), 0)
         : getPatternString(rule, key).length;
