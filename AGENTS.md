@@ -65,6 +65,7 @@ src/
 testing/
 ├── exports.test.ts             # Public export contract test
 └── fixtures/
+    ├── README.md                     # Fixture purpose, source, and refresh workflow
     ├── dictionary-book-options.ts   # Local golden options for the four reference dictionaries
     ├── dictionary-books.ts          # Test fixture loader helpers
     ├── dictionary-fixture-manifest.ts
@@ -451,6 +452,9 @@ bun run dictionary:export-options
 # Scan a full book with a builtin dictionary profile
 bun run dictionary:scan -- --book 1687 --input /path/to/1687.json
 
+# Validate a dictionary profile shape in userland
+# (public API: validateDictionaryProfile(profile))
+
 # Format code
 bunx biome format --write .
 
@@ -635,12 +639,6 @@ bunx biome check .
 56. **Linting vs Checks**: `bunx biome check` is strict. Complexity limits (max 15/18) force you to decompose functions. If you receive a complexity error, extract the complex logic (e.g., switch cases, specific validation checks) into standalone helper functions.
 
 57. **Validation Hints Specificity**: Generic error hints like "Check segmenter.ts" are unhelpful. Provide specific file names and logical components (e.g., "Check maxPages windowing in breakpoint-processor.ts"). User-friendly validation reports guide debugging much faster than "Something is wrong".
-
-### Process Template (Multi-agent design review, TDD-first)
-
-If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:
-
-- `docs/ai-multi-agent-tdd-template.md`
 
 ### Architecture Insights
 

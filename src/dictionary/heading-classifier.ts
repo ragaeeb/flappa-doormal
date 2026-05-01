@@ -1,7 +1,6 @@
+import type { DictionaryHeadingScanClass } from '@/types/dictionary.js';
 import { ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN, getTokenPattern } from '../segmentation/tokens.js';
 import { normalizeArabicForComparison } from '../utils/textUtils.js';
-
-export type DictionaryHeadingScanClass = 'chapter' | 'marker' | 'cluster' | 'entry' | 'noise';
 
 export type DictionarySurfaceKind =
     | DictionaryHeadingScanClass
@@ -42,8 +41,15 @@ const PAIRED_FORMS_RE = new RegExp(
     `^(?<forms>${ARABIC_WORD_PATTERN}(?:\\s*[،,]\\s*${ARABIC_WORD_PATTERN})+)\\s*:`,
     'u',
 );
-const CHAPTER_HEADING_RE = /^(?:[([{]\s*)?(?:باب|فصل|كتاب|حرف|أبواب)\b/u;
-const CLUSTER_HEADING_RE = /^(?:\(?\s*)?(?:أبواب|أبنية)\b|.*[،,].*(?:مستعمل|مهمل|مستعملة|مستعملان)/u;
+const ARABIC_BOUNDARY_OR_PUNCTUATION = '(?=$|[\\s:،؛()\\[\\]{}\\-–—]|[^\\p{Script=Arabic}])';
+const CHAPTER_HEADING_RE = new RegExp(
+    `^(?:[([{]\\s*)?(?:باب|فصل|كتاب|حرف|أبواب)${ARABIC_BOUNDARY_OR_PUNCTUATION}`,
+    'u',
+);
+const CLUSTER_HEADING_RE = new RegExp(
+    `^(?:\\(?\\s*)?(?:أبواب|أبنية)${ARABIC_BOUNDARY_OR_PUNCTUATION}|^(?=.{1,80}$).+?[،,].+?(?:مستعمل|مهمل|مستعملة|مستعملان)(?=$|[.،,:؛\\s])`,
+    'u',
+);
 const STATUS_HEADING_RE = new RegExp(
     `^(?:${CODE_LINE_PATTERN}|(?:(?:${ARABIC_WORD_PATTERN}\\s+){1,3}${ARABIC_WORD_PATTERN}|${ARABIC_WORD_PATTERN}(?:\\s*[،,]\\s*${ARABIC_WORD_PATTERN})+))\\s*:?[\\s]*(?:مستعمل|مستعملة|مستعملان|مهمل|مهملة)(?=$|[.،,:؛\\s])`,
     'u',
@@ -70,6 +76,17 @@ const extractWrappedLemma = (lemma: string): string => lemma.replace(/^[[{(]+|[\
 
 const stripLeadingWrappers = (text: string): string => text.replace(/^[[{(]+\s*/u, '').trim();
 
+const isDelimitedPrefixMatch = (text: string, prefix: string): boolean => {
+    if (text === prefix) {
+        return true;
+    }
+    if (!text.startsWith(prefix)) {
+        return false;
+    }
+    const nextChar = text[prefix.length];
+    return nextChar === undefined || /[\s:،؛()[\]{}\-–—]/u.test(nextChar);
+};
+
 const isCodeHeading = (text: string): boolean => {
     if (CODE_LINE_RE.test(text)) {
         return true;
@@ -82,6 +99,10 @@ const isCodeHeading = (text: string): boolean => {
 const looksLikeNoiseHeading = (text: string): boolean => {
     const normalized = normalizeArabicForComparison(text);
     const wordCount = text.trim().split(/\s+/u).filter(Boolean).length;
+
+    if (/(?:مستعمل|مهمل|مستعملة|مستعملان)(?=$|[.،,:؛\s])/u.test(text)) {
+        return false;
+    }
 
     if (wordCount >= 8 && COLON_NOISE_RE.test(text)) {
         return true;
@@ -104,10 +125,14 @@ export const classifyDictionaryHeading = (line: string): DictionaryHeadingScanCl
     if (
         CHAPTER_HEADING_RE.test(text) ||
         CHAPTER_TERMS.some((term) =>
-            normalizeArabicForComparison(unwrapped).startsWith(normalizeArabicForComparison(term)),
+            isDelimitedPrefixMatch(normalizeArabicForComparison(unwrapped), normalizeArabicForComparison(term)),
         )
     ) {
         return 'chapter';
+    }
+
+    if (looksLikeNoiseHeading(text)) {
+        return 'noise';
     }
 
     if (isCodeHeading(text)) {
@@ -128,10 +153,6 @@ export const classifyDictionaryHeading = (line: string): DictionaryHeadingScanCl
 
     if (CLUSTER_HEADING_RE.test(text)) {
         return 'cluster';
-    }
-
-    if (looksLikeNoiseHeading(text)) {
-        return 'noise';
     }
 
     return 'entry';

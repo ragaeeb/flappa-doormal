@@ -16,6 +16,18 @@ export {
 } from './detection.js';
 export type { ArabicDictionaryEntryRuleOptions } from './dictionary/arabic-dictionary-rule.js';
 export { createArabicDictionaryEntryRule } from './dictionary/arabic-dictionary-rule.js';
+export type {
+    DictionaryMarkdownPage,
+    DictionarySurfaceKind,
+    DictionarySurfaceMatch,
+    DictionarySurfaceReport,
+} from './dictionary/heading-classifier.js';
+export {
+    analyzeDictionaryMarkdownPages,
+    classifyDictionaryHeading,
+    scanDictionaryMarkdownPage,
+} from './dictionary/heading-classifier.js';
+export { DictionaryProfileValidationError, validateDictionaryProfile } from './dictionary/profile.js';
 export { diagnoseDictionaryProfile } from './dictionary/runtime.js';
 export type { OptimizeResult } from './optimization/optimize-rules.js';
 export { optimizeRules } from './optimization/optimize-rules.js';
@@ -65,9 +77,13 @@ export type {
     DictionaryFamilyUse,
     DictionaryGate,
     DictionaryHeadingClass,
+    DictionaryHeadingScanClass,
     DictionaryProfileDiagnostics,
     DictionaryProfileDiagnosticsOptions,
+    DictionaryProfileValidationIssue,
+    DictionaryProfileValidationIssueCode,
     DictionarySegmentKind,
+    DictionarySegmentMeta,
     DictionaryZone,
 } from './types/dictionary.js';
 export type {

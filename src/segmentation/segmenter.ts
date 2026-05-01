@@ -124,15 +124,26 @@ const mergeRecord = (
           }
         : undefined;
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
+
 const mergeSplitPoints = (existing: SplitPoint, incoming: SplitPoint): SplitPoint => {
     const preferred = prefersIncomingSplitPoint(existing, incoming) ? incoming : existing;
     const fallback = preferred === incoming ? existing : incoming;
+    const meta = mergeRecord(existing.meta, incoming.meta);
+
+    if (meta && isPlainObject(existing.meta?._flappa) && isPlainObject(incoming.meta?._flappa)) {
+        meta._flappa = {
+            ...existing.meta._flappa,
+            ...incoming.meta._flappa,
+        };
+    }
 
     return {
         ...fallback,
         ...preferred,
         contentStartOffset: preferred.contentStartOffset ?? fallback.contentStartOffset,
-        meta: mergeRecord(existing.meta, incoming.meta),
+        meta,
         namedCaptures: mergeRecord(existing.namedCaptures, incoming.namedCaptures) as
             | Record<string, string>
             | undefined,
@@ -373,7 +384,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
 
     const splitPointsFromRules = collectSplitPointsFromRules(rules, matchContent, pageMap, debugMetaKey, logger);
     const splitPointsFromDictionary = dictionary
-        ? collectDictionarySplitPoints(preprocessedPages, dictionary, pageMap, logger)
+        ? collectDictionarySplitPoints(preprocessedPages, dictionary, pageMap, normalizedContent, logger, debugMetaKey)
         : [];
     const splitPoints = [...splitPointsFromRules, ...splitPointsFromDictionary];
     const unique = dedupeSplitPoints(splitPoints);
@@ -385,7 +396,7 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
         uniqueSplitPoints: unique.length,
     });
 
-    let segments = buildSegments(unique, matchContent, pageMap, rules, pageJoiner);
+    let segments = buildSegments(unique, matchContent, pageMap, rules, pageJoiner, dictionary !== undefined);
     logger?.debug?.('[segmenter] structural segments built', { segmentCount: segments.length });
 
     segments = ensureFallbackSegment(segments, preprocessedPages, normalizedContent, pageJoiner);
@@ -434,6 +445,7 @@ const buildSegments = (
     pageMap: PageMap,
     rules: SplitRule[],
     pageJoiner: 'space' | 'newline',
+    hasDictionaryProfile: boolean,
 ) => {
     const getActualStart = (start: number, contentStartOffset?: number) => start + (contentStartOffset ?? 0);
     const trimSegmentText = (sliced: string, capturedContent?: string, contentStartOffset?: number) =>
@@ -511,7 +523,7 @@ const buildSegments = (
     // Handle case with no split points
     if (!splitPoints.length) {
         const firstId = pageMap.getId(0);
-        if (anyRuleAllowsId(rules, firstId)) {
+        if (hasDictionaryProfile || anyRuleAllowsId(rules, firstId)) {
             const s = createSegment(0, content.length);
             if (s) {
                 segments.push(s);
@@ -523,7 +535,7 @@ const buildSegments = (
     // Add first segment if there's content before first split
     if (splitPoints[0].index > 0) {
         const firstId = pageMap.getId(0);
-        if (anyRuleAllowsId(rules, firstId)) {
+        if (hasDictionaryProfile || anyRuleAllowsId(rules, firstId)) {
             const s = createSegment(0, splitPoints[0].index);
             if (s) {
                 segments.push(s);

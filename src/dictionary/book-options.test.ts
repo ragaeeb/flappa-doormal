@@ -9,7 +9,7 @@ describe('dictionary book options', () => {
     });
 
     for (const bookId of BOOK_IDS) {
-        it(`keeps builtin options for ${bookId} serializable and page-bounded`, () => {
+        it(`has expected options for ${bookId} and remains serializable`, () => {
             const options = DICTIONARY_BOOK_OPTIONS[bookId];
 
             expect(options.maxPages).toBe(1);

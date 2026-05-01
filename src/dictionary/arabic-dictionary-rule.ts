@@ -107,7 +107,7 @@ const validateDictionaryEntryOptions = ({
             `createArabicDictionaryEntryRule: maxLetters must be an integer >= minLetters, got ${maxLetters}`,
         );
     }
-    if (!captureName.match(/^[A-Za-z_]\w*$/)) {
+    if (!/^[A-Za-z_]\w*$/.test(captureName)) {
         throw new Error(`createArabicDictionaryEntryRule: invalid captureName "${captureName}"`);
     }
 };
@@ -182,6 +182,11 @@ export const buildArabicDictionaryEntryRegexSource = (
  *   allowCommaSeparated: true,
  *   stopWords: ['الليث', 'العجاج'],
  * })
+ */
+/**
+ * @deprecated Prefer the top-level `SegmentationOptions.dictionary` profile for
+ * whole-book dictionary segmentation. Keep this helper for advanced single-rule
+ * composition inside a broader `SplitRule[]` pipeline.
  */
 export const createArabicDictionaryEntryRule = ({
     allowCommaSeparated = false,

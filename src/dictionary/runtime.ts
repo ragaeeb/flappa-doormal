@@ -3,6 +3,7 @@ import type {
     DictionaryDiagnosticReason,
     DictionaryGate,
     DictionaryHeadingClass,
+    DictionaryHeadingScanClass,
     DictionaryProfileDiagnostics,
     DictionaryProfileDiagnosticsOptions,
     DictionarySegmentKind,
@@ -13,9 +14,10 @@ import type {
 } from '@/types/dictionary.js';
 import type { Page } from '@/types/index.js';
 import type { Logger } from '@/types/options.js';
+import { mergeDebugIntoMeta } from '../segmentation/debug-meta.js';
 import { ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN, getTokenPattern } from '../segmentation/tokens.js';
 import type { PageMap, SplitPoint } from '../types/segmenter.js';
-import { normalizeArabicForComparison } from '../utils/textUtils.js';
+import { escapeRegex, normalizeArabicForComparison, normalizeLineEndings } from '../utils/textUtils.js';
 import { classifyDictionaryHeading } from './heading-classifier.js';
 import { normalizeDictionaryProfile } from './profile.js';
 
@@ -186,6 +188,12 @@ const GATE_TOKEN_MAP = {
     kitab: 'كتاب',
 } as const;
 
+const GATE_DELIMITER_RE = /[\s:،؛()[\]{}\-–—]/u;
+
+const assertNever = (value: never): never => {
+    throw new Error(`Unhandled dictionary runtime variant: ${JSON.stringify(value)}`);
+};
+
 type DictionaryFamilyUse = NormalizedDictionaryFamily['use'];
 
 type HeadingFamily = Extract<NormalizedDictionaryFamily, { use: 'heading' }>;
@@ -196,7 +204,6 @@ type PairedFormsFamily = Extract<NormalizedDictionaryFamily, { use: 'pairedForms
 
 const lineEntryRegexCache = new WeakMap<LineEntryFamily, RegExp>();
 const inlineSubentryRegexCache = new WeakMap<InlineSubentryFamily, RegExp>();
-const codeLineRegexCache = new WeakMap<CodeLineFamily, RegExp>();
 const pairedFormsRegexCache = new WeakMap<PairedFormsFamily, RegExp>();
 
 type DictionaryLine = {
@@ -205,13 +212,24 @@ type DictionaryLine = {
     text: string;
 };
 
+type PageContext = {
+    boundary: NonNullable<PageMap['boundaries'][number]>;
+    content: string;
+    index: number;
+    lines: DictionaryLine[];
+    page: Page;
+};
+
 type DictionaryCandidate = {
     absoluteIndex: number;
     contentStartOffset?: number;
     family: DictionaryFamilyUse;
+    headingClass?: DictionaryHeadingScanClass;
     kind: DictionarySegmentKind;
     lemma?: string;
+    lineNumber: number;
     localIndex: number;
+    probeText: string;
     text: string;
 };
 
@@ -219,26 +237,26 @@ type RejectionResult = {
     reason: DictionaryDiagnosticReason;
 };
 
-const trimTrailingPageWrapNoise = (text: string) => {
-    let trimmed = text.trimEnd();
-    while (trimmed !== trimmed.replace(TRAILING_PAGE_WRAP_NOISE, '')) {
-        trimmed = trimmed.replace(TRAILING_PAGE_WRAP_NOISE, '');
-    }
-    return trimmed;
-};
+const trimTrailingPageWrapNoise = (text: string) => text.trimEnd().replace(TRAILING_PAGE_WRAP_NOISE, '');
 
 const endsWithStrongSentenceTerminator = (pageContent: string) => {
     return STRONG_SENTENCE_TERMINATORS.test(trimTrailingPageWrapNoise(pageContent));
 };
 
-const extractLastArabicWord = (text: string) => {
-    const withoutTrailingDelimiters = trimTrailingPageWrapNoise(text).replace(TRAILING_WORD_DELIMITERS, '');
-    const matches = [...withoutTrailingDelimiters.matchAll(ARABIC_WORD_REGEX)];
-    return matches.at(-1)?.[0] ?? '';
+const extractLastArabicWord = (text: string, endExclusive = text.length) => {
+    const windowStart = Math.max(0, endExclusive - 256);
+    const window = text.slice(windowStart, endExclusive);
+    const withoutTrailingDelimiters = trimTrailingPageWrapNoise(window).replace(TRAILING_WORD_DELIMITERS, '');
+    let lastMatch = '';
+    ARABIC_WORD_REGEX.lastIndex = 0;
+    for (const match of withoutTrailingDelimiters.matchAll(ARABIC_WORD_REGEX)) {
+        lastMatch = match[0];
+    }
+    return lastMatch;
 };
 
-const previousNonWhitespaceChar = (text: string): string => {
-    for (let index = text.length - 1; index >= 0; index--) {
+const previousNonWhitespaceChar = (text: string, endExclusive = text.length): string => {
+    for (let index = endExclusive - 1; index >= 0; index--) {
         const char = text[index];
         if (char && !/\s/u.test(char)) {
             return char;
@@ -259,6 +277,52 @@ const normalizeStopLemma = (text: string): string =>
         .replace(/[\s:؛،,.!?؟()[\]{}«»"'“”‘’]+$/gu, '')
         .trim();
 
+const getTrailingContext = (text: string, endExclusive: number, maxChars = 240) =>
+    text.slice(Math.max(0, endExclusive - maxChars), endExclusive);
+
+const isDelimitedPrefixMatch = (text: string, prefix: string) => {
+    if (text === prefix) {
+        return true;
+    }
+    if (!text.startsWith(prefix)) {
+        return false;
+    }
+    const nextChar = text[prefix.length];
+    return nextChar === undefined || GATE_DELIMITER_RE.test(nextChar);
+};
+
+const createPageContexts = (pages: Page[], pageMap: PageMap, normalizedPages?: string[]): PageContext[] => {
+    if (normalizedPages && normalizedPages.length !== pages.length) {
+        throw new Error(
+            `Dictionary runtime expected ${pages.length} normalized pages, received ${normalizedPages.length}`,
+        );
+    }
+    if (pageMap.boundaries.length !== pages.length) {
+        throw new Error(
+            `Dictionary runtime expected ${pages.length} page boundaries, received ${pageMap.boundaries.length}`,
+        );
+    }
+
+    const contexts: PageContext[] = [];
+    for (let index = 0; index < pages.length; index++) {
+        const page = pages[index];
+        const boundary = pageMap.boundaries[index];
+        if (!page || !boundary) {
+            throw new Error(`Dictionary runtime encountered a missing page or boundary at index ${index}`);
+        }
+
+        const content = normalizedPages?.[index] ?? normalizeLineEndings(page.content);
+        contexts.push({
+            boundary,
+            content,
+            index,
+            lines: buildPageLines(content),
+            page,
+        });
+    }
+    return contexts;
+};
+
 const normalizeIntroContextText = (text: string): string =>
     normalizeArabicForComparison(text)
         .replace(/[\\/]+/gu, ' ')
@@ -269,8 +333,8 @@ const normalizeIntroContextText = (text: string): string =>
 const startsWithConfiguredWord = (words: string[], candidate: string): boolean =>
     words.some((word) => normalizedStartsWith(candidate, word));
 
-const buildPageLines = (page: Page): DictionaryLine[] => {
-    const parts = page.content.split('\n');
+const buildPageLines = (content: string): DictionaryLine[] => {
+    const parts = content.split('\n');
     const lines: DictionaryLine[] = [];
     let offset = 0;
 
@@ -285,31 +349,48 @@ const buildPageLines = (page: Page): DictionaryLine[] => {
 
 const headingMatchesGate = (headingText: string, gate: DictionaryGate): boolean => {
     if (gate.use === 'headingText') {
-        const normalizedMatch = normalizeArabicForComparison(gate.match);
-        const normalizedHeading = normalizeArabicForComparison(headingText);
-        return (
-            normalizedHeading === normalizedMatch ||
-            normalizedHeading.startsWith(normalizedMatch) ||
-            normalizedHeading.includes(normalizedMatch)
-        );
+        const useFuzzy = gate.fuzzy ?? false;
+        const source = useFuzzy ? normalizeArabicForComparison(headingText) : headingText.trim();
+        const match = useFuzzy ? normalizeArabicForComparison(gate.match) : gate.match.trim();
+        return !!match && isDelimitedPrefixMatch(source, match);
     }
 
     return normalizedStartsWith(headingText, GATE_TOKEN_MAP[gate.token]);
 };
 
-const pageMatchesAnyGate = (page: Page, gates: DictionaryGate[]) => {
-    const lines = page.content.split(/\n/u).map((line) => line.trim());
-
-    return lines.some((line) => {
-        if (!line.startsWith(HEADING_PREFIX)) {
+const pageMatchesAnyGate = (page: PageContext, gates: DictionaryGate[]) =>
+    page.lines.some((line) => {
+        const trimmed = line.text.trim();
+        if (!trimmed.startsWith(HEADING_PREFIX)) {
             return false;
         }
-        const headingText = line.slice(HEADING_PREFIX.length).trim();
+        const headingText = trimmed.replace(/^##\s+/u, '').trim();
         return gates.some((gate) => headingMatchesGate(headingText, gate));
     });
+
+const pageWithinZoneBounds = (zone: NormalizedDictionaryZone, pageId: number) => {
+    if (zone.when?.minPageId !== undefined && pageId < zone.when.minPageId) {
+        return false;
+    }
+    if (zone.when?.maxPageId !== undefined && pageId > zone.when.maxPageId) {
+        return false;
+    }
+    return true;
 };
 
-const createZoneActivationMap = (profile: NormalizedArabicDictionaryProfile, pages: Page[]) => {
+const findActivationPageId = (zone: NormalizedDictionaryZone, pages: PageContext[]) => {
+    for (const page of pages) {
+        if (!pageWithinZoneBounds(zone, page.page.id)) {
+            continue;
+        }
+        if (pageMatchesAnyGate(page, zone.when?.activateAfter ?? [])) {
+            return page.page.id;
+        }
+    }
+    return null;
+};
+
+const createZoneActivationMap = (profile: NormalizedArabicDictionaryProfile, pages: PageContext[]) => {
     const activation = new Map<string, number | null>();
 
     for (const zone of profile.zones) {
@@ -317,15 +398,7 @@ const createZoneActivationMap = (profile: NormalizedArabicDictionaryProfile, pag
             activation.set(zone.name, null);
             continue;
         }
-
-        let activatedAt: number | null = null;
-        for (const page of pages) {
-            if (pageMatchesAnyGate(page, zone.when.activateAfter)) {
-                activatedAt = page.id;
-                break;
-            }
-        }
-        activation.set(zone.name, activatedAt);
+        activation.set(zone.name, findActivationPageId(zone, pages));
     }
 
     return activation;
@@ -370,6 +443,7 @@ const resolveActiveZone = (
 const createHeadingCandidate = (
     pageStartOffset: number,
     line: DictionaryLine,
+    nextLine: DictionaryLine | undefined,
     family: HeadingFamily,
     headingClass: DictionaryHeadingClass,
 ): DictionaryCandidate | null => {
@@ -381,14 +455,20 @@ const createHeadingCandidate = (
     if (!family.allowSingleLetter && headingClass === 'entry' && headingText.length <= 1) {
         return null;
     }
+    if (headingClass === 'entry' && !family.allowNextLineColon && nextLine?.text.trimStart().startsWith(':')) {
+        return null;
+    }
 
     return {
         absoluteIndex: pageStartOffset + line.start,
         contentStartOffset: HEADING_PREFIX.length,
         family: 'heading',
+        headingClass,
         kind: family.emit,
         lemma: family.emit === 'entry' ? headingText : undefined,
+        lineNumber: line.lineNumber,
         localIndex: line.start,
+        probeText: line.text.trim(),
         text: line.text.trim(),
     };
 };
@@ -398,6 +478,9 @@ const optionalSecondWord = (allowMultiWord: boolean) =>
 
 const wrappedWordPattern = (open: string, close: string, allowMultiWord: boolean) =>
     `${open}${ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN}${optionalSecondWord(allowMultiWord)}${close}`;
+
+const bareWordPattern = (allowMultiWord: boolean) =>
+    `${ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN}${optionalSecondWord(allowMultiWord)}`;
 
 const STATUS_LINE_RE = new RegExp(
     `^(?:${CODE_LINE_PATTERN}|${ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN}(?:\\s*[،,]\\s*${ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN})+)\\s*:?[\\s]*${STATUS_TAIL_PATTERN}(?=$|[.،,:؛\\s])`,
@@ -418,8 +501,8 @@ const createLineEntryRegex = (family: LineEntryFamily) => {
               : family.wrappers === 'curly'
                 ? wrappedWordPattern('\\{', '\\}', family.allowMultiWord)
                 : family.wrappers === 'any'
-                  ? `[([{]${ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN}${optionalSecondWord(family.allowMultiWord)}[)\\]}]`
-                  : `${ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN}${optionalSecondWord(family.allowMultiWord)}`;
+                  ? `(?:${wrappedWordPattern('\\(', '\\)', family.allowMultiWord)}|${wrappedWordPattern('\\[', '\\]', family.allowMultiWord)}|${wrappedWordPattern('\\{', '\\}', family.allowMultiWord)})`
+                  : bareWordPattern(family.allowMultiWord);
     const colonSpacing = family.allowWhitespaceBeforeColon ? '\\s*:' : ':';
     const regex = new RegExp(`^(?<lemma>${wrapperPattern})${colonSpacing}`, 'u');
     lineEntryRegexCache.set(family, regex);
@@ -443,7 +526,9 @@ const collectLineEntryCandidates = (pageStartOffset: number, line: DictionaryLin
             family: 'lineEntry',
             kind: 'entry',
             lemma: match.groups.lemma.replace(/^[[{(]+|[\])}]+$/gu, '').trim(),
+            lineNumber: line.lineNumber,
             localIndex: line.start,
+            probeText: trimmed,
             text: trimmed,
         },
     ] satisfies DictionaryCandidate[];
@@ -455,7 +540,7 @@ const collectInlineSubentryCandidates = (
     family: InlineSubentryFamily,
 ): DictionaryCandidate[] => {
     const cached = inlineSubentryRegexCache.get(family);
-    const prefixes = family.prefixes.length > 0 ? family.prefixes.join('|') : 'و';
+    const prefixes = family.prefixes.length > 0 ? family.prefixes.map(escapeRegex).join('|') : escapeRegex('و');
     const regex =
         cached ??
         new RegExp(`(^|[\\s،؛,:.])(?<lemma>(?:${prefixes})${ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN})\\s*:`, 'gu');
@@ -469,7 +554,11 @@ const collectInlineSubentryCandidates = (
             continue;
         }
 
-        const candidateStart = match.index + match[0].length - match.groups.lemma.length - 1;
+        const lemmaIndex = match[0].indexOf(match.groups.lemma);
+        if (lemmaIndex < 0) {
+            continue;
+        }
+        const candidateStart = match.index + lemmaIndex;
         const lemma = family.stripPrefixesFromLemma
             ? match.groups.lemma.replace(new RegExp(`^(?:${prefixes})`, 'u'), '')
             : match.groups.lemma;
@@ -479,27 +568,54 @@ const collectInlineSubentryCandidates = (
             family: 'inlineSubentry',
             kind: 'entry',
             lemma,
+            lineNumber: line.lineNumber,
             localIndex: line.start + candidateStart,
-            text: match.groups.lemma,
+            probeText: line.text.slice(candidateStart).trimStart(),
+            text: line.text.trim(),
         });
     }
 
     return candidates;
 };
 
-const collectCodeLineCandidates = (pageStartOffset: number, line: DictionaryLine, _family: CodeLineFamily) => {
-    const cached = codeLineRegexCache.get(_family);
-    const regex =
-        cached ??
-        new RegExp(
-            `^(?:[[(])?(?<codes>${CODE_LINE_PATTERN})(?:[)\\]])?(?:\\s*:?[\\s]*${STATUS_TAIL_PATTERN}.*)?$`,
-            'u',
-        );
-    if (!cached) {
-        codeLineRegexCache.set(_family, regex);
+const CODE_CORE_RE = new RegExp(`^${CODE_LINE_PATTERN}$`, 'u');
+const STATUS_SUFFIX_RE = new RegExp(`(?:\\s*:?[\\s]*${STATUS_TAIL_PATTERN}.*)?$`, 'u');
+
+const parseWrappedCode = (text: string) => {
+    const paired = text.match(/^(?<open>[[(])(?<inner>.+)(?<close>[\])])$/u);
+    if (!paired?.groups?.inner || !paired.groups.open || !paired.groups.close) {
+        return null;
     }
-    const match = line.text.trim().match(regex);
-    if (!match?.groups?.codes) {
+    return {
+        close: paired.groups.close,
+        inner: paired.groups.inner.trim(),
+        open: paired.groups.open,
+        paired:
+            (paired.groups.open === '(' && paired.groups.close === ')') ||
+            (paired.groups.open === '[' && paired.groups.close === ']'),
+    };
+};
+
+const collectCodeLineCandidates = (pageStartOffset: number, line: DictionaryLine, family: CodeLineFamily) => {
+    const trimmed = line.text.trim();
+    const bare = trimmed.replace(STATUS_SUFFIX_RE, '').trim();
+    const wrapped = parseWrappedCode(bare);
+    const inner = wrapped?.inner ?? bare;
+
+    if (!CODE_CORE_RE.test(inner)) {
+        return [] satisfies DictionaryCandidate[];
+    }
+
+    const wrapperAllowed =
+        family.wrappers === 'either'
+            ? true
+            : family.wrappers === 'none'
+              ? wrapped === null
+              : family.wrappers === 'paired'
+                ? wrapped?.paired === true
+                : wrapped !== null && !wrapped.paired;
+
+    if (!wrapperAllowed) {
         return [] satisfies DictionaryCandidate[];
     }
 
@@ -508,9 +624,11 @@ const collectCodeLineCandidates = (pageStartOffset: number, line: DictionaryLine
             absoluteIndex: pageStartOffset + line.start,
             family: 'codeLine',
             kind: 'marker',
-            lemma: match.groups.codes,
+            lemma: inner,
+            lineNumber: line.lineNumber,
             localIndex: line.start,
-            text: line.text.trim(),
+            probeText: trimmed,
+            text: trimmed,
         },
     ] satisfies DictionaryCandidate[];
 };
@@ -539,7 +657,9 @@ const collectPairedFormsCandidates = (pageStartOffset: number, line: DictionaryL
             family: 'pairedForms',
             kind: family.emit,
             lemma: family.emit === 'entry' ? match.groups.forms : undefined,
+            lineNumber: line.lineNumber,
             localIndex: line.start,
+            probeText: line.text.trim(),
             text: line.text.trim(),
         },
     ] satisfies DictionaryCandidate[];
@@ -723,36 +843,44 @@ const rejectsViaIntroBlocker = (
     }
 
     return (
-        isIntroCandidate(candidate.text) ||
+        isIntroCandidate(candidate.probeText) ||
         endsWithIntroPhrase(localBeforeCandidate) ||
         endsWithIntroContext(localBeforeCandidate)
     );
 };
 
 const rejectsViaAuthorityBlocker = (candidate: DictionaryCandidate, blocker: NormalizedDictionaryBlocker) =>
-    blocker.use === 'authorityIntro' && isAuthorityCandidate(candidate.text, blocker.precision ?? 'high');
+    blocker.use === 'authorityIntro' && isAuthorityCandidate(candidate.probeText, blocker.precision);
 
 const rejectsViaStopLemmaBlocker = (candidate: DictionaryCandidate, blocker: NormalizedDictionaryBlocker) =>
     blocker.use === 'stopLemma' &&
     !!candidate.lemma &&
     !!normalizeStopLemma(candidate.lemma) &&
-    blocker.normalizedWords.includes(normalizeStopLemma(candidate.lemma));
+    blocker.normalizedWords.has(normalizeStopLemma(candidate.lemma));
 
-const rejectsViaPreviousWordBlocker = (localBeforeCandidate: string, blocker: NormalizedDictionaryBlocker) => {
+const rejectsViaPreviousWordBlocker = (
+    pageContent: string,
+    localIndex: number,
+    blocker: NormalizedDictionaryBlocker,
+) => {
     if (blocker.use !== 'previousWord') {
         return false;
     }
 
-    const lastWord = extractLastArabicWord(localBeforeCandidate);
-    return !!lastWord && blocker.normalizedWords.includes(normalizeArabicForComparison(lastWord));
+    const lastWord = extractLastArabicWord(pageContent, localIndex);
+    return !!lastWord && blocker.normalizedWords.has(normalizeArabicForComparison(lastWord));
 };
 
-const rejectsViaPreviousCharBlocker = (localBeforeCandidate: string, blocker: NormalizedDictionaryBlocker) => {
+const rejectsViaPreviousCharBlocker = (
+    pageContent: string,
+    localIndex: number,
+    blocker: NormalizedDictionaryBlocker,
+) => {
     if (blocker.use !== 'previousChar') {
         return false;
     }
 
-    const previousChar = previousNonWhitespaceChar(localBeforeCandidate);
+    const previousChar = previousNonWhitespaceChar(pageContent, localIndex);
     return !!previousChar && blocker.charSet.has(previousChar);
 };
 
@@ -761,7 +889,7 @@ const rejectsViaPageContinuationBlocker = (
     blocker: NormalizedDictionaryBlocker,
     localBeforeCandidate: string,
     pageIndex: number,
-    pages: Page[],
+    pages: PageContext[],
 ) => {
     if (blocker.use !== 'pageContinuation') {
         return false;
@@ -784,8 +912,8 @@ const rejectsViaPageContinuationBlocker = (
     return (
         previousWordBlocks ||
         endsWithIntroContext(previousPage.content) ||
-        isIntroCandidate(candidate.text) ||
-        isAuthorityCandidate(candidate.text, 'high')
+        isIntroCandidate(candidate.probeText) ||
+        isAuthorityCandidate(candidate.probeText, 'high')
     );
 };
 
@@ -793,8 +921,9 @@ const getBlockerRejectionReason = (
     blocker: NormalizedDictionaryBlocker,
     candidate: DictionaryCandidate,
     localBeforeCandidate: string,
+    pageContent: string,
     pageIndex: number,
-    pages: Page[],
+    pages: PageContext[],
 ): DictionaryDiagnosticReason | null => {
     if (rejectsViaIntroBlocker(candidate, blocker, localBeforeCandidate)) {
         return 'intro';
@@ -805,10 +934,10 @@ const getBlockerRejectionReason = (
     if (rejectsViaStopLemmaBlocker(candidate, blocker)) {
         return 'stopLemma';
     }
-    if (rejectsViaPreviousWordBlocker(localBeforeCandidate, blocker)) {
+    if (rejectsViaPreviousWordBlocker(pageContent, candidate.localIndex, blocker)) {
         return 'previousWord';
     }
-    if (rejectsViaPreviousCharBlocker(localBeforeCandidate, blocker)) {
+    if (rejectsViaPreviousCharBlocker(pageContent, candidate.localIndex, blocker)) {
         return 'previousChar';
     }
     if (rejectsViaPageContinuationBlocker(candidate, blocker, localBeforeCandidate, pageIndex, pages)) {
@@ -820,21 +949,28 @@ const getBlockerRejectionReason = (
 const getCandidateRejection = (
     candidate: DictionaryCandidate,
     zone: NormalizedDictionaryZone,
-    pageIndex: number,
-    pages: Page[],
+    pageContext: PageContext,
+    pages: PageContext[],
 ): RejectionResult | null => {
     const hasQualifierTail = hasBlockedQualifierTail(candidate.lemma ?? '');
     if (hasQualifierTail || looksLikeStructuralLeak(candidate)) {
         return { reason: hasQualifierTail ? 'qualifierTail' : 'structuralLeak' };
     }
 
-    const localBeforeCandidate = pages[pageIndex]!.content.slice(0, candidate.localIndex);
+    const localBeforeCandidate = getTrailingContext(pageContext.content, candidate.localIndex);
 
     for (const blocker of zone.blockers) {
         if (!blockerApplies(blocker, candidate.family)) {
             continue;
         }
-        const reason = getBlockerRejectionReason(blocker, candidate, localBeforeCandidate, pageIndex, pages);
+        const reason = getBlockerRejectionReason(
+            blocker,
+            candidate,
+            localBeforeCandidate,
+            pageContext.content,
+            pageContext.index,
+            pages,
+        );
         if (reason) {
             return { reason };
         }
@@ -846,15 +982,16 @@ const getCandidateRejection = (
 const shouldRejectCandidate = (
     candidate: DictionaryCandidate,
     zone: NormalizedDictionaryZone,
-    pageIndex: number,
-    pages: Page[],
+    pageContext: PageContext,
+    pages: PageContext[],
 ): boolean => {
-    return getCandidateRejection(candidate, zone, pageIndex, pages) !== null;
+    return getCandidateRejection(candidate, zone, pageContext, pages) !== null;
 };
 
 const collectHeadingCandidates = (
     pageStartOffset: number,
     line: DictionaryLine,
+    nextLine: DictionaryLine | undefined,
     family: HeadingFamily,
     trimmed: string,
 ): DictionaryCandidate[] => {
@@ -867,19 +1004,20 @@ const collectHeadingCandidates = (
         return [];
     }
 
-    const candidate = createHeadingCandidate(pageStartOffset, line, family, headingClass);
+    const candidate = createHeadingCandidate(pageStartOffset, line, nextLine, family, headingClass);
     return candidate ? [candidate] : [];
 };
 
 const collectCandidatesForFamily = (
     pageStartOffset: number,
     line: DictionaryLine,
+    nextLine: DictionaryLine | undefined,
     family: NormalizedDictionaryFamily,
     trimmed: string,
 ): DictionaryCandidate[] => {
     switch (family.use) {
         case 'heading':
-            return collectHeadingCandidates(pageStartOffset, line, family, trimmed);
+            return collectHeadingCandidates(pageStartOffset, line, nextLine, family, trimmed);
         case 'lineEntry':
             return collectLineEntryCandidates(pageStartOffset, line, family);
         case 'inlineSubentry':
@@ -888,29 +1026,49 @@ const collectCandidatesForFamily = (
             return collectCodeLineCandidates(pageStartOffset, line, family);
         case 'pairedForms':
             return collectPairedFormsCandidates(pageStartOffset, line, family);
+        default:
+            return assertNever(family);
     }
 };
 
 const collectCandidatesForLine = (
     pageStartOffset: number,
     line: DictionaryLine,
+    nextLine: DictionaryLine | undefined,
     zone: NormalizedDictionaryZone,
 ): DictionaryCandidate[] => {
     const trimmed = line.text.trim();
     const candidates: DictionaryCandidate[] = [];
 
+    if (!trimmed) {
+        return candidates;
+    }
+
     for (const family of zone.families) {
-        candidates.push(...collectCandidatesForFamily(pageStartOffset, line, family, trimmed));
+        candidates.push(...collectCandidatesForFamily(pageStartOffset, line, nextLine, family, trimmed));
     }
 
     return candidates;
 };
 
-const candidateToSplitPoint = (candidate: DictionaryCandidate): SplitPoint => ({
-    contentStartOffset: candidate.contentStartOffset,
-    index: candidate.absoluteIndex,
-    meta: candidate.lemma ? { kind: candidate.kind, lemma: candidate.lemma } : { kind: candidate.kind },
-});
+const candidateToSplitPoint = (candidate: DictionaryCandidate, debugMetaKey?: string): SplitPoint => {
+    const baseMeta = candidate.lemma ? { kind: candidate.kind, lemma: candidate.lemma } : { kind: candidate.kind };
+    const meta =
+        debugMetaKey === undefined
+            ? baseMeta
+            : mergeDebugIntoMeta(baseMeta, debugMetaKey, {
+                  dictionary: {
+                      family: candidate.family,
+                      ...(candidate.headingClass ? { headingClass: candidate.headingClass } : {}),
+                  },
+              });
+
+    return {
+        contentStartOffset: candidate.contentStartOffset,
+        index: candidate.absoluteIndex,
+        meta,
+    };
+};
 
 const pushDiagnosticSample = (
     samples: DictionaryProfileDiagnostics['samples'],
@@ -929,10 +1087,13 @@ export const collectDictionarySplitPoints = (
     pages: Page[],
     profile: ArabicDictionaryProfile,
     pageMap: PageMap,
+    normalizedPages?: string[],
     logger?: Logger,
+    debugMetaKey?: string,
 ): SplitPoint[] => {
     const normalizedProfile = normalizeDictionaryProfile(profile);
-    const activationMap = createZoneActivationMap(normalizedProfile, pages);
+    const pageContexts = createPageContexts(pages, pageMap, normalizedPages);
+    const activationMap = createZoneActivationMap(normalizedProfile, pageContexts);
     const splitPoints: SplitPoint[] = [];
 
     logger?.debug?.('[dictionary] collecting split points', {
@@ -940,23 +1101,21 @@ export const collectDictionarySplitPoints = (
         zoneCount: normalizedProfile.zones.length,
     });
 
-    for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
-        const page = pages[pageIndex]!;
-        const zone = resolveActiveZone(normalizedProfile, activationMap, page.id);
+    for (const pageContext of pageContexts) {
+        const zone = resolveActiveZone(normalizedProfile, activationMap, pageContext.page.id);
         if (!zone) {
             continue;
         }
 
-        const boundary = pageMap.boundaries[pageIndex];
-        const lines = buildPageLines(page);
-
-        for (const line of lines) {
-            const candidates = collectCandidatesForLine(boundary.start, line, zone);
+        for (let lineIndex = 0; lineIndex < pageContext.lines.length; lineIndex++) {
+            const line = pageContext.lines[lineIndex]!;
+            const nextLine = pageContext.lines[lineIndex + 1];
+            const candidates = collectCandidatesForLine(pageContext.boundary.start, line, nextLine, zone);
             for (const candidate of candidates) {
-                if (shouldRejectCandidate(candidate, zone, pageIndex, pages)) {
+                if (shouldRejectCandidate(candidate, zone, pageContext, pageContexts)) {
                     continue;
                 }
-                splitPoints.push(candidateToSplitPoint(candidate));
+                splitPoints.push(candidateToSplitPoint(candidate, debugMetaKey));
             }
         }
     }
@@ -977,7 +1136,33 @@ export const diagnoseDictionaryProfile = (
     options: DictionaryProfileDiagnosticsOptions = {},
 ): DictionaryProfileDiagnostics => {
     const normalizedProfile = normalizeDictionaryProfile(profile);
-    const activationMap = createZoneActivationMap(normalizedProfile, pages);
+    const pageMap: PageMap = {
+        boundaries: [],
+        getId: (offset) => {
+            for (const boundary of pageMap.boundaries) {
+                if (offset >= boundary.start && offset <= boundary.end) {
+                    return boundary.id;
+                }
+            }
+            return pageMap.boundaries.at(-1)?.id ?? 0;
+        },
+        pageBreaks: [],
+        pageIds: pages.map((page) => page.id),
+    };
+    let offset = 0;
+    const normalizedPages = pages.map((page, pageIndex) => {
+        const normalized = normalizeLineEndings(page.content);
+        pageMap.boundaries.push({ end: offset + normalized.length, id: page.id, start: offset });
+        if (pageIndex < pages.length - 1) {
+            pageMap.pageBreaks.push(offset + normalized.length);
+            offset += normalized.length + 1;
+        } else {
+            offset += normalized.length;
+        }
+        return normalized;
+    });
+    const pageContexts = createPageContexts(pages, pageMap, normalizedPages);
+    const activationMap = createZoneActivationMap(normalizedProfile, pageContexts);
     const sampleLimit = options.sampleLimit ?? 50;
     const acceptedKinds = createInitialKindCounts();
     const blockerHits = createInitialReasonCounts();
@@ -988,25 +1173,27 @@ export const diagnoseDictionaryProfile = (
     let acceptedCount = 0;
     let rejectedCount = 0;
 
-    for (let pageIndex = 0; pageIndex < pages.length; pageIndex++) {
-        const page = pages[pageIndex]!;
-        const zone = resolveActiveZone(normalizedProfile, activationMap, page.id);
+    for (const pageContext of pageContexts) {
+        const zone = resolveActiveZone(normalizedProfile, activationMap, pageContext.page.id);
         if (!zone) {
             continue;
         }
 
         zoneCounts[zone.name] ??= { accepted: 0, rejected: 0 };
 
-        const lines = buildPageLines(page);
-        for (const line of lines) {
-            const candidates = collectCandidatesForLine(line.start, line, zone);
+        for (let lineIndex = 0; lineIndex < pageContext.lines.length; lineIndex++) {
+            const line = pageContext.lines[lineIndex]!;
+            const nextLine = pageContext.lines[lineIndex + 1];
+            const candidates = collectCandidatesForLine(pageContext.boundary.start, line, nextLine, zone);
             for (const candidate of candidates) {
-                const rejection = getCandidateRejection(candidate, zone, pageIndex, pages);
+                const rejection = getCandidateRejection(candidate, zone, pageContext, pageContexts);
                 const sampleBase = {
+                    absoluteIndex: candidate.absoluteIndex,
                     family: candidate.family,
                     kind: candidate.kind,
                     lemma: candidate.lemma,
-                    pageId: page.id,
+                    line: candidate.lineNumber,
+                    pageId: pageContext.page.id,
                     text: candidate.text,
                     zone: zone.name,
                 };

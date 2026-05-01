@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { ArabicDictionaryProfile } from '@/types/dictionary.js';
-import { normalizeDictionaryProfile } from './profile.js';
+import { DictionaryProfileValidationError, normalizeDictionaryProfile, validateDictionaryProfile } from './profile.js';
 
 describe('dictionary profile normalization', () => {
     const minimalProfile = (): ArabicDictionaryProfile => ({
@@ -32,8 +32,14 @@ describe('dictionary profile normalization', () => {
         };
 
         const normalized = normalizeDictionaryProfile(profile);
-        const [heading, lineEntry, inlineSubentry, codeLine, pairedForms] = normalized.zones[0]?.families ?? [];
-        const [authorityIntro] = normalized.zones[0]?.blockers ?? [];
+        const families = normalized.zones[0]?.families ?? [];
+        const blockers = normalized.zones[0]?.blockers ?? [];
+        const heading = families.find((family) => family.use === 'heading');
+        const lineEntry = families.find((family) => family.use === 'lineEntry');
+        const inlineSubentry = families.find((family) => family.use === 'inlineSubentry');
+        const codeLine = families.find((family) => family.use === 'codeLine');
+        const pairedForms = families.find((family) => family.use === 'pairedForms');
+        const authorityIntro = blockers.find((blocker) => blocker.use === 'authorityIntro');
 
         expect(heading).toMatchObject({ allowNextLineColon: false, allowSingleLetter: false });
         expect(lineEntry).toMatchObject({
@@ -101,18 +107,31 @@ describe('dictionary profile normalization', () => {
 
         expect(normalized.zones[0]).toMatchObject({
             blockers: [{ precision: 'aggressive', use: 'authorityIntro' }],
-            families: [
-                { allowNextLineColon: true, allowSingleLetter: true },
-                { allowMultiWord: true, allowWhitespaceBeforeColon: true, wrappers: 'any' },
-                { prefixes: ['و', 'ف'], stripPrefixesFromLemma: false },
-                { wrappers: 'paired' },
-                { requireStatusTail: true, separator: 'space' },
-            ],
             when: {
                 activateAfter: [{ match: 'باب', use: 'headingText' }],
                 maxPageId: 100,
                 minPageId: 50,
             },
+        });
+        expect(normalized.zones[0]?.families.find((family) => family.use === 'heading')).toMatchObject({
+            allowNextLineColon: true,
+            allowSingleLetter: true,
+        });
+        expect(normalized.zones[0]?.families.find((family) => family.use === 'lineEntry')).toMatchObject({
+            allowMultiWord: true,
+            allowWhitespaceBeforeColon: true,
+            wrappers: 'any',
+        });
+        expect(normalized.zones[0]?.families.find((family) => family.use === 'inlineSubentry')).toMatchObject({
+            prefixes: ['و', 'ف'],
+            stripPrefixesFromLemma: false,
+        });
+        expect(normalized.zones[0]?.families.find((family) => family.use === 'codeLine')).toMatchObject({
+            wrappers: 'paired',
+        });
+        expect(normalized.zones[0]?.families.find((family) => family.use === 'pairedForms')).toMatchObject({
+            requireStatusTail: true,
+            separator: 'space',
         });
     });
 
@@ -179,7 +198,7 @@ describe('dictionary profile normalization', () => {
                     },
                 ],
             }),
-        ).toThrow('dictionary blocker "stopLemma" in zone "main" must include words');
+        ).toThrow('stopLemma blocker in zone "main" must include non-empty words');
 
         expect(() =>
             normalizeDictionaryProfile({
@@ -192,7 +211,7 @@ describe('dictionary profile normalization', () => {
                     },
                 ],
             }),
-        ).toThrow('dictionary blocker "previousWord" in zone "main" must include words');
+        ).toThrow('previousWord blocker in zone "main" must include non-empty words');
     });
 
     it('rejects empty previousChar lists', () => {
@@ -207,6 +226,45 @@ describe('dictionary profile normalization', () => {
                     },
                 ],
             }),
-        ).toThrow('dictionary blocker "previousChar" in zone "main" must include chars');
+        ).toThrow('previousChar blocker in zone "main" must include chars');
+    });
+
+    it('returns structured validation issues for invalid gates and inert heading families', () => {
+        const issues = validateDictionaryProfile({
+            version: 2,
+            zones: [
+                {
+                    families: [{ classes: [], emit: 'entry', use: 'heading' }],
+                    name: 'main',
+                    when: {
+                        activateAfter: [
+                            { fuzzy: true, match: '', use: 'headingText' },
+                            { fuzzy: true, match: '', use: 'headingText' },
+                        ],
+                    },
+                },
+            ],
+        });
+
+        expect(issues.map((issue) => issue.code)).toEqual([
+            'invalid_gate_match',
+            'invalid_gate_match',
+            'duplicate_activate_after_gate',
+            'empty_heading_classes',
+            'inert_heading_family',
+        ]);
+    });
+
+    it('throws a structured validation error when normalization fails', () => {
+        try {
+            normalizeDictionaryProfile({
+                version: 2,
+                zones: [{ families: [{ classes: [], emit: 'entry', use: 'heading' }], name: 'main' }],
+            });
+            throw new Error('expected normalizeDictionaryProfile to throw');
+        } catch (error) {
+            expect(error).toBeInstanceOf(DictionaryProfileValidationError);
+            expect((error as DictionaryProfileValidationError).issues[0]?.code).toBe('empty_heading_classes');
+        }
     });
 });

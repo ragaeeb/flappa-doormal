@@ -3,8 +3,13 @@
  */
 
 export type DictionaryHeadingClass = 'chapter' | 'entry' | 'marker' | 'cluster';
+export type DictionaryHeadingScanClass = DictionaryHeadingClass | 'noise';
 
 export type DictionarySegmentKind = 'chapter' | 'entry' | 'marker';
+export type DictionarySegmentMeta = {
+    kind: DictionarySegmentKind;
+    lemma?: string;
+};
 /** Family key used by diagnostics and authoring tools. */
 export type DictionaryFamilyUse = DictionaryFamily['use'];
 /** Rejection reason emitted by dictionary-profile diagnostics. */
@@ -21,6 +26,30 @@ export type DictionaryDiagnosticReason =
 export type DictionaryGate =
     | { use: 'headingText'; match: string; fuzzy?: boolean }
     | { use: 'headingToken'; token: 'bab' | 'fasl' | 'kitab' };
+
+export type DictionaryProfileValidationIssueCode =
+    | 'invalid_version'
+    | 'missing_zones'
+    | 'duplicate_zone_name'
+    | 'empty_zone_name'
+    | 'empty_zone_families'
+    | 'invalid_zone_page_range'
+    | 'empty_heading_classes'
+    | 'inert_heading_family'
+    | 'empty_inline_prefixes'
+    | 'invalid_gate_match'
+    | 'invalid_gate_fuzzy'
+    | 'duplicate_activate_after_gate'
+    | 'invalid_stop_words'
+    | 'invalid_previous_words'
+    | 'invalid_previous_chars';
+
+export type DictionaryProfileValidationIssue = {
+    code: DictionaryProfileValidationIssueCode;
+    message: string;
+    path: string;
+    zoneName?: string;
+};
 
 export type HeadingFamily = {
     use: 'heading';
@@ -126,9 +155,11 @@ export type ArabicDictionaryProfile = {
 /** Sampled accepted or rejected candidate from dictionary-profile diagnostics. */
 export type DictionaryDiagnosticSample = {
     accepted: boolean;
+    absoluteIndex: number;
     family: DictionaryFamilyUse;
     kind: DictionarySegmentKind;
     lemma?: string;
+    line: number;
     pageId: number;
     reason?: DictionaryDiagnosticReason;
     text: string;
@@ -185,20 +216,16 @@ export type NormalizedDictionaryFamily =
     | NormalizedCodeLineFamily
     | NormalizedPairedFormsFamily;
 
-export interface NormalizedPageContinuationBlocker extends PageContinuationBlocker {}
-
-export interface NormalizedIntroBlocker extends IntroBlocker {}
-
 export interface NormalizedAuthorityIntroBlocker extends AuthorityIntroBlocker {
     precision: 'high' | 'aggressive';
 }
 
 export interface NormalizedStopLemmaBlocker extends StopLemmaBlocker {
-    normalizedWords: string[];
+    normalizedWords: ReadonlySet<string>;
 }
 
 export interface NormalizedPreviousWordBlocker extends PreviousWordBlocker {
-    normalizedWords: string[];
+    normalizedWords: ReadonlySet<string>;
 }
 
 export interface NormalizedPreviousCharBlocker extends PreviousCharBlocker {
@@ -206,8 +233,8 @@ export interface NormalizedPreviousCharBlocker extends PreviousCharBlocker {
 }
 
 export type NormalizedDictionaryBlocker =
-    | NormalizedPageContinuationBlocker
-    | NormalizedIntroBlocker
+    | PageContinuationBlocker
+    | IntroBlocker
     | NormalizedAuthorityIntroBlocker
     | NormalizedStopLemmaBlocker
     | NormalizedPreviousWordBlocker

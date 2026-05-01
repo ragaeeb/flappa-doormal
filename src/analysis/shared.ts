@@ -1,8 +1,8 @@
 // Shared utilities for analysis functions
 
-import { getAvailableTokens, TOKEN_PATTERNS } from '../segmentation/tokens.js';
+import { getAvailableTokens, TOKEN_PATTERNS, type TokenPatternName } from '../segmentation/tokens.js';
 
-type TokenName = string;
+type TokenName = TokenPatternName;
 
 // Helpers shared across analysis modules
 
@@ -29,7 +29,7 @@ export const TOKEN_PRIORITY_ORDER: TokenName[] = [
 ];
 
 export const buildTokenPriority = (): TokenName[] => {
-    const allTokens = new Set<string>(getAvailableTokens());
+    const allTokens = new Set<TokenName>(getAvailableTokens());
     // IMPORTANT: We only use an explicit allow-list here.
     // Including "all remaining tokens" adds overly-generic tokens (e.g., harf) which makes signatures noisy.
     return TOKEN_PRIORITY_ORDER.filter((t) => allTokens.has(t));
@@ -44,12 +44,12 @@ export const stripArabicDiacritics = (s: string): string =>
     // harakat + common Quranic marks (no tatweel - it's used as a dash)
     s.replace(/[\u064B-\u065F\u0670\u06D6-\u06ED]/gu, '');
 
-export type CompiledTokenRegex = { token: string; re: RegExp };
+export type CompiledTokenRegex = { token: TokenName; re: RegExp };
 
-export const compileTokenRegexes = (tokenNames: string[]): CompiledTokenRegex[] =>
+export const compileTokenRegexes = (tokenNames: TokenName[]): CompiledTokenRegex[] =>
     tokenNames
         .map((token) => {
-            const pat = TOKEN_PATTERNS[token as keyof typeof TOKEN_PATTERNS];
+            const pat = TOKEN_PATTERNS[token];
             if (!pat) {
                 return null;
             }
@@ -74,8 +74,8 @@ export const findBestTokenMatchAt = (
     pos: number,
     compiled: CompiledTokenRegex[],
     isArabicLetter: (ch: string) => boolean,
-): { token: string; text: string } | null => {
-    let best: { token: string; text: string } | null = null;
+): { token: TokenName; text: string } | null => {
+    let best: { token: TokenName; text: string } | null = null;
     for (const { token, re } of compiled) {
         re.lastIndex = pos;
         const m = re.exec(s);

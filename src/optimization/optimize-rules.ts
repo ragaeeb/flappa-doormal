@@ -38,7 +38,7 @@ const normalizePatterns = (patterns: string[]) =>
     [...new Set(patterns)].sort((a, b) => b.length - a.length || a.localeCompare(b));
 
 const getDictionaryEntrySpecificityScore = (rule: SplitRule) => {
-    if (!('dictionaryEntry' in rule)) {
+    if (!('dictionaryEntry' in rule) || !rule.dictionaryEntry) {
         return 0;
     }
 

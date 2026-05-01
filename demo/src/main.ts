@@ -658,7 +658,6 @@ function handleSegment(): void {
 
     try {
         const options = buildOptions();
-        console.log('Options:', options);
         const segments = segmentPages(pageData, options);
         renderSegments(segments);
     } catch (error) {

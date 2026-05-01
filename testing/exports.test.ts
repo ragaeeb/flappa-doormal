@@ -20,9 +20,17 @@ import type {
     DictionaryFamilyUse,
     DictionaryGate,
     DictionaryHeadingClass,
+    DictionaryHeadingScanClass,
+    DictionaryMarkdownPage,
     DictionaryProfileDiagnostics,
     DictionaryProfileDiagnosticsOptions,
+    DictionaryProfileValidationIssue,
+    DictionaryProfileValidationIssueCode,
     DictionarySegmentKind,
+    DictionarySegmentMeta,
+    DictionarySurfaceKind,
+    DictionarySurfaceMatch,
+    DictionarySurfaceReport,
     DictionaryZone,
     // Segmenter
     ExpandResult,
@@ -90,7 +98,12 @@ describe('Build Exports Validation', () => {
         // Breakpoint Utils
         expect(flappa.escapeWordsOutsideTokens).toBeFunction();
         expect(flappa.createArabicDictionaryEntryRule).toBeFunction();
+        expect(flappa.classifyDictionaryHeading).toBeFunction();
         expect(flappa.diagnoseDictionaryProfile).toBeFunction();
+        expect(flappa.DictionaryProfileValidationError).toBeFunction();
+        expect(flappa.validateDictionaryProfile).toBeFunction();
+        expect(flappa.scanDictionaryMarkdownPage).toBeFunction();
+        expect(flappa.analyzeDictionaryMarkdownPages).toBeFunction();
 
         // Pattern Validator
         expect(flappa.formatValidationReport).toBeFunction();
@@ -151,9 +164,17 @@ describe('Build Exports Validation', () => {
         const _dictionaryFamilyUse: DictionaryFamilyUse = typedEmpty();
         const _dictionaryGate: DictionaryGate = typedEmpty();
         const _dictionaryHeadingClass: DictionaryHeadingClass = typedEmpty();
+        const _dictionaryHeadingScanClass: DictionaryHeadingScanClass = typedEmpty();
+        const _dictionaryMarkdownPage: DictionaryMarkdownPage = typedEmpty();
         const _dictionaryProfileDiagnostics: DictionaryProfileDiagnostics = typedEmpty();
         const _dictionaryProfileDiagnosticsOptions: DictionaryProfileDiagnosticsOptions = typedEmpty();
+        const _dictionaryProfileValidationIssue: DictionaryProfileValidationIssue = typedEmpty();
+        const _dictionaryProfileValidationIssueCode: DictionaryProfileValidationIssueCode = typedEmpty();
+        const _dictionarySegmentMeta: DictionarySegmentMeta = typedEmpty();
         const _dictionarySegmentKind: DictionarySegmentKind = typedEmpty();
+        const _dictionarySurfaceKind: DictionarySurfaceKind = typedEmpty();
+        const _dictionarySurfaceMatch: DictionarySurfaceMatch = typedEmpty();
+        const _dictionarySurfaceReport: DictionarySurfaceReport = typedEmpty();
         const _dictionaryZone: DictionaryZone = typedEmpty();
 
         // Optimization
@@ -216,9 +237,17 @@ describe('Build Exports Validation', () => {
             _dictionaryFamilyUse,
             _dictionaryGate,
             _dictionaryHeadingClass,
+            _dictionaryHeadingScanClass,
+            _dictionaryMarkdownPage,
             _dictionaryProfileDiagnostics,
             _dictionaryProfileDiagnosticsOptions,
+            _dictionaryProfileValidationIssue,
+            _dictionaryProfileValidationIssueCode,
+            _dictionarySegmentMeta,
             _dictionarySegmentKind,
+            _dictionarySurfaceKind,
+            _dictionarySurfaceMatch,
+            _dictionarySurfaceReport,
             _dictionaryZone,
             _optimizeRes,
             _patProc,

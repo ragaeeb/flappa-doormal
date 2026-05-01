@@ -24,6 +24,8 @@ describe('dictionary heading classifier', () => {
             expect(classifyDictionaryHeading('## خَ ق (وَا يء)')).toBe('marker');
             expect(classifyDictionaryHeading('## بِسمِ اللَّهِ الرَّحْمَنِ الرَّحِيمِ')).toBe('marker');
             expect(classifyDictionaryHeading('## آخر كتاب الْخَاء')).toBe('marker');
+            expect(classifyDictionaryHeading('## قال أبو زيد: معنى الباب')).toBe('noise');
+            expect(classifyDictionaryHeading('## أبوابX')).toBe('chapter');
         });
     });
 
@@ -59,6 +61,7 @@ describe('dictionary heading classifier', () => {
             const page = await loadMarkdownPage('1687.json', 8097);
             const headingMatch = scanDictionaryMarkdownPage(page).find((match) => match.kind === 'noise');
 
+            expect(headingMatch).toBeDefined();
             expect(headingMatch?.text).toStartWith('## أَراد:');
         });
 

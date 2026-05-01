@@ -388,9 +388,20 @@ Why this is preferred:
 - profile-scoped blockers instead of giant regex blobs
 - zone support for books that change layout later
 - compatible with diagnostics tooling via `diagnoseDictionaryProfile()`
+- first-class validation via `validateDictionaryProfile()`
 
 The production dictionary implementation now lives under `src/dictionary/`
 inside the repo, separate from the generic segmentation internals.
+
+Dictionary runtime semantics:
+- `segmentPages()` is still the only entry point; dictionary profiles do not use
+  a separate API
+- dictionary split points are merged with ordinary `rules`
+- when a rule split and a dictionary split land at the same offset, metadata is
+  merged; if `debug` is enabled, `_flappa.rule` and `_flappa.dictionary` can
+  both appear on the same segment
+- for dictionary-only configs, content before the first detected entry/chapter
+  is preserved as a leading segment with no dictionary metadata
 
 #### Advanced: Single-Rule Arabic Dictionary Matching
 
@@ -583,6 +594,51 @@ Returned diagnostics include:
 - top rejected lemmas
 - sampled accepted/rejected candidates for quick inspection
 
+Validate profiles before persisting them or shipping them to an editor/CI step:
+
+```typescript
+import { validateDictionaryProfile } from 'flappa-doormal';
+
+const issues = validateDictionaryProfile(profile);
+if (issues.length > 0) {
+  console.error(issues);
+}
+```
+
+Validation catches:
+- empty or duplicate zones
+- invalid gate shapes
+- empty blocker lists
+- inert heading families (for example, a heading family that emits `entry` but
+  never matches `entry` headings)
+
+The runtime throws `DictionaryProfileValidationError` if invalid profiles reach
+`segmentPages()` or `diagnoseDictionaryProfile()`.
+
+#### Dictionary Surface Analysis
+
+For corpus exploration and profile authoring, the library also exposes the
+heading/surface scanner used during the proposal phase:
+
+```typescript
+import {
+  analyzeDictionaryMarkdownPages,
+  classifyDictionaryHeading,
+  scanDictionaryMarkdownPage,
+} from 'flappa-doormal';
+
+const kind = classifyDictionaryHeading('## (خَ غ)');
+const pageMatches = scanDictionaryMarkdownPage(page);
+const report = analyzeDictionaryMarkdownPages(pages);
+```
+
+Use these for:
+- inspecting `convertContentToMarkdown()` output before profile authoring
+- spotting structural marker/code lines
+- building your own authoring tools around the same heading classifier
+
+These are analysis helpers, not a replacement for the full runtime.
+
 For full-book scans, use the bundled script:
 
 ```bash
@@ -595,7 +651,8 @@ The scan script:
 - reads an explicit `--input` file or resolves `<books-dir>/<book>.json`
 - converts each page with `convertContentToMarkdown()`
 - applies `removeZeroWidth`
-- runs `diagnoseDictionaryProfile()` with the built-in profile for that book
+- runs `diagnoseDictionaryProfile()` with the repo-local golden profile fixture
+  for that book
 
 The test suite does not require the full Shamela corpora. It uses extracted
 markdown fixtures under `testing/fixtures/dictionary-books/`, so moving your
@@ -767,11 +824,6 @@ const segments = segmentPages(pages, {
     info: (msg, data) => console.info(`[INFO] ${msg}`, data),
     warn: (msg, data) => console.warn(`[WARN] ${msg}`, data),
     error: (msg, data) => console.error(`[ERROR] ${msg}`, data),
-  logger: {
-    debug: (msg, data) => console.log(`[DEBUG] ${msg}`, data),
-    info: (msg, data) => console.info(`[INFO] ${msg}`, data),
-    warn: (msg, data) => console.warn(`[WARN] ${msg}`, data),
-    error: (msg, data) => console.error(`[ERROR] ${msg}`, data),
   }
 });
 
@@ -821,7 +873,35 @@ If a segment was created by a `breakpoint` pattern (e.g. because it exceeded `ma
 }
 ```
 
-**3. Safety Fallback Splits (`maxContentLength`)**
+**3. Dictionary-based Splits**
+If a segment was created by a dictionary profile:
+```json
+{
+  "meta": {
+    "_flappa": {
+      "dictionary": {
+        "family": "lineEntry"
+      }
+    }
+  }
+}
+```
+
+Heading-driven dictionary splits can also record the heading class:
+```json
+{
+  "meta": {
+    "_flappa": {
+      "dictionary": {
+        "family": "heading",
+        "headingClass": "chapter"
+      }
+    }
+  }
+}
+```
+
+**4. Safety Fallback Splits (`maxContentLength`)**
 If no rule or breakpoint matched and the library was forced to perform a safety fallback split:
 ```json
 {

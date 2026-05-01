@@ -52,11 +52,53 @@ const KNOWN_TOKENS = new Set<string>(getAvailableTokens());
 const TOKEN_INSIDE_BRACES = /\{\{(\w+)(?::\w+)?\}\}/g;
 
 // Regex to find potential token names NOT inside {{}}
-// Matches word boundaries around known token names
-const buildBareTokenRegex = () => {
+// Matches word boundaries around known token names.
+const BARE_TOKEN_REGEX = (() => {
     const tokens = [...KNOWN_TOKENS].sort((a, b) => b.length - a.length);
     return new RegExp(`(?<!\\{\\{)(${tokens.join('|')})(?::\\w+)?(?!\\}\\})`, 'g');
+})();
+
+const createMalformedTokenIssue = (tokenLiteral: string, side: 'opening' | 'closing') => {
+    const token = tokenLiteral.split(':', 1)[0] || undefined;
+    return {
+        message: `Token "${tokenLiteral || 'unknown'}" appears to be missing ${side} braces.`,
+        suggestion: tokenLiteral ? `{{${tokenLiteral}}}` : undefined,
+        token,
+        type: 'missing_braces',
+    } as const;
 };
+
+const detectMalformedLeftToken = (pattern: string) => {
+    for (let index = 0; index < pattern.length - 1; index++) {
+        if (pattern.slice(index, index + 2) !== '{{') {
+            continue;
+        }
+        const closeIndex = pattern.indexOf('}}', index + 2);
+        if (closeIndex === -1) {
+            const token = pattern.slice(index + 2).match(/^\w+(?::\w+)?/u)?.[0] ?? '';
+            return createMalformedTokenIssue(token, 'closing');
+        }
+        index = closeIndex + 1;
+    }
+    return undefined;
+};
+
+const detectMalformedRightToken = (pattern: string) => {
+    for (let index = 0; index < pattern.length - 1; index++) {
+        if (pattern.slice(index, index + 2) !== '}}') {
+            continue;
+        }
+        const openIndex = pattern.lastIndexOf('{{', index);
+        if (openIndex === -1) {
+            const token = pattern.slice(0, index).match(/(\w+(?::\w+)?)$/u)?.[1] ?? '';
+            return createMalformedTokenIssue(token, 'opening');
+        }
+    }
+    return undefined;
+};
+
+const detectMalformedToken = (pattern: string) =>
+    detectMalformedLeftToken(pattern) ?? detectMalformedRightToken(pattern);
 
 /**
  * Validates a single pattern for common issues.
@@ -84,7 +126,12 @@ const validatePattern = (pattern: string, seenPatterns: Set<string>) => {
         }
     }
 
-    for (const match of pattern.matchAll(buildBareTokenRegex())) {
+    const malformed = detectMalformedToken(pattern);
+    if (malformed) {
+        return malformed;
+    }
+
+    for (const match of pattern.matchAll(BARE_TOKEN_REGEX)) {
         const [full, name] = match;
         const idx = match.index!;
         if (
@@ -182,7 +229,7 @@ const addCaptureNameIssue = (
     issues: Partial<Record<keyof DictionaryEntryPatternOptions, ValidationIssue>>,
     captureName: string | undefined,
 ) => {
-    if (captureName !== undefined && !captureName.match(/^[A-Za-z_]\w*$/)) {
+    if (captureName !== undefined && !/^[A-Za-z_]\w*$/.test(captureName)) {
         issues.captureName = invalidDictionaryEntryIssue(
             `captureName must match /^[A-Za-z_]\\w*$/, got "${captureName}"`,
         );

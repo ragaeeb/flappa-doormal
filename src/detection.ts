@@ -1,6 +1,6 @@
-import { getAvailableTokens, TOKEN_PATTERNS } from './segmentation/tokens.js';
+import { getAvailableTokens, TOKEN_PATTERNS, type TokenPatternName } from './segmentation/tokens.js';
 
-type TokenName = string;
+type TokenName = TokenPatternName;
 
 /**
  * Result of detecting a token pattern in text
@@ -43,7 +43,7 @@ const TOKEN_PRIORITY_ORDER: TokenName[] = [
  * Returns tokens in priority order, with any TOKEN_PATTERNS not in the priority list appended.
  */
 const getTokenPriority = () => {
-    const allTokens = getAvailableTokens() as string[];
+    const allTokens = getAvailableTokens();
     const prioritized = TOKEN_PRIORITY_ORDER.filter((t) => allTokens.includes(t));
     const remaining = allTokens.filter((t) => !TOKEN_PRIORITY_ORDER.includes(t)).sort();
     return [...prioritized, ...remaining];

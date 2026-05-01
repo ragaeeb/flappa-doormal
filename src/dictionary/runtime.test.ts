@@ -532,6 +532,155 @@ describe('dictionary segmentation runtime', () => {
         expect(entryLemmas).not.toContain('واحدها');
     });
 
+    it('keeps leading content before the first dictionary split when rules are omitted', () => {
+        const profile: ArabicDictionaryProfile = {
+            version: 2,
+            zones: [
+                {
+                    families: [{ classes: ['chapter', 'entry'], emit: 'entry', use: 'heading' }],
+                    name: 'main',
+                },
+            ],
+        };
+
+        const pages: Page[] = [
+            {
+                content: 'مقدمة موجزة\n## جذر\nجذر\n: تفسير المدخل.',
+                id: 1,
+            },
+        ];
+
+        const segments = segmentPages(pages, { dictionary: profile, maxPages: 1 });
+
+        expect(segments.map((segment) => ({ from: segment.from, kind: segment.meta?.kind ?? 'none' }))).toEqual([
+            { from: 1, kind: 'none' },
+            { from: 1, kind: 'entry' },
+        ]);
+        expect(segments[0]?.content).toBe('مقدمة موجزة');
+    });
+
+    it('normalizes CRLF pages before computing dictionary offsets', () => {
+        const profile: ArabicDictionaryProfile = {
+            version: 2,
+            zones: [
+                {
+                    families: [{ emit: 'entry', use: 'lineEntry', wrappers: 'none' }],
+                    name: 'main',
+                },
+            ],
+        };
+
+        const pages: Page[] = [{ content: 'تمهيد\r\nجذر:\r\nشرح المدخل', id: 1 }];
+        const segments = segmentPages(pages, { dictionary: profile, maxPages: 1 });
+
+        expect(segments.map((segment) => segment.content)).toEqual(['تمهيد', 'جذر:\nشرح المدخل']);
+        expect(segments[1]?.from).toBe(1);
+    });
+
+    it('attaches dictionary debug provenance when debug metadata is enabled', () => {
+        const profile: ArabicDictionaryProfile = {
+            version: 2,
+            zones: [
+                {
+                    families: [{ emit: 'entry', use: 'lineEntry', wrappers: 'none' }],
+                    name: 'main',
+                },
+            ],
+        };
+
+        const pages: Page[] = [{ content: 'جذر: شرح المدخل', id: 1 }];
+        const segments = segmentPages(pages, { debug: true, dictionary: profile, maxPages: 1 });
+
+        expect((segments[0]?.meta as any)?._flappa?.dictionary).toEqual({
+            family: 'lineEntry',
+        });
+    });
+
+    it('honors allowNextLineColon for heading entries with a detached colon body line', () => {
+        const pages: Page[] = [{ content: '## جذر\n: شرح المدخل', id: 1 }];
+
+        const disabled = segmentPages(pages, {
+            dictionary: {
+                version: 2,
+                zones: [
+                    {
+                        families: [{ classes: ['entry'], emit: 'entry', use: 'heading' }],
+                        name: 'main',
+                    },
+                ],
+            },
+            maxPages: 1,
+        });
+        const enabled = segmentPages(pages, {
+            dictionary: {
+                version: 2,
+                zones: [
+                    {
+                        families: [{ allowNextLineColon: true, classes: ['entry'], emit: 'entry', use: 'heading' }],
+                        name: 'main',
+                    },
+                ],
+            },
+            maxPages: 1,
+        });
+
+        expect(disabled.map((segment) => segment.meta?.kind ?? 'none')).toEqual(['none']);
+        expect(enabled.map((segment) => segment.meta?.kind ?? 'none')).toEqual(['entry']);
+    });
+
+    it('supports codeLine wrapper modes without accepting the wrong wrapper shape', () => {
+        const pages: Page[] = [
+            { content: '(خ ف د): مستعمل.\n[خ ف د]: مستعمل.\n(خ ف د]: مستعمل.\nخ ف د: مستعمل.', id: 1 },
+        ];
+
+        const collectMarkerLemmas = (wrappers: 'none' | 'paired' | 'mismatched' | 'either') =>
+            segmentPages(pages, {
+                dictionary: {
+                    version: 2,
+                    zones: [
+                        {
+                            families: [{ emit: 'marker', use: 'codeLine', wrappers }],
+                            name: 'main',
+                        },
+                    ],
+                },
+                maxPages: 1,
+            })
+                .filter((segment) => segment.meta?.kind === 'marker')
+                .map((segment) => segment.meta?.lemma);
+
+        expect(collectMarkerLemmas('none')).toEqual(['خ ف د']);
+        expect(collectMarkerLemmas('paired')).toEqual(['خ ف د', 'خ ف د']);
+        expect(collectMarkerLemmas('mismatched')).toEqual(['خ ف د']);
+        expect(collectMarkerLemmas('either')).toEqual(['خ ف د', 'خ ف د', 'خ ف د', 'خ ف د']);
+    });
+
+    it('merges rule and dictionary metadata when both split at the same offset', () => {
+        const pages: Page[] = [{ content: '## جذر\nشرح المدخل', id: 1 }];
+        const segments = segmentPages(pages, {
+            debug: true,
+            dictionary: {
+                version: 2,
+                zones: [
+                    {
+                        families: [{ classes: ['entry'], emit: 'entry', use: 'heading' }],
+                        name: 'main',
+                    },
+                ],
+            },
+            maxPages: 1,
+            rules: [{ lineStartsWith: ['## '], meta: { type: 'chapter' } }],
+        });
+
+        expect(segments[0]?.meta).toMatchObject({
+            kind: 'entry',
+            lemma: 'جذر',
+            type: 'chapter',
+        });
+        expect((segments[0]?.meta as any)?._flappa?.dictionary?.family).toBe('heading');
+        expect((segments[0]?.meta as any)?._flappa?.rule?.patternType).toBe('lineStartsWith');
+    });
+
     it('produces diagnostics with blocker hit counts and rejected lemmas', () => {
         const profile: ArabicDictionaryProfile = {
             version: 2,
@@ -567,5 +716,11 @@ describe('dictionary segmentation runtime', () => {
             { count: 1, lemma: 'ومعناه' },
         ]);
         expect(diagnostics.samples).toHaveLength(3);
+        expect(diagnostics.samples[0]).toEqual(
+            expect.objectContaining({
+                absoluteIndex: expect.any(Number),
+                line: expect.any(Number),
+            }),
+        );
     });
 });

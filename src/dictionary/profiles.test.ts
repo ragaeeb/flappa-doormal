@@ -1077,28 +1077,29 @@ describe('dictionary book profiles', () => {
             preprocess: ['removeZeroWidth'],
         });
 
-        const summary = segments.slice(0, 6).map((segment) => ({
+        const summary = segments.slice(0, 7).map((segment) => ({
             head: segment.content.split('\n', 1)[0],
             kind: segment.meta?.kind,
             lemma: segment.meta?.lemma,
         }));
 
-        expect(summary[0]).toEqual({ head: 'حرف القاف', kind: 'chapter', lemma: undefined });
-        expect(summary[1]?.kind).toBe('entry');
-        expect(summary[1]?.lemma).toBe('ق');
-        expect(summary[1]?.head.startsWith('ق:')).toBeTrue();
-        expect(summary[2]).toEqual({ head: 'فصل الألف', kind: 'chapter', lemma: undefined });
-        expect(summary[3]?.kind).toBe('entry');
-        expect(summary[3]?.lemma).toBe('أبق');
-        expect(summary[3]?.head.startsWith('أبق:')).toBeTrue();
-        expect(summary[4]).toEqual({
+        expect(summary[0]).toEqual({ head: 'الجزء العاشر', kind: undefined, lemma: undefined });
+        expect(summary[1]).toEqual({ head: 'حرف القاف', kind: 'chapter', lemma: undefined });
+        expect(summary[2]?.kind).toBe('entry');
+        expect(summary[2]?.lemma).toBe('ق');
+        expect(summary[2]?.head.startsWith('ق:')).toBeTrue();
+        expect(summary[3]).toEqual({ head: 'فصل الألف', kind: 'chapter', lemma: undefined });
+        expect(summary[4]?.kind).toBe('entry');
+        expect(summary[4]?.lemma).toBe('أبق');
+        expect(summary[4]?.head.startsWith('أبق:')).toBeTrue();
+        expect(summary[5]).toEqual({
             head: 'والأَبَقُ: الكتَّان؛ عَنْ ثَعْلَبٍ. وأَبَّاق: رَجُلٌ مِنْ رُجَّازهم، وَهُوَ يُكَنَّى أَبا قَرِيبَةَ.',
             kind: 'entry',
             lemma: 'والأَبَقُ',
         });
-        expect(summary[5]?.kind).toBe('entry');
-        expect(summary[5]?.lemma).toBe('أرق');
-        expect(summary[5]?.head.startsWith('أرق:')).toBeTrue();
+        expect(summary[6]?.kind).toBe('entry');
+        expect(summary[6]?.lemma).toBe('أرق');
+        expect(summary[6]?.head.startsWith('أرق:')).toBeTrue();
     });
 
     it('7031 grouped and appendix zones emit the expected structural shapes', async () => {
@@ -1109,13 +1110,14 @@ describe('dictionary book profiles', () => {
             maxPages: 1,
             preprocess: ['removeZeroWidth'],
         });
-        const groupedSummary = groupedSegments.slice(0, 4).map((segment) => ({
+        const groupedSummary = groupedSegments.slice(0, 5).map((segment) => ({
             head: segment.content.split('\n', 1)[0],
             kind: segment.meta?.kind,
             lemma: segment.meta?.lemma,
         }));
 
         expect(groupedSummary).toEqual([
+            { head: 'كتاب حرف الْخَاء من تَهْذِيب اللُّغَة', kind: undefined, lemma: undefined },
             { head: '(خَ غ)', kind: 'marker', lemma: undefined },
             { head: '(بَاب الْخَاء وَالْقَاف)', kind: 'chapter', lemma: undefined },
             { head: '(خَ ق)', kind: 'marker', lemma: 'خَ ق' },
