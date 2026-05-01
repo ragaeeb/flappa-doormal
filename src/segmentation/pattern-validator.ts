@@ -46,7 +46,7 @@ export type RuleValidationResult = {
 };
 
 // Known token names from the tokens module
-const KNOWN_TOKENS = new Set(getAvailableTokens());
+const KNOWN_TOKENS = new Set<string>(getAvailableTokens());
 
 // Regex to find tokens inside {{}} - both with and without capture syntax
 const TOKEN_INSIDE_BRACES = /\{\{(\w+)(?::\w+)?\}\}/g;
@@ -74,7 +74,7 @@ const validatePattern = (pattern: string, seenPatterns: Set<string>) => {
     TOKEN_INSIDE_BRACES.lastIndex = 0;
     for (const match of pattern.matchAll(TOKEN_INSIDE_BRACES)) {
         const name = match[1];
-        if (!KNOWN_TOKENS.has(name)) {
+        if (name && !KNOWN_TOKENS.has(name)) {
             return {
                 message: `Unknown token: {{${name}}}. Available tokens: ${[...KNOWN_TOKENS].slice(0, 5).join(', ')}...`,
                 suggestion: 'Check spelling or use a known token',
@@ -127,7 +127,7 @@ const applyRulePatternValidation = (
 };
 
 const validateTemplateRule = (rule: SplitRule, result: RuleValidationResult) => {
-    if (rule.template === undefined) {
+    if (!('template' in rule)) {
         return false;
     }
 
@@ -141,7 +141,7 @@ const validateTemplateRule = (rule: SplitRule, result: RuleValidationResult) => 
 };
 
 const validateRegexRule = (rule: SplitRule, result: RuleValidationResult) => {
-    if (rule.regex === undefined) {
+    if (!('regex' in rule)) {
         return false;
     }
 
@@ -168,6 +168,47 @@ const invalidDictionaryEntryIssue = (message: string): ValidationIssue => ({
     type: 'invalid_option',
 });
 
+const addBooleanDictionaryEntryIssue = (
+    issues: Partial<Record<keyof DictionaryEntryPatternOptions, ValidationIssue>>,
+    key: 'allowCommaSeparated' | 'allowParenthesized' | 'allowWhitespaceBeforeColon' | 'midLineSubentries',
+    value: unknown,
+) => {
+    if (value !== undefined && typeof value !== 'boolean') {
+        issues[key] = invalidDictionaryEntryIssue(`${key} must be a boolean`);
+    }
+};
+
+const addCaptureNameIssue = (
+    issues: Partial<Record<keyof DictionaryEntryPatternOptions, ValidationIssue>>,
+    captureName: string | undefined,
+) => {
+    if (captureName !== undefined && !captureName.match(/^[A-Za-z_]\w*$/)) {
+        issues.captureName = invalidDictionaryEntryIssue(
+            `captureName must match /^[A-Za-z_]\\w*$/, got "${captureName}"`,
+        );
+    }
+};
+
+const addMinLettersIssue = (
+    issues: Partial<Record<keyof DictionaryEntryPatternOptions, ValidationIssue>>,
+    minLetters: number | undefined,
+) => {
+    if (minLetters !== undefined && (!Number.isInteger(minLetters) || minLetters < 1)) {
+        issues.minLetters = invalidDictionaryEntryIssue('minLetters must be an integer >= 1');
+    }
+};
+
+const addMaxLettersIssue = (
+    issues: Partial<Record<keyof DictionaryEntryPatternOptions, ValidationIssue>>,
+    maxLetters: number | undefined,
+    minLetters: number | undefined,
+) => {
+    const min = minLetters ?? 2;
+    if (maxLetters !== undefined && (!Number.isInteger(maxLetters) || maxLetters < min)) {
+        issues.maxLetters = invalidDictionaryEntryIssue(`maxLetters must be an integer >= ${min}`);
+    }
+};
+
 const validateDictionaryEntryRule = (rule: SplitRule, result: RuleValidationResult) => {
     if (!('dictionaryEntry' in rule) || !rule.dictionaryEntry) {
         return false;
@@ -188,29 +229,13 @@ const validateDictionaryEntryRule = (rule: SplitRule, result: RuleValidationResu
     if (!Array.isArray(stopWords) || stopWords.some((word) => typeof word !== 'string' || !word.trim())) {
         issues.stopWords = invalidDictionaryEntryIssue('stopWords must be a string[] with non-empty entries');
     }
-    if (allowCommaSeparated !== undefined && typeof allowCommaSeparated !== 'boolean') {
-        issues.allowCommaSeparated = invalidDictionaryEntryIssue('allowCommaSeparated must be a boolean');
-    }
-    if (allowParenthesized !== undefined && typeof allowParenthesized !== 'boolean') {
-        issues.allowParenthesized = invalidDictionaryEntryIssue('allowParenthesized must be a boolean');
-    }
-    if (allowWhitespaceBeforeColon !== undefined && typeof allowWhitespaceBeforeColon !== 'boolean') {
-        issues.allowWhitespaceBeforeColon = invalidDictionaryEntryIssue('allowWhitespaceBeforeColon must be a boolean');
-    }
-    if (midLineSubentries !== undefined && typeof midLineSubentries !== 'boolean') {
-        issues.midLineSubentries = invalidDictionaryEntryIssue('midLineSubentries must be a boolean');
-    }
-    if (captureName !== undefined && !captureName.match(/^[A-Za-z_]\w*$/)) {
-        issues.captureName = invalidDictionaryEntryIssue(
-            `captureName must match /^[A-Za-z_]\\w*$/, got "${captureName}"`,
-        );
-    }
-    if (minLetters !== undefined && (!Number.isInteger(minLetters) || minLetters < 1)) {
-        issues.minLetters = invalidDictionaryEntryIssue('minLetters must be an integer >= 1');
-    }
-    if (maxLetters !== undefined && (!Number.isInteger(maxLetters) || maxLetters < (minLetters ?? 2))) {
-        issues.maxLetters = invalidDictionaryEntryIssue(`maxLetters must be an integer >= ${minLetters ?? 2}`);
-    }
+    addBooleanDictionaryEntryIssue(issues, 'allowCommaSeparated', allowCommaSeparated);
+    addBooleanDictionaryEntryIssue(issues, 'allowParenthesized', allowParenthesized);
+    addBooleanDictionaryEntryIssue(issues, 'allowWhitespaceBeforeColon', allowWhitespaceBeforeColon);
+    addBooleanDictionaryEntryIssue(issues, 'midLineSubentries', midLineSubentries);
+    addCaptureNameIssue(issues, captureName);
+    addMinLettersIssue(issues, minLetters);
+    addMaxLettersIssue(issues, maxLetters, minLetters);
 
     if (Object.keys(issues).length === 0) {
         return false;
@@ -261,9 +286,21 @@ const formatValidationIssue = (_type: string, issue: ValidationIssue | undefined
 export const validateRules = (rules: SplitRule[]) =>
     rules.map((rule) => {
         const result: RuleValidationResult = {};
-        const startsWithIssues = applyRulePatternValidation(result, 'lineStartsWith', rule.lineStartsWith);
-        const startsAfterIssues = applyRulePatternValidation(result, 'lineStartsAfter', rule.lineStartsAfter);
-        const endsWithIssues = applyRulePatternValidation(result, 'lineEndsWith', rule.lineEndsWith);
+        const startsWithIssues = applyRulePatternValidation(
+            result,
+            'lineStartsWith',
+            'lineStartsWith' in rule ? rule.lineStartsWith : undefined,
+        );
+        const startsAfterIssues = applyRulePatternValidation(
+            result,
+            'lineStartsAfter',
+            'lineStartsAfter' in rule ? rule.lineStartsAfter : undefined,
+        );
+        const endsWithIssues = applyRulePatternValidation(
+            result,
+            'lineEndsWith',
+            'lineEndsWith' in rule ? rule.lineEndsWith : undefined,
+        );
         const templateIssues = validateTemplateRule(rule, result);
         const regexIssues = validateRegexRule(rule, result);
         const dictionaryEntryIssues = validateDictionaryEntryRule(rule, result);

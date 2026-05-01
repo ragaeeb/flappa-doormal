@@ -2,6 +2,8 @@
 
 import { getAvailableTokens, TOKEN_PATTERNS } from '../segmentation/tokens.js';
 
+type TokenName = string;
+
 // Helpers shared across analysis modules
 
 // For analysis signatures we avoid escaping ()[] because:
@@ -11,7 +13,7 @@ import { getAvailableTokens, TOKEN_PATTERNS } from '../segmentation/tokens.js';
 export const escapeSignatureLiteral = (s: string): string => s.replace(/[.*+?^${}|\\{}]/g, '\\$&');
 
 // Keep this intentionally focused on "useful at line start" tokens, avoiding overly-generic tokens like {{harf}}.
-export const TOKEN_PRIORITY_ORDER: string[] = [
+export const TOKEN_PRIORITY_ORDER: TokenName[] = [
     'basmalah',
     'kitab',
     'bab',
@@ -26,8 +28,8 @@ export const TOKEN_PRIORITY_ORDER: string[] = [
     'tarqim',
 ];
 
-export const buildTokenPriority = (): string[] => {
-    const allTokens = new Set(getAvailableTokens());
+export const buildTokenPriority = (): TokenName[] => {
+    const allTokens = new Set<string>(getAvailableTokens());
     // IMPORTANT: We only use an explicit allow-list here.
     // Including "all remaining tokens" adds overly-generic tokens (e.g., harf) which makes signatures noisy.
     return TOKEN_PRIORITY_ORDER.filter((t) => allTokens.has(t));
@@ -47,7 +49,7 @@ export type CompiledTokenRegex = { token: string; re: RegExp };
 export const compileTokenRegexes = (tokenNames: string[]): CompiledTokenRegex[] =>
     tokenNames
         .map((token) => {
-            const pat = TOKEN_PATTERNS[token];
+            const pat = TOKEN_PATTERNS[token as keyof typeof TOKEN_PATTERNS];
             if (!pat) {
                 return null;
             }

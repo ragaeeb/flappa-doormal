@@ -1,7 +1,9 @@
 {
     "compilerOptions": {
         "allowImportingTsExtensions": true,
+        "baseUrl": ".",
         "erasableSyntaxOnly": true,
+        "ignoreDeprecations": "6.0",
         "lib": ["ESNext", "DOM", "DOM.Iterable"],
         "module": "ESNext",
         "moduleDetection": "force",
@@ -13,6 +15,10 @@
         "noUncheckedSideEffectImports": true,
         "noUnusedLocals": true,
         "noUnusedParameters": true,
+        "paths": {
+            "@/*": ["../src/*"],
+            "flappa-doormal": ["../src/index.ts"]
+        },
         "resolveJsonModule": true,
         "skipLibCheck": true,
 

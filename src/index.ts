@@ -14,6 +14,9 @@ export {
     generateTemplateFromText,
     suggestPatternConfig,
 } from './detection.js';
+export type { ArabicDictionaryEntryRuleOptions } from './dictionary/arabic-dictionary-rule.js';
+export { createArabicDictionaryEntryRule } from './dictionary/arabic-dictionary-rule.js';
+export { diagnoseDictionaryProfile } from './dictionary/runtime.js';
 export type { OptimizeResult } from './optimization/optimize-rules.js';
 export { optimizeRules } from './optimization/optimize-rules.js';
 export {
@@ -22,8 +25,6 @@ export {
     fixTrailingWaw,
     removeZeroWidth,
 } from './preprocessing/transforms.js';
-export type { ArabicDictionaryEntryRuleOptions } from './segmentation/arabic-dictionary-rule.js';
-export { createArabicDictionaryEntryRule } from './segmentation/arabic-dictionary-rule.js';
 export type { PatternProcessor } from './segmentation/breakpoint-utils.js';
 export { escapeWordsOutsideTokens } from './segmentation/breakpoint-utils.js';
 export { getDebugReason, getSegmentDebugReason } from './segmentation/debug-meta.js';
@@ -55,6 +56,20 @@ export {
     withCapture,
 } from './segmentation/tokens.js';
 export type { Breakpoint, BreakpointRule } from './types/breakpoints.js';
+export type {
+    ArabicDictionaryProfile,
+    DictionaryBlocker,
+    DictionaryDiagnosticReason,
+    DictionaryDiagnosticSample,
+    DictionaryFamily,
+    DictionaryFamilyUse,
+    DictionaryGate,
+    DictionaryHeadingClass,
+    DictionaryProfileDiagnostics,
+    DictionaryProfileDiagnosticsOptions,
+    DictionarySegmentKind,
+    DictionaryZone,
+} from './types/dictionary.js';
 export type {
     Page,
     PageRange,

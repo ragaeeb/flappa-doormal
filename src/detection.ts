@@ -1,5 +1,7 @@
 import { getAvailableTokens, TOKEN_PATTERNS } from './segmentation/tokens.js';
 
+type TokenName = string;
+
 /**
  * Result of detecting a token pattern in text
  */
@@ -20,7 +22,7 @@ export type DetectedPattern = {
  *
  * Tokens not in this list are appended in alphabetical order from TOKEN_PATTERNS.
  */
-const TOKEN_PRIORITY_ORDER = [
+const TOKEN_PRIORITY_ORDER: TokenName[] = [
     'basmalah', // Most specific - full phrase
     'kitab',
     'bab',
@@ -41,7 +43,7 @@ const TOKEN_PRIORITY_ORDER = [
  * Returns tokens in priority order, with any TOKEN_PATTERNS not in the priority list appended.
  */
 const getTokenPriority = () => {
-    const allTokens = getAvailableTokens();
+    const allTokens = getAvailableTokens() as string[];
     const prioritized = TOKEN_PRIORITY_ORDER.filter((t) => allTokens.includes(t));
     const remaining = allTokens.filter((t) => !TOKEN_PRIORITY_ORDER.includes(t)).sort();
     return [...prioritized, ...remaining];
@@ -99,7 +101,7 @@ export const detectTokenPatterns = (text: string) => {
 
     // Process tokens in priority order
     for (const tokenName of getTokenPriority()) {
-        const pattern = TOKEN_PATTERNS[tokenName];
+        const pattern = TOKEN_PATTERNS[tokenName as keyof typeof TOKEN_PATTERNS];
         if (!pattern) {
             continue;
         }
@@ -109,7 +111,6 @@ export const detectTokenPatterns = (text: string) => {
             const regex = new RegExp(`(${pattern})`, 'gu');
             let match: RegExpExecArray | null;
 
-            // biome-ignore lint/suspicious/noAssignInExpressions: standard regex exec loop pattern
             while ((match = regex.exec(text)) !== null) {
                 const startIndex = match.index;
                 const endIndex = startIndex + match[0].length;

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'bun:test';
 import type {
     // Core Types
     ArabicDictionaryEntryRuleOptions,
+    ArabicDictionaryProfile,
     Breakpoint,
     BreakpointRule,
     // Analysis
@@ -11,7 +12,18 @@ import type {
     CondenseEllipsisRule,
     // Detection
     DetectedPattern,
+    DictionaryBlocker,
+    DictionaryDiagnosticReason,
+    DictionaryDiagnosticSample,
     DictionaryEntryPatternOptions,
+    DictionaryFamily,
+    DictionaryFamilyUse,
+    DictionaryGate,
+    DictionaryHeadingClass,
+    DictionaryProfileDiagnostics,
+    DictionaryProfileDiagnosticsOptions,
+    DictionarySegmentKind,
+    DictionaryZone,
     // Segmenter
     ExpandResult,
     FixTrailingWawRule,
@@ -78,6 +90,7 @@ describe('Build Exports Validation', () => {
         // Breakpoint Utils
         expect(flappa.escapeWordsOutsideTokens).toBeFunction();
         expect(flappa.createArabicDictionaryEntryRule).toBeFunction();
+        expect(flappa.diagnoseDictionaryProfile).toBeFunction();
 
         // Pattern Validator
         expect(flappa.formatValidationReport).toBeFunction();
@@ -121,6 +134,7 @@ describe('Build Exports Validation', () => {
 
         // Analysis
         const _commonPattern: CommonLineStartPattern = typedEmpty();
+        const _dictionaryProfile: ArabicDictionaryProfile = typedEmpty();
         const _arabicDictionaryRuleOptions: ArabicDictionaryEntryRuleOptions = typedEmpty();
         const _lsOptions: LineStartAnalysisOptions = typedEmpty();
         const _lsExample: LineStartPatternExample = typedEmpty();
@@ -130,6 +144,17 @@ describe('Build Exports Validation', () => {
 
         // Detection
         const _detected: DetectedPattern = typedEmpty();
+        const _dictionaryBlocker: DictionaryBlocker = typedEmpty();
+        const _dictionaryDiagnosticReason: DictionaryDiagnosticReason = typedEmpty();
+        const _dictionaryDiagnosticSample: DictionaryDiagnosticSample = typedEmpty();
+        const _dictionaryFamily: DictionaryFamily = typedEmpty();
+        const _dictionaryFamilyUse: DictionaryFamilyUse = typedEmpty();
+        const _dictionaryGate: DictionaryGate = typedEmpty();
+        const _dictionaryHeadingClass: DictionaryHeadingClass = typedEmpty();
+        const _dictionaryProfileDiagnostics: DictionaryProfileDiagnostics = typedEmpty();
+        const _dictionaryProfileDiagnosticsOptions: DictionaryProfileDiagnosticsOptions = typedEmpty();
+        const _dictionarySegmentKind: DictionarySegmentKind = typedEmpty();
+        const _dictionaryZone: DictionaryZone = typedEmpty();
 
         // Optimization
         const _optimizeRes: OptimizeResult = typedEmpty();
@@ -176,6 +201,7 @@ describe('Build Exports Validation', () => {
         // Just to avoid unused var errors (though TS check handles this implicitly by compiling)
         expect([
             _commonPattern,
+            _dictionaryProfile,
             _arabicDictionaryRuleOptions,
             _lsOptions,
             _lsExample,
@@ -183,6 +209,17 @@ describe('Build Exports Validation', () => {
             _rsOptions,
             _rsPattern,
             _detected,
+            _dictionaryBlocker,
+            _dictionaryDiagnosticReason,
+            _dictionaryDiagnosticSample,
+            _dictionaryFamily,
+            _dictionaryFamilyUse,
+            _dictionaryGate,
+            _dictionaryHeadingClass,
+            _dictionaryProfileDiagnostics,
+            _dictionaryProfileDiagnosticsOptions,
+            _dictionarySegmentKind,
+            _dictionaryZone,
             _optimizeRes,
             _patProc,
             _ruleValRes,

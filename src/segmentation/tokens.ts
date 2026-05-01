@@ -181,6 +181,8 @@ export type TokenKey = keyof typeof Token;
  * Type representing valid token pattern names for `getTokenPattern()`.
  */
 export type TokenPatternName = keyof typeof TOKEN_PATTERNS;
+type BaseTokenName = keyof typeof BASE_TOKENS;
+type CompositeTokenName = keyof typeof COMPOSITE_TOKENS;
 
 /** Wraps a token constant with a named capture: `{{token}}` → `{{token:name}}`. */
 export const withCapture = (token: string, name: string): string => {
@@ -203,7 +205,9 @@ const COMPOSITE_TOKENS = {
 export const expandCompositeTokensInTemplate = (template: string) => {
     let out = template;
     for (let i = 0; i < 10; i++) {
-        const next = out.replace(/\{\{(\w+)\}\}/g, (m, tokenName: string) => COMPOSITE_TOKENS[tokenName] ?? m);
+        const next = out.replace(/\{\{(\w+)\}\}/g, (m, tokenName: string) =>
+            tokenName in COMPOSITE_TOKENS ? COMPOSITE_TOKENS[tokenName as CompositeTokenName] : m,
+        );
         if (next === out) {
             break;
         }
@@ -221,7 +225,9 @@ export const expandCompositeTokensInTemplate = (template: string) => {
  * @internal
  */
 const expandBaseTokens = (template: string) =>
-    template.replace(/\{\{(\w+)\}\}/g, (_, tokenName) => BASE_TOKENS[tokenName] ?? `{{${tokenName}}}`);
+    template.replace(/\{\{(\w+)\}\}/g, (_, tokenName) =>
+        tokenName in BASE_TOKENS ? BASE_TOKENS[tokenName as BaseTokenName] : `{{${tokenName}}}`,
+    );
 
 /**
  * Token definitions mapping human-readable token names to regex patterns.
@@ -399,10 +405,11 @@ const expandTokenLiteral = (
         return `(?<${opts.registerCapture(captureName)}>.+)`;
     }
 
-    let tokenPattern = TOKEN_PATTERNS[tokenName];
-    if (!tokenPattern) {
+    if (!(tokenName in TOKEN_PATTERNS)) {
         return literal;
     }
+
+    let tokenPattern = TOKEN_PATTERNS[tokenName as TokenPatternName];
 
     tokenPattern = maybeApplyFuzzyToTokenPattern(tokenPattern, opts.fuzzyTransform);
     if (captureName) {

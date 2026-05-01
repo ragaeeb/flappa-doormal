@@ -1,7 +1,7 @@
 import './style.css';
 import {
     analyzeCommonLineStarts,
-    createArabicDictionaryEntryRule,
+    type ArabicDictionaryProfile,
     getSegmentDebugReason,
     type Page,
     type Segment,
@@ -43,6 +43,7 @@ interface DemoRulePreset {
 interface DemoPreset {
     breakpoints?: string[];
     debug?: boolean;
+    dictionary?: ArabicDictionaryProfile;
     maxPages?: number;
     pageJoiner?: 'space' | 'newline';
     pages: Array<{ content: string; id: number }>;
@@ -50,7 +51,7 @@ interface DemoPreset {
     rules: DemoRulePreset[];
 }
 
-type PatternType = 'lineStartsWith' | 'lineStartsAfter' | 'lineEndsWith' | 'template' | 'regex' | 'dictionaryEntry';
+type PatternType = 'lineStartsWith' | 'lineStartsAfter' | 'lineEndsWith' | 'template' | 'regex';
 
 // ============================================
 // State
@@ -86,6 +87,7 @@ const whitespaceSelect = document.getElementById('whitespace') as HTMLSelectElem
 const maxPagesInput = document.getElementById('max-pages') as HTMLInputElement;
 const maxContentLengthInput = document.getElementById('max-content-length') as HTMLInputElement;
 const breakpointsTextarea = document.getElementById('breakpoints') as HTMLTextAreaElement;
+const dictionaryProfileTextarea = document.getElementById('dictionary-profile') as HTMLTextAreaElement;
 const preferSelect = document.getElementById('prefer') as HTMLSelectElement;
 const pageJoinerSelect = document.getElementById('page-joiner') as HTMLSelectElement;
 const debugToggle = document.getElementById('debug-toggle') as HTMLInputElement;
@@ -102,11 +104,38 @@ const dictionaryLemmaStopWords = Array.from(
         ),
     ),
 );
-const dictionaryLemmaPrevWordStoplist = ['قال', 'وقال', 'وقيل', 'ويقال', 'يقال', 'قلت', 'فقال', 'قالوا'];
 const dictionaryLemmaSamePagePrevWordStoplist = ['جل'];
 const demoPresets: Record<string, DemoPreset> = {
     'dictionary-lemma': {
         debug: true,
+        dictionary: {
+            version: 2,
+            zones: [
+                {
+                    blockers: [
+                        { appliesTo: ['lineEntry', 'inlineSubentry'], use: 'pageContinuation' },
+                        { appliesTo: ['lineEntry', 'inlineSubentry'], use: 'intro' },
+                        {
+                            appliesTo: ['lineEntry', 'inlineSubentry'],
+                            precision: 'aggressive',
+                            use: 'authorityIntro',
+                        },
+                        {
+                            appliesTo: ['lineEntry', 'inlineSubentry'],
+                            use: 'stopLemma',
+                            words: dictionaryLemmaStopWords,
+                        },
+                        { appliesTo: ['inlineSubentry'], use: 'previousWord', words: dictionaryLemmaSamePagePrevWordStoplist },
+                    ],
+                    families: [
+                        { classes: ['chapter', 'cluster'], emit: 'chapter', use: 'heading' },
+                        { emit: 'entry', use: 'lineEntry', wrappers: 'none' },
+                        { emit: 'entry', prefixes: ['و'], stripPrefixesFromLemma: false, use: 'inlineSubentry' },
+                    ],
+                    name: 'main',
+                },
+            ],
+        },
         maxPages: 1,
         pageJoiner: 'space',
         pages: [
@@ -132,22 +161,7 @@ const demoPresets: Record<string, DemoPreset> = {
             },
         ],
         prefer: 'longer',
-        rules: [
-            {
-                metaType: 'chapter',
-                pattern: '## ',
-                patternType: 'lineStartsAfter',
-                split: 'at',
-            },
-            {
-                metaType: 'entry',
-                pageStartPrevWordStoplist: dictionaryLemmaPrevWordStoplist,
-                pattern: dictionaryLemmaStopWords.join(', '),
-                patternType: 'dictionaryEntry',
-                samePagePrevWordStoplist: dictionaryLemmaSamePagePrevWordStoplist,
-                split: 'at',
-            },
-        ],
+        rules: [],
     },
 };
 
@@ -235,7 +249,6 @@ function createRuleElement(id: number): HTMLElement {
           <option value="lineEndsWith">lineEndsWith</option>
           <option value="template">template</option>
           <option value="regex">regex</option>
-          <option value="dictionaryEntry">dictionaryEntry</option>
         </select>
       </div>
       <div class="form-group">
@@ -391,6 +404,7 @@ function loadPreset(preset: DemoPreset): void {
     pageJoinerSelect.value = preset.pageJoiner ?? 'space';
     debugToggle.checked = preset.debug ?? true;
     breakpointsTextarea.value = preset.breakpoints?.join('\n') ?? '';
+    dictionaryProfileTextarea.value = preset.dictionary ? JSON.stringify(preset.dictionary, null, 2) : '';
     preRemoveZW.checked = false;
     preCondenseEllipsis.checked = false;
     preFixWaw.checked = false;
@@ -455,18 +469,6 @@ function buildRuleFromElement(element: HTMLElement): SplitRule {
             return { ...baseOptions, template: pattern } as SplitRule;
         case 'regex':
             return { ...baseOptions, regex: pattern } as SplitRule;
-        case 'dictionaryEntry':
-            return {
-                ...baseOptions,
-                ...createArabicDictionaryEntryRule({
-                    pageStartPrevWordStoplist: prevWordStoplist,
-                    samePagePrevWordStoplist,
-                    stopWords: pattern
-                        .split(',')
-                        .map((word) => word.trim())
-                        .filter(Boolean),
-                }),
-            } as SplitRule;
         default:
             return { ...baseOptions, lineStartsAfter: [pattern] } as SplitRule;
     }
@@ -481,8 +483,12 @@ function buildOptions(): SegmentationOptions {
         debug: debugToggle.checked,
         pageJoiner: pageJoinerSelect.value as 'space' | 'newline',
         prefer: preferSelect.value as 'longer' | 'shorter',
-        rules: buildAllRules(),
     };
+
+    const rules = buildAllRules();
+    if (rules.length > 0) {
+        options.rules = rules;
+    }
 
     if (maxPagesInput.value) {
         options.maxPages = parseInt(maxPagesInput.value, 10);
@@ -513,6 +519,10 @@ function buildOptions(): SegmentationOptions {
             .split('\n')
             .map((s) => s.trim())
             .filter((s) => s !== undefined); // Keep empty strings as page boundary fallback
+    }
+
+    if (dictionaryProfileTextarea.value.trim()) {
+        options.dictionary = JSON.parse(dictionaryProfileTextarea.value) as ArabicDictionaryProfile;
     }
 
     return options;

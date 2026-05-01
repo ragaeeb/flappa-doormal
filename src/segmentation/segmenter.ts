@@ -3,6 +3,7 @@ import type { Page, Segment } from '@/types';
 import type { Logger, SegmentationOptions } from '@/types/options.js';
 import type { SplitRule } from '@/types/rules.js';
 import { normalizeLineEndings } from '@/utils/textUtils.js';
+import { collectDictionarySplitPoints } from '../dictionary/runtime.js';
 import type { PageBoundary, PageMap, SplitPoint } from '../types/segmenter.js';
 import { applyBreakpoints } from './breakpoint-processor.js';
 import { resolveDebugConfig } from './debug-meta.js';
@@ -328,6 +329,7 @@ const convertPageBreaks = (
  */
 export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
     const {
+        dictionary,
         rules = [],
         breakpoints = [],
         prefer = 'longer',
@@ -369,11 +371,17 @@ export const segmentPages = (pages: Page[], options: SegmentationOptions) => {
 
     logger?.debug?.('[segmenter] content built', { pageIds: pageMap.pageIds, totalContentLength: matchContent.length });
 
-    const splitPoints = collectSplitPointsFromRules(rules, matchContent, pageMap, debugMetaKey, logger);
+    const splitPointsFromRules = collectSplitPointsFromRules(rules, matchContent, pageMap, debugMetaKey, logger);
+    const splitPointsFromDictionary = dictionary
+        ? collectDictionarySplitPoints(preprocessedPages, dictionary, pageMap, logger)
+        : [];
+    const splitPoints = [...splitPointsFromRules, ...splitPointsFromDictionary];
     const unique = dedupeSplitPoints(splitPoints);
 
     logger?.debug?.('[segmenter] split points collected', {
+        dictionarySplitPoints: splitPointsFromDictionary.length,
         rawSplitPoints: splitPoints.length,
+        ruleSplitPoints: splitPointsFromRules.length,
         uniqueSplitPoints: unique.length,
     });
 

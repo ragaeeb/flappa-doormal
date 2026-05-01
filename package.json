@@ -47,12 +47,17 @@
     },
     "scripts": {
         "build": "tsdown",
+        "dictionary:export-options": "bun scripts/export-dictionary-book-options.ts",
+        "dictionary:extract-fixtures": "bun scripts/extract-dictionary-test-fixtures.ts",
+        "dictionary:preview-html": "bun scripts/generate-dictionary-html-previews.ts",
+        "dictionary:scan": "bun scripts/analyze-dictionary-profile.ts",
+        "dictionary:split-csv": "bun scripts/split-dictionary-csvs.ts",
         "format": "biome format --write",
         "lint": "biome check",
         "postbuild": "bun run test:exports",
         "test": "bun test",
         "test:exports": "bunx tsc --ignoreConfig --noEmit testing/exports.test.ts --moduleResolution bundler --target esnext --module esnext --esModuleInterop --skipLibCheck --types bun-types,node && bun test testing/exports.test.ts",
-        "test:perf": "RUN_PERF=true bun test src/segmentation/segmenter.perf.test.ts src/validation/validate.perf.test.ts"
+        "test:perf": "RUN_PERF=true bun test src/segmentation/segmenter.perf.test.ts src/dictionary/heading-classifier.perf.test.ts src/dictionary/runtime.perf.test.ts src/validation/validate.perf.test.ts"
     },
     "type": "module",
     "types": "./dist/index.d.mts",

@@ -1,6 +1,6 @@
 import type { DictionaryEntryPatternOptions, SplitRule } from '@/types/rules.js';
 import { makeDiacriticInsensitive, normalizeArabicForComparison } from '@/utils/textUtils.js';
-import { ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN, ARABIC_MARKS_CLASS } from './tokens.js';
+import { ARABIC_LETTER_WITH_OPTIONAL_MARKS_PATTERN, ARABIC_MARKS_CLASS } from '../segmentation/tokens.js';
 
 export interface ArabicDictionaryEntryRuleOptions extends DictionaryEntryPatternOptions {
     /**

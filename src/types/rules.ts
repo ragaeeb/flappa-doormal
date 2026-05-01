@@ -152,7 +152,7 @@ type LineEndsWithPattern = {
  * This captures authoring intent in a serializable shape and is compiled into
  * a regex internally by the rule compiler.
  */
-export interface DictionaryEntryPatternOptions {
+export type DictionaryEntryPatternOptions = {
     /**
      * Words that should never be treated as lemmas when followed by a colon.
      *
@@ -204,7 +204,7 @@ export interface DictionaryEntryPatternOptions {
      * @default 10
      */
     maxLetters?: number;
-}
+};
 
 /**
  * Arabic dictionary entry pattern rule - serializable headword matcher compiled internally.

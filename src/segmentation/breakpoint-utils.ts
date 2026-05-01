@@ -598,10 +598,10 @@ export const findPageStartNearExpectedBoundary = (
 };
 
 /** Internal candidate for page start anchoring */
-interface AnchorCandidate {
+type AnchorCandidate = {
     pos: number;
     isNewline: boolean;
-}
+};
 
 /** Finds all whitespace-preceded occurrences of a prefix within a search range */
 const findAnchorCandidates = (content: string, prefix: string, start: number, end: number) => {

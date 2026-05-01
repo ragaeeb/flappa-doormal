@@ -6,14 +6,36 @@
                 "organizeImports": "on",
                 "useSortedKeys": {
                     "level": "on",
-                    "options": { "sortOrder": "natural" }
+                    "options": {
+                        "sortOrder": "natural"
+                    }
                 }
             }
         }
     },
+    "css": {
+        "parser": {
+            "cssModules": true,
+            "tailwindDirectives": true
+        }
+    },
     "files": {
         "ignoreUnknown": true,
-        "includes": ["**", "!node_modules", "!dist", "!build", "!coverage"]
+        "includes": [
+            "src/**",
+            "testing/**",
+            ".github/**",
+            "*.ts",
+            "*.mjs",
+            "*.js",
+            "*.json",
+            "*.md",
+            "*.json",
+            "!!**/node_modules",
+            "!!**/dist",
+            "!!testing/fixtures/dictionary-books",
+            "!!coverage"
+        ]
     },
     "formatter": {
         "enabled": true,
@@ -31,32 +53,79 @@
             "trailingCommas": "all"
         }
     },
+    "json": {
+        "formatter": {
+            "enabled": true
+        }
+    },
     "linter": {
-        "domains": {
-            "project": "recommended"
-        },
         "enabled": true,
         "rules": {
             "complexity": {
                 "noExcessiveCognitiveComplexity": "warn",
-                "useWhile": "error"
+                "useArrowFunction": "warn"
             },
-            "recommended": true,
-            "style": {
-                "noNonNullAssertion": "off",
-                "useBlockStatements": {
-                    "fix": "safe",
-                    "level": "error",
-                    "options": {}
-                },
-                "useTemplate": {
+            "correctness": {
+                "noUnusedImports": {
                     "fix": "safe",
                     "level": "warn",
                     "options": {}
                 }
             },
+            "nursery": {
+                "noExcessiveLinesPerFile": {
+                    "level": "off",
+                    "options": {
+                        "maxLines": 600,
+                        "skipBlankLines": true
+                    }
+                },
+                "useSortedClasses": "on"
+            },
+            "recommended": true,
+            "style": {
+                "noInferrableTypes": "warn",
+                "noNonNullAssertion": "off",
+                "noRestrictedImports": {
+                    "level": "warn",
+                    "options": {
+                        "paths": {
+                            "node:fs": {
+                                "importNames": ["readFile", "readFileSync", "writeFile", "writeFileSync"],
+                                "message": "Use Bun.file(...).text() or Bun.file(...).json() for whole-file reads, and prefer Bun.write(...) for whole-file writes. Keep node:fs only for lower-level or non-Bun workflows."
+                            },
+                            "node:fs/promises": {
+                                "importNames": ["default", "readFile", "writeFile"],
+                                "message": "Use Bun.file(...).text() or Bun.file(...).json() for whole-file reads, and prefer Bun.write(...) for whole-file writes. Keep node:fs/promises for mkdir/rm, stats, copy/rename, locks, and other non-Bun workflows."
+                            }
+                        }
+                    }
+                },
+                "useBlockStatements": {
+                    "fix": "safe",
+                    "level": "warn",
+                    "options": {}
+                },
+                "useConsistentTypeDefinitions": {
+                    "fix": "safe",
+                    "level": "warn",
+                    "options": {
+                        "style": "type"
+                    }
+                },
+                "useImportType": {
+                    "fix": "safe",
+                    "level": "error",
+                    "options": {}
+                },
+                "useTemplate": "off"
+            },
             "suspicious": {
-                "noExplicitAny": "off"
+                "noAssignInExpressions": "off",
+                "noConsole": "off",
+                "noControlCharactersInRegex": "off",
+                "noExplicitAny": "off",
+                "noTemplateCurlyInString": "off"
             }
         }
     },
