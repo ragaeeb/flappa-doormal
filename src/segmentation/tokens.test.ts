@@ -435,6 +435,10 @@ describe('tokens', () => {
         it('should preserve tokens without captures', () => {
             expect(stripTokenMappings('{{raqms}} {{dash}}')).toBe('{{raqms}} {{dash}}');
         });
+
+        it('should collapse capture-only tokens to empty token shells', () => {
+            expect(stripTokenMappings('{{:content}} {{raqms:num}}')).toBe('{{}} {{raqms}}');
+        });
     });
 });
 

@@ -25,6 +25,14 @@ describe('validateRules', () => {
             expect(result[0]?.lineStartsWith?.[0]?.message).toContain('bab');
         });
 
+        it('should detect tokens with only one side of the braces present', () => {
+            const leftMissing = validateRules([{ lineStartsAfter: ['raqms:num}}'], split: 'at' }]);
+            const rightMissing = validateRules([{ lineStartsAfter: ['{{raqms:num'], split: 'at' }]);
+
+            expect(leftMissing[0]?.lineStartsAfter?.[0]?.type).toBe('missing_braces');
+            expect(rightMissing[0]?.lineStartsAfter?.[0]?.type).toBe('missing_braces');
+        });
+
         it('should return undefined for valid patterns', () => {
             const result = validateRules([{ lineStartsAfter: ['{{raqms:num}} {{dash}}'], split: 'at' }]);
             expect(result).toHaveLength(1);

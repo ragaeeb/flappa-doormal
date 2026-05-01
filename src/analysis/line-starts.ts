@@ -2,6 +2,7 @@
 
 import type { Page } from '@/types/index.js';
 import { normalizeLineEndings } from '@/utils/textUtils.js';
+import type { TokenPatternName } from '../segmentation/tokens.js';
 import {
     appendWs,
     buildTokenPriority,
@@ -207,7 +208,7 @@ const skipWhitespace = (
 
 // Main tokenization
 
-const tokenizeLineStart = (line: string, tokenNames: string[], opts: ResolvedOptions): string | null => {
+const tokenizeLineStart = (line: string, tokenNames: TokenPatternName[], opts: ResolvedOptions): string | null => {
     const trimmed = collapseWhitespace(line);
     if (!trimmed) {
         return null;
@@ -260,7 +261,7 @@ type PatternAccumulator = Map<string, { count: number; examples: LineStartPatter
 const processLine = (
     line: string,
     pageId: number,
-    tokenPriority: string[],
+    tokenPriority: TokenPatternName[],
     opts: ResolvedOptions,
     acc: PatternAccumulator,
 ): void => {
@@ -288,7 +289,12 @@ const processLine = (
     }
 };
 
-const processPage = (page: Page, tokenPriority: string[], opts: ResolvedOptions, acc: PatternAccumulator): void => {
+const processPage = (
+    page: Page,
+    tokenPriority: TokenPatternName[],
+    opts: ResolvedOptions,
+    acc: PatternAccumulator,
+): void => {
     for (const line of normalizeLineEndings(page.content ?? '').split('\n')) {
         processLine(line, page.id, tokenPriority, opts, acc);
     }

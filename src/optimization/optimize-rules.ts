@@ -1,4 +1,4 @@
-import { PATTERN_TYPE_KEYS, type PatternTypeKey, type SplitRule } from '@/types/rules';
+import { PATTERN_TYPE_KEYS, type PatternTypeKey, type SplitRule } from '@/types/rules.js';
 
 // Keys that support array patterns and can be merged
 const MERGEABLE_KEYS = new Set<PatternTypeKey>(['lineStartsWith', 'lineStartsAfter', 'lineEndsWith']);
@@ -38,7 +38,7 @@ const normalizePatterns = (patterns: string[]) =>
     [...new Set(patterns)].sort((a, b) => b.length - a.length || a.localeCompare(b));
 
 const getDictionaryEntrySpecificityScore = (rule: SplitRule) => {
-    if (!('dictionaryEntry' in rule)) {
+    if (!('dictionaryEntry' in rule) || !rule.dictionaryEntry) {
         return 0;
     }
 

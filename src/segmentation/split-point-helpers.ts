@@ -20,11 +20,11 @@ import { buildRuleRegex, type RuleRegex } from './rule-regex.js';
 // Maximum iterations before throwing to prevent infinite loops
 const MAX_REGEX_ITERATIONS = 100000;
 
-interface CombinableRule {
+type CombinableRule = {
     rule: SplitRule;
     prefix: string;
     index: number;
-}
+};
 
 type RuleRegexInfo = RuleRegex & { prefix: string; source: string };
 

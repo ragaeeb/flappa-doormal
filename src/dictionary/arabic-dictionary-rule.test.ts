@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { Page } from '@/types/index.js';
+import { buildRuleRegex } from '../segmentation/rule-regex.js';
+import { segmentPages } from '../segmentation/segmenter.js';
 import { createArabicDictionaryEntryRule } from './arabic-dictionary-rule.js';
-import { buildRuleRegex } from './rule-regex.js';
-import { segmentPages } from './segmenter.js';
 
 const getRegex = (rule: ReturnType<typeof createArabicDictionaryEntryRule>) => {
     return buildRuleRegex(rule).regex.source;

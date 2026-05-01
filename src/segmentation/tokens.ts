@@ -177,11 +177,6 @@ export const Token = {
  */
 export type TokenKey = keyof typeof Token;
 
-/**
- * Type representing valid token pattern names for `getTokenPattern()`.
- */
-export type TokenPatternName = keyof typeof TOKEN_PATTERNS;
-
 /** Wraps a token constant with a named capture: `{{token}}` → `{{token:name}}`. */
 export const withCapture = (token: string, name: string): string => {
     // Extract token name from {{token}} format
@@ -199,11 +194,21 @@ const COMPOSITE_TOKENS = {
     numbered: '{{raqms}} {{dash}} ',
 } as const satisfies Record<string, string>;
 
+type BaseTokenName = keyof typeof BASE_TOKENS;
+type CompositeTokenName = keyof typeof COMPOSITE_TOKENS;
+
+/**
+ * Type representing valid token pattern names for `getTokenPattern()`.
+ */
+export type TokenPatternName = BaseTokenName | CompositeTokenName;
+
 /** Expands composite tokens (e.g. `{{numbered}}`) to their underlying template form. */
 export const expandCompositeTokensInTemplate = (template: string) => {
     let out = template;
     for (let i = 0; i < 10; i++) {
-        const next = out.replace(/\{\{(\w+)\}\}/g, (m, tokenName: string) => COMPOSITE_TOKENS[tokenName] ?? m);
+        const next = out.replace(/\{\{(\w+)\}\}/g, (m, tokenName: string) =>
+            tokenName in COMPOSITE_TOKENS ? COMPOSITE_TOKENS[tokenName as CompositeTokenName] : m,
+        );
         if (next === out) {
             break;
         }
@@ -221,7 +226,13 @@ export const expandCompositeTokensInTemplate = (template: string) => {
  * @internal
  */
 const expandBaseTokens = (template: string) =>
-    template.replace(/\{\{(\w+)\}\}/g, (_, tokenName) => BASE_TOKENS[tokenName] ?? `{{${tokenName}}}`);
+    template.replace(/\{\{(\w+)\}\}/g, (_, tokenName) =>
+        tokenName in BASE_TOKENS ? BASE_TOKENS[tokenName as BaseTokenName] : `{{${tokenName}}}`,
+    );
+
+const EXPANDED_COMPOSITE_TOKENS = Object.fromEntries(
+    Object.entries(COMPOSITE_TOKENS).map(([key, value]) => [key, expandBaseTokens(value)]),
+) as Record<CompositeTokenName, string>;
 
 /**
  * Token definitions mapping human-readable token names to regex patterns.
@@ -251,8 +262,8 @@ const expandBaseTokens = (template: string) =>
 export const TOKEN_PATTERNS = {
     ...BASE_TOKENS,
     // Pre-expand composite tokens at module load time
-    ...Object.fromEntries(Object.entries(COMPOSITE_TOKENS).map(([k, v]) => [k, expandBaseTokens(v)])),
-} as const satisfies Record<string, string>;
+    ...EXPANDED_COMPOSITE_TOKENS,
+} as const satisfies Record<TokenPatternName, string>;
 
 /**
  * Regex pattern for matching tokens with optional named capture syntax.
@@ -399,10 +410,11 @@ const expandTokenLiteral = (
         return `(?<${opts.registerCapture(captureName)}>.+)`;
     }
 
-    let tokenPattern = TOKEN_PATTERNS[tokenName];
-    if (!tokenPattern) {
+    if (!(tokenName in TOKEN_PATTERNS)) {
         return literal;
     }
+
+    let tokenPattern = TOKEN_PATTERNS[tokenName as TokenPatternName];
 
     tokenPattern = maybeApplyFuzzyToTokenPattern(tokenPattern, opts.fuzzyTransform);
     if (captureName) {
@@ -645,6 +657,10 @@ export const applyTokenMappings = (template: string, mappings: TokenMapping[]): 
  * // → '{{raqms}} {{dash}}'
  */
 export const stripTokenMappings = (template: string) => {
-    // Match {{token:name}} and replace with {{token}}
-    return template.replace(/\{\{([^:}]+):[^}]+\}\}/g, '{{$1}}');
+    // Match {{token:name}} and replace with {{token}}.
+    // Capture-only syntax {{:name}} intentionally collapses to {{}}.
+    return template.replace(
+        /\{\{([^:}]*)?:[^}]+\}\}/g,
+        (_match, tokenName: string | undefined) => `{{${tokenName ?? ''}}}`,
+    );
 };

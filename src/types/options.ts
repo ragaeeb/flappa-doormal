@@ -1,4 +1,5 @@
 import type { Breakpoint } from './breakpoints.js';
+import type { ArabicDictionaryProfile } from './dictionary.js';
 import type { PageRangeConstraint } from './index.js';
 import type { SplitRule } from './rules.js';
 
@@ -135,7 +136,7 @@ export type PreprocessTransform =
  *   error: (msg, ...args) => myLoggingService.error(msg, args),
  * };
  */
-export interface Logger {
+export type Logger = {
     /** Log a debug message (verbose debugging output) */
     debug?: (message: string, ...args: unknown[]) => void;
     /** Log an error message (critical failures) */
@@ -146,7 +147,7 @@ export interface Logger {
     trace?: (message: string, ...args: unknown[]) => void;
     /** Log a warning message (potential issues) */
     warn?: (message: string, ...args: unknown[]) => void;
-}
+};
 
 /**
  * Segmentation options controlling how pages are split.
@@ -181,6 +182,14 @@ export interface Logger {
  * };
  */
 export type SegmentationOptions = {
+    /**
+     * Dictionary profile for Shamela-style Arabic dictionaries.
+     *
+     * This authoring contract is compiled into internal matchers and merged
+     * with any regular `rules`.
+     */
+    dictionary?: ArabicDictionaryProfile;
+
     /**
      * Rules applied in order to find split points.
      *

@@ -7,7 +7,7 @@
 
 import type { SplitRule } from '@/types/rules.js';
 import { escapeTemplateBrackets, makeDiacriticInsensitive } from '@/utils/textUtils.js';
-import { buildArabicDictionaryEntryRegexSource } from './arabic-dictionary-rule.js';
+import { buildArabicDictionaryEntryRegexSource } from '../dictionary/arabic-dictionary-rule.js';
 import { expandTokensWithCaptures, shouldDefaultToFuzzy } from './tokens.js';
 
 /**
@@ -34,10 +34,10 @@ export type RuleRegex = {
     usesLineStartsAfter: boolean;
 };
 
-interface RuleRegexSource {
+type RuleRegexSource = {
     captureNames: string[];
     regex: string;
-}
+};
 
 /**
  * Checks if a regex pattern contains standard (anonymous) capturing groups.

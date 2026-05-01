@@ -349,12 +349,88 @@ const segments = segmentPages(pages, {
 If the previous page ends with strong sentence punctuation (`.`, `!`, `?`, `؟`, `؛`),
 the stoplist guard is skipped and the page-start match is allowed.
 
-#### Arabic Dictionary Helper
+#### Preferred Dictionary Profile
 
-Use `createArabicDictionaryEntryRule()` to build a conservative rule for Arabic
-dictionaries with lemma capture, stopword filtering, and page-wrap protection.
-The helper now returns a serializable native `dictionaryEntry` rule rather than
-an eagerly-compiled regex blob:
+For new Shamela-style dictionary work, prefer the top-level `dictionary`
+profile over hand-built raw regexes or the older one-rule helper:
+
+```typescript
+import { segmentPages } from 'flappa-doormal';
+
+const segments = segmentPages(pages, {
+  breakpoints: ['{{tarqim}}'],
+  dictionary: {
+    version: 2,
+    zones: [{
+      name: 'main',
+      blockers: [
+        { appliesTo: ['lineEntry', 'inlineSubentry'], use: 'pageContinuation' },
+        { appliesTo: ['lineEntry', 'inlineSubentry'], use: 'intro' },
+        {
+          appliesTo: ['lineEntry', 'inlineSubentry'],
+          use: 'stopLemma',
+          words: ['ومعناه', 'ويقال', 'وقيل']
+        },
+      ],
+      families: [
+        { classes: ['chapter'], emit: 'chapter', use: 'heading' },
+        { emit: 'entry', use: 'lineEntry', wrappers: 'none' },
+        { emit: 'entry', prefixes: ['و'], stripPrefixesFromLemma: false, use: 'inlineSubentry' },
+      ],
+    }],
+  },
+  maxPages: 1,
+});
+```
+
+Why this is preferred:
+- serializable JSON authoring shape
+- profile-scoped blockers instead of giant regex blobs
+- zone support for books that change layout later
+- compatible with diagnostics tooling via `diagnoseDictionaryProfile()`
+- first-class validation via `validateDictionaryProfile()`
+
+The production dictionary implementation now lives under `src/dictionary/`
+inside the repo, separate from the generic segmentation internals.
+
+Dictionary runtime semantics:
+- `segmentPages()` is still the only entry point; dictionary profiles do not use
+  a separate API
+- dictionary split points are merged with ordinary `rules`
+- when a rule split and a dictionary split land at the same offset, metadata is
+  merged; if `debug` is enabled, `_flappa.rule` and `_flappa.dictionary` can
+  both appear on the same segment
+- for dictionary-only configs, content before the first detected entry/chapter
+  is preserved as a leading segment with no dictionary metadata
+
+#### Advanced: Single-Rule Arabic Dictionary Matching
+
+`createArabicDictionaryEntryRule()` and the native `dictionaryEntry` rule shape
+are still supported as the lower-level, advanced path for clients who want one
+Arabic dictionary-style matcher inside a broader `rules` pipeline.
+
+Use this path when:
+- you need exactly one conservative dictionary headword rule
+- you want to compose it with ordinary `SplitRule[]`
+- you do not need profile zones, per-family blockers, or full-book tuning
+
+Prefer the top-level `dictionary` profile when:
+- segmenting an entire dictionary book
+- persisting JSON config for a corpus
+- the book changes layout in different sections
+- you need diagnostics, blocker hit rates, or book-specific profile tuning
+
+Decision guide:
+
+| Use case | Preferred API |
+|----------|---------------|
+| One conservative lemma matcher inside a normal segmentation pipeline | `createArabicDictionaryEntryRule()` / `dictionaryEntry` |
+| Full-book dictionary segmentation with blockers, families, and zones | top-level `dictionary` |
+| Persisted JSON config for real books | top-level `dictionary` |
+| Advanced composition with other `SplitRule[]` rules | `createArabicDictionaryEntryRule()` / `dictionaryEntry` |
+
+The helper returns a serializable native `dictionaryEntry` rule rather than an
+eagerly-compiled regex blob:
 
 ```typescript
 import { createArabicDictionaryEntryRule, segmentPages } from 'flappa-doormal';
@@ -399,6 +475,188 @@ Behavior:
 - Can match parenthesized headwords like `(عنبر) :` when enabled
 - Can match comma-separated headword lists like `سبد، دبس:` when enabled
 - Can suppress same-page false positives like `جلّ وعزّ:` with `samePagePrevWordStoplist`
+
+Option notes:
+- `stopWords`
+  - exact lemma-level blockers for non-lexical heads like `وقيل` or `ويقال`
+  - use this for rejecting candidate headwords themselves
+- `pageStartPrevWordStoplist`
+  - blocks a page-start candidate when the previous page ends with one of these
+    words
+  - useful for page-wrap false positives after citation/introduction prose
+- `samePagePrevWordStoplist`
+  - blocks a same-page candidate when the previous local word matches
+  - useful for phrases like `جلّ وعزّ`
+- `allowParenthesized`
+  - enables heads like `(عنبر):`
+- `allowWhitespaceBeforeColon`
+  - enables spacing variants like `عنبر :`
+- `allowCommaSeparated`
+  - enables grouped heads like `سبد، دبس:`
+- `midLineSubentries`
+  - when `true`, allows conservative same-line subentries such as `والعزاء:`
+  - when `false`, only line-start/page-start heads are emitted
+
+Serialization tradeoff:
+- `dictionaryEntry` is serializable and safe to keep in JSON
+- but it is still a single-rule primitive
+- if you need corpus-wide blocker tuning, families, or zones, move up to the
+  top-level `dictionary` profile
+
+Example: compose with chapter rules
+
+```typescript
+import { createArabicDictionaryEntryRule, segmentPages } from 'flappa-doormal';
+
+const segments = segmentPages(pages, {
+  rules: [
+    { lineStartsAfter: ['## '], meta: { type: 'chapter' } },
+    {
+      fuzzy: true,
+      lineStartsAfter: ['{{bab}} '],
+      meta: { type: 'chapter' },
+    },
+    createArabicDictionaryEntryRule({
+      stopWords: ['وقيل', 'ويقال', 'قال'],
+      pageStartPrevWordStoplist: ['قال', 'وقيل', 'ويقال'],
+      samePagePrevWordStoplist: ['جل'],
+      allowCommaSeparated: true,
+    }),
+  ],
+  breakpoints: ['{{tarqim}}'],
+  maxPages: 1,
+});
+```
+
+Example: one-off advanced rule inside a non-dictionary pipeline
+
+```typescript
+import { createArabicDictionaryEntryRule, segmentPages } from 'flappa-doormal';
+
+const segments = segmentPages(pages, {
+  rules: [
+    { lineStartsWith: ['{{kitab}}'], meta: { type: 'book' } },
+    { lineStartsWith: ['{{bab}}'], meta: { type: 'chapter' } },
+    createArabicDictionaryEntryRule({
+      stopWords: ['وقيل', 'ويقال'],
+      midLineSubentries: false,
+      allowParenthesized: true,
+    }),
+  ],
+});
+```
+
+Use `createArabicDictionaryEntryRule()` or `dictionaryEntry` when you only need
+one conservative dictionary matcher and want it to behave like a normal
+`SplitRule`.
+
+For full-book dictionary profiling, diagnostics, and book-specific tuning,
+prefer the top-level `dictionary` contract above.
+
+#### Repo Fixture Book Options
+
+The repo keeps book-specific golden options for the four reference Shamela
+dictionaries as local test/support fixtures, not as part of the public package
+API.
+
+If you want standalone JSON copies of those fixture options for your own local
+workflow, export them on demand:
+
+```bash
+bun run dictionary:export-options
+bun run dictionary:export-options -- --out-dir /path/to/dictionary-options
+```
+
+By default this writes to `out/dictionary-options/`, which is not intended to
+be checked into the repo.
+
+#### Dictionary Diagnostics
+
+Use `diagnoseDictionaryProfile()` when tuning blockers and families for a
+dictionary profile:
+
+```typescript
+import { diagnoseDictionaryProfile } from 'flappa-doormal';
+
+const diagnostics = diagnoseDictionaryProfile(pages, profile, {
+  sampleLimit: 25,
+});
+
+console.log(diagnostics.blockerHits);
+console.log(diagnostics.rejectedLemmas.slice(0, 10));
+```
+
+Returned diagnostics include:
+- accepted vs rejected candidate counts
+- accepted counts by `kind`
+- accepted/rejected counts by family and zone
+- blocker hit counts (`intro`, `stopLemma`, `pageContinuation`, etc.)
+- top rejected lemmas
+- sampled accepted/rejected candidates for quick inspection
+
+Validate profiles before persisting them or shipping them to an editor/CI step:
+
+```typescript
+import { validateDictionaryProfile } from 'flappa-doormal';
+
+const issues = validateDictionaryProfile(profile);
+if (issues.length > 0) {
+  console.error(issues);
+}
+```
+
+Validation catches:
+- empty or duplicate zones
+- invalid gate shapes
+- empty blocker lists
+- inert heading families (for example, a heading family that emits `entry` but
+  never matches `entry` headings)
+
+The runtime throws `DictionaryProfileValidationError` if invalid profiles reach
+`segmentPages()` or `diagnoseDictionaryProfile()`.
+
+#### Dictionary Surface Analysis
+
+For corpus exploration and profile authoring, the library also exposes the
+heading/surface scanner used during the proposal phase:
+
+```typescript
+import {
+  analyzeDictionaryMarkdownPages,
+  classifyDictionaryHeading,
+  scanDictionaryMarkdownPage,
+} from 'flappa-doormal';
+
+const kind = classifyDictionaryHeading('## (خَ غ)');
+const pageMatches = scanDictionaryMarkdownPage(page);
+const report = analyzeDictionaryMarkdownPages(pages);
+```
+
+Use these for:
+- inspecting `convertContentToMarkdown()` output before profile authoring
+- spotting structural marker/code lines
+- building your own authoring tools around the same heading classifier
+
+These are analysis helpers, not a replacement for the full runtime.
+
+For full-book scans, use the bundled script:
+
+```bash
+bun run dictionary:scan -- --book 1687 --input /path/to/1687.json
+bun run dictionary:scan -- --book 7031 --books-dir /path/to/books --json
+bun run dictionary:scan -- --book 1687 --input /path/to/1687.json --out diagnostics/1687.txt
+```
+
+The scan script:
+- reads an explicit `--input` file or resolves `<books-dir>/<book>.json`
+- converts each page with `convertContentToMarkdown()`
+- applies `removeZeroWidth`
+- runs `diagnoseDictionaryProfile()` with the repo-local golden profile fixture
+  for that book
+
+The test suite does not require the full Shamela corpora. It uses extracted
+markdown fixtures under `testing/fixtures/dictionary-books/`, so moving your
+local `books/` directory will not break CI or the built-in tests.
 
 #### Dictionary Letter-Code Lines
 
@@ -566,11 +824,6 @@ const segments = segmentPages(pages, {
     info: (msg, data) => console.info(`[INFO] ${msg}`, data),
     warn: (msg, data) => console.warn(`[WARN] ${msg}`, data),
     error: (msg, data) => console.error(`[ERROR] ${msg}`, data),
-  logger: {
-    debug: (msg, data) => console.log(`[DEBUG] ${msg}`, data),
-    info: (msg, data) => console.info(`[INFO] ${msg}`, data),
-    warn: (msg, data) => console.warn(`[WARN] ${msg}`, data),
-    error: (msg, data) => console.error(`[ERROR] ${msg}`, data),
   }
 });
 
@@ -620,7 +873,35 @@ If a segment was created by a `breakpoint` pattern (e.g. because it exceeded `ma
 }
 ```
 
-**3. Safety Fallback Splits (`maxContentLength`)**
+**3. Dictionary-based Splits**
+If a segment was created by a dictionary profile:
+```json
+{
+  "meta": {
+    "_flappa": {
+      "dictionary": {
+        "family": "lineEntry"
+      }
+    }
+  }
+}
+```
+
+Heading-driven dictionary splits can also record the heading class:
+```json
+{
+  "meta": {
+    "_flappa": {
+      "dictionary": {
+        "family": "heading",
+        "headingClass": "chapter"
+      }
+    }
+  }
+}
+```
+
+**4. Safety Fallback Splits (`maxContentLength`)**
 If no rule or breakpoint matched and the library was forced to perform a safety fallback split:
 ```json
 {

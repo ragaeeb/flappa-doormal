@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { Page } from '@/types/index.js';
 import type { SplitRule } from '@/types/rules.js';
-import { createArabicDictionaryEntryRule } from './arabic-dictionary-rule.js';
+import { createArabicDictionaryEntryRule } from '../dictionary/arabic-dictionary-rule.js';
 import { FAST_PATH_THRESHOLD } from './breakpoint-constants';
 import { dedupeSplitPoints, ensureFallbackSegment, segmentPages } from './segmenter';
 import { getTokenPattern } from './tokens.js';

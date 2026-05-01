@@ -30,6 +30,12 @@ src/
 │   ├── breakpoints.ts          # Breakpoint types
 │   ├── options.ts              # SegmentationOptions and Logger
 │   └── segmenter.ts            # Internal segmenter types
+├── dictionary/                 # Dictionary-specific compiler, runtime, profiles, diagnostics
+│   ├── arabic-dictionary-rule.ts
+│   ├── heading-classifier.ts
+│   ├── profile.ts
+│   ├── profiles.ts
+│   └── runtime.ts
 ├── analysis/                   # Pattern discovery module
 │   ├── line-starts.ts          # analyzeCommonLineStarts (frequent line markers)
 │   ├── repeating-sequences.ts  # analyzeRepeatingSequences (N-grams)
@@ -55,6 +61,22 @@ src/
 ├── index.ts                    # Public barrel exports
 ├── detection.ts                # Pattern auto-detection (standalone)
 └── *.test.ts                   # Unit and integration tests (co-located)
+
+testing/
+├── exports.test.ts             # Public export contract test
+└── fixtures/
+    ├── README.md                     # Fixture purpose, source, and refresh workflow
+    ├── dictionary-book-options.ts   # Local golden options for the four reference dictionaries
+    ├── dictionary-books.ts          # Test fixture loader helpers
+    ├── dictionary-fixture-manifest.ts
+    └── dictionary-books/            # Extracted markdown pages used by integration tests
+
+scripts/
+├── analyze-dictionary-profile.ts    # Full-book diagnostics against an explicit input file/books dir
+├── export-dictionary-book-options.ts
+├── extract-dictionary-test-fixtures.ts
+├── generate-dictionary-html-previews.ts
+└── split-dictionary-csvs.ts
 
 ### Core Components
 
@@ -386,7 +408,8 @@ The original `segmentPages` had complexity 37 (max: 15). Extraction:
 
 - **Unit tests**: Each utility function has dedicated tests
 - **Integration tests**: Full pipeline tests in `src/segmentation/segmenter.test.ts`
-- **Real-world tests**: `src/segmentation/segmenter.bukhari.test.ts` uses actual hadith data
+- **Dictionary integration tests**: `src/dictionary/*.test.ts` use extracted markdown fixtures under `testing/fixtures/dictionary-books/`
+- **Optional corpus tooling**: full-book diagnostics/preview scripts can use external Shamela JSONs via `--input` or `--books-dir`, but the test suite does not require a local `books/` directory
 - **Style convention**: Prefer `it('should ...', () => { ... })` (Bun) for consistency across the suite
 - Run: `bun test`
 
@@ -395,7 +418,7 @@ The original `segmentPages` had complexity 37 (max: 15). Extraction:
 1. **TypeScript strict mode** - No `any` types
 2. **Biome linting** - Max complexity 15 per function (some exceptions exist)
 3. **JSDoc comments** - All exported functions documented
-4. **Test coverage** - 642 tests across 21 files
+4. **Test coverage** - keep coverage representative; do not rely on local corpora for CI
 
 ## Dependencies
 
@@ -417,14 +440,26 @@ bun test
 bun run build
 # Output: dist/index.mjs (~17 KB gzip ~5.7 KB)
 
-# Run performance test (generates 50K pages, measures segmentation speed/memory)
-bun run perf
+# Run performance tests
+bun run test:perf
+
+# Regenerate extracted dictionary test fixtures (requires external books dir if not using ./books)
+bun run dictionary:extract-fixtures -- --books-dir /path/to/books
+
+# Export built-in dictionary options (writes to out/dictionary-options by default)
+bun run dictionary:export-options
+
+# Scan a full book with a builtin dictionary profile
+bun run dictionary:scan -- --book 1687 --input /path/to/1687.json
+
+# Validate a dictionary profile shape in userland
+# (public API: validateDictionaryProfile(profile))
 
 # Format code
 bunx biome format --write .
 
 # Lint code
-bunx biome lint .
+bunx biome check .
 ```
 
 ## Lessons Learned
@@ -604,12 +639,6 @@ bunx biome lint .
 56. **Linting vs Checks**: `bunx biome check` is strict. Complexity limits (max 15/18) force you to decompose functions. If you receive a complexity error, extract the complex logic (e.g., switch cases, specific validation checks) into standalone helper functions.
 
 57. **Validation Hints Specificity**: Generic error hints like "Check segmenter.ts" are unhelpful. Provide specific file names and logical components (e.g., "Check maxPages windowing in breakpoint-processor.ts"). User-friendly validation reports guide debugging much faster than "Something is wrong".
-
-### Process Template (Multi-agent design review, TDD-first)
-
-If you want to repeat the “write a plan → get multiple AI critiques → synthesize → update plan → implement TDD-first” workflow, use:
-
-- `docs/ai-multi-agent-tdd-template.md`
 
 ### Architecture Insights
 
