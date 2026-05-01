@@ -1,9 +1,23 @@
 import { describe, expect, it } from 'bun:test';
 import type { Segment } from '@/types/index.js';
-import { applyBreakpoints, computeNextFromIdx, computeWindowEndIdx } from './breakpoint-processor.js';
+import {
+    applyBreakpoints,
+    computeNextFromIdx,
+    computeWindowEndIdx,
+    computeWindowEndPositionForIteration,
+    ensureProgressingBreakOffset,
+} from './breakpoint-processor.js';
 import type { NormalizedPage } from './breakpoint-utils.js';
 
 describe('breakpoint-processor', () => {
+    const createNormalizedPages = (pages: Array<{ id: number; content: string }>) => {
+        const map = new Map<number, NormalizedPage>();
+        pages.forEach((p, i) => {
+            map.set(p.id, { content: p.content, index: i, length: p.content.length });
+        });
+        return map;
+    };
+
     describe('computeWindowEndIdx', () => {
         it('should return currentFromIdx when window size is 0', () => {
             const pageIds = [1, 2, 3, 4, 5];
@@ -49,14 +63,6 @@ describe('breakpoint-processor', () => {
     });
 
     describe('computeNextFromIdx', () => {
-        const createNormalizedPages = (pages: Array<{ id: number; content: string }>) => {
-            const map = new Map<number, NormalizedPage>();
-            pages.forEach((p, i) => {
-                map.set(p.id, { content: p.content, index: i, length: p.content.length });
-            });
-            return map;
-        };
-
         it('should return actualEndIdx when remaining content is empty', () => {
             const pageIds = [1, 2, 3];
             const normalizedPages = createNormalizedPages([
@@ -112,6 +118,83 @@ describe('breakpoint-processor', () => {
             // So '  Page two' becomes 'Page two' which matches page 2 content
             const result = computeNextFromIdx('  Page two', 0, 2, pageIds, normalizedPages);
             expect(result).toBe(1);
+        });
+    });
+
+    describe('computeWindowEndPositionForIteration', () => {
+        it('should clamp maxPages=0 windows to the current page boundary', () => {
+            const fullContent = 'AAAAA BBBBB';
+            const remainingContent = fullContent.slice(2);
+            const pageIds = [1, 2];
+            const normalizedPages = createNormalizedPages([
+                { content: 'AAAAA', id: 1 },
+                { content: 'BBBBB', id: 2 },
+            ]);
+            const cumulativeOffsets = [0, 6, 11];
+            const boundaryPositions = [0, 6, 11];
+
+            const result = computeWindowEndPositionForIteration(
+                remainingContent,
+                2,
+                0,
+                0,
+                0,
+                1,
+                pageIds,
+                boundaryPositions,
+                normalizedPages,
+                cumulativeOffsets,
+                0,
+                undefined,
+            );
+
+            expect(result).toBe(4);
+        });
+
+        it('should still honor maxContentLength after clamping to the current page', () => {
+            const fullContent = 'AAAAA BBBBB';
+            const remainingContent = fullContent.slice(2);
+            const pageIds = [1, 2];
+            const normalizedPages = createNormalizedPages([
+                { content: 'AAAAA', id: 1 },
+                { content: 'BBBBB', id: 2 },
+            ]);
+            const cumulativeOffsets = [0, 6, 11];
+            const boundaryPositions = [0, 6, 11];
+
+            const result = computeWindowEndPositionForIteration(
+                remainingContent,
+                2,
+                0,
+                0,
+                0,
+                1,
+                pageIds,
+                boundaryPositions,
+                normalizedPages,
+                cumulativeOffsets,
+                0,
+                3,
+            );
+
+            expect(result).toBe(3);
+        });
+    });
+
+    describe('ensureProgressingBreakOffset', () => {
+        it('should preserve positive break offsets', () => {
+            const result = ensureProgressingBreakOffset(7, 'abcdefghi', 0, undefined);
+            expect(result).toBe(7);
+        });
+
+        it('should force at least one character of progress without a length cap', () => {
+            const result = ensureProgressingBreakOffset(0, 'abcdef', 12, undefined);
+            expect(result).toBe(1);
+        });
+
+        it('should cap forced progress to the remaining content length', () => {
+            const result = ensureProgressingBreakOffset(0, 'abc', 12, 10);
+            expect(result).toBe(3);
         });
     });
 
