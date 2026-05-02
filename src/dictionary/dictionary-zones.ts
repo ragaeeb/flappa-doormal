@@ -72,7 +72,7 @@ const pageMatchesAnyGate = (page: PageContext, gates: DictionaryGate[]) =>
         if (!trimmed.startsWith(HEADING_PREFIX)) {
             return false;
         }
-        const headingText = trimmed.replace(/^##\s+/u, '').trim();
+        const headingText = trimmed.slice(HEADING_PREFIX.length).trim();
         return gates.some((gate) => headingMatchesGate(headingText, gate));
     });
 

@@ -11,14 +11,11 @@ import type {
     NormalizedDictionaryZone,
 } from '@/types/dictionary.js';
 import { normalizeArabicForComparison } from '@/utils/textUtils.js';
+import { normalizeStopLemmaWord } from './constants.js';
 
 const normalizedProfileCache = new WeakMap<ArabicDictionaryProfile, NormalizedArabicDictionaryProfile>();
-
-const normalizeStopLemmaWord = (word: string) =>
-    normalizeArabicForComparison(word)
-        .replace(/^[\s:؛،,.!?؟()[\]{}«»"'“”‘’]+/gu, '')
-        .replace(/[\s:؛،,.!?؟()[\]{}«»"'“”‘’]+$/gu, '')
-        .trim();
+const PREVIOUS_WORD_SCOPES = ['samePage', 'pageStart', 'any'] as const;
+const BLOCKER_PRECISIONS = ['high', 'aggressive'] as const;
 
 const uniqueNormalizedSet = (values: string[], normalize: (value: string) => string): ReadonlySet<string> =>
     new Set(values.map(normalize).filter(Boolean));
@@ -80,6 +77,7 @@ const normalizeBlocker = (blocker: DictionaryBlocker): NormalizedDictionaryBlock
             return {
                 ...blocker,
                 normalizedWords: uniqueNormalizedSet(blocker.words, normalizeArabicForComparison),
+                scope: blocker.scope ?? 'samePage',
             };
         case 'previousChar':
             return {
@@ -87,8 +85,12 @@ const normalizeBlocker = (blocker: DictionaryBlocker): NormalizedDictionaryBlock
                 charSet: new Set(blocker.chars),
             };
         case 'intro':
-        case 'pageContinuation':
             return blocker;
+        case 'pageContinuation':
+            return {
+                ...blocker,
+                authorityPrecision: blocker.authorityPrecision ?? 'high',
+            };
         default:
             return assertNever(blocker);
     }
@@ -118,6 +120,101 @@ const createIssue = (
     path,
     ...(zoneName ? { zoneName } : {}),
 });
+
+const hasBlankString = (values: string[]) => values.length === 0 || values.some((value) => !value.trim());
+
+const pushBlockerIssue = (
+    issues: DictionaryProfileValidationIssue[],
+    code: DictionaryProfileValidationIssue['code'],
+    path: string,
+    message: string,
+    zoneName: string,
+) => {
+    issues.push(createIssue(code, path, message, zoneName));
+};
+
+const validateAuthorityPrecision = (
+    issues: DictionaryProfileValidationIssue[],
+    blockerPath: string,
+    zoneName: string,
+    code: 'invalid_authority_intro_precision' | 'invalid_continuation_precision',
+    fieldName: 'precision' | 'authorityPrecision',
+    value: string | undefined,
+    blockerUse: 'authorityIntro' | 'pageContinuation',
+) => {
+    if (value === undefined || BLOCKER_PRECISIONS.includes(value as (typeof BLOCKER_PRECISIONS)[number])) {
+        return;
+    }
+
+    pushBlockerIssue(
+        issues,
+        code,
+        `${blockerPath}.${fieldName}`,
+        `${blockerUse} blocker in zone "${zoneName}" must use ${fieldName} "high" or "aggressive"`,
+        zoneName,
+    );
+};
+
+const validatePreviousWordBlocker = (
+    blocker: Extract<DictionaryBlocker, { use: 'previousWord' }>,
+    blockerPath: string,
+    zoneName: string,
+    issues: DictionaryProfileValidationIssue[],
+) => {
+    if (hasBlankString(blocker.words)) {
+        pushBlockerIssue(
+            issues,
+            'invalid_previous_words',
+            `${blockerPath}.words`,
+            `previousWord blocker in zone "${zoneName}" must include non-empty words`,
+            zoneName,
+        );
+    }
+
+    if (blocker.scope !== undefined && !PREVIOUS_WORD_SCOPES.includes(blocker.scope)) {
+        pushBlockerIssue(
+            issues,
+            'invalid_previous_word_scope',
+            `${blockerPath}.scope`,
+            `previousWord blocker in zone "${zoneName}" must use scope "samePage", "pageStart", or "any"`,
+            zoneName,
+        );
+    }
+};
+
+const validatePreviousCharBlocker = (
+    blocker: Extract<DictionaryBlocker, { use: 'previousChar' }>,
+    blockerPath: string,
+    zoneName: string,
+    issues: DictionaryProfileValidationIssue[],
+) => {
+    if (blocker.chars.length === 0 || blocker.chars.some((char) => !char)) {
+        pushBlockerIssue(
+            issues,
+            'invalid_previous_chars',
+            `${blockerPath}.chars`,
+            `previousChar blocker in zone "${zoneName}" must include chars`,
+            zoneName,
+        );
+    }
+};
+
+const validateStopLemmaBlocker = (
+    blocker: Extract<DictionaryBlocker, { use: 'stopLemma' }>,
+    blockerPath: string,
+    zoneName: string,
+    issues: DictionaryProfileValidationIssue[],
+) => {
+    if (hasBlankString(blocker.words)) {
+        pushBlockerIssue(
+            issues,
+            'invalid_stop_words',
+            `${blockerPath}.words`,
+            `stopLemma blocker in zone "${zoneName}" must include non-empty words`,
+            zoneName,
+        );
+    }
+};
 
 const validateGate = (
     gate: DictionaryGate,
@@ -247,45 +344,38 @@ const validateBlocker = (
 ) => {
     const blockerPath = `zones[].blockers[${blockerIndex}]`.replace('[]', `[${zone.name}]`);
     switch (blocker.use) {
+        case 'authorityIntro':
+            validateAuthorityPrecision(
+                issues,
+                blockerPath,
+                zone.name,
+                'invalid_authority_intro_precision',
+                'precision',
+                blocker.precision,
+                'authorityIntro',
+            );
+            break;
         case 'stopLemma':
-            if (blocker.words.length === 0 || blocker.words.some((word) => !word.trim())) {
-                issues.push(
-                    createIssue(
-                        'invalid_stop_words',
-                        `${blockerPath}.words`,
-                        `stopLemma blocker in zone "${zone.name}" must include non-empty words`,
-                        zone.name,
-                    ),
-                );
-            }
+            validateStopLemmaBlocker(blocker, blockerPath, zone.name, issues);
             break;
         case 'previousWord':
-            if (blocker.words.length === 0 || blocker.words.some((word) => !word.trim())) {
-                issues.push(
-                    createIssue(
-                        'invalid_previous_words',
-                        `${blockerPath}.words`,
-                        `previousWord blocker in zone "${zone.name}" must include non-empty words`,
-                        zone.name,
-                    ),
-                );
-            }
+            validatePreviousWordBlocker(blocker, blockerPath, zone.name, issues);
             break;
         case 'previousChar':
-            if (blocker.chars.length === 0 || blocker.chars.some((char) => !char)) {
-                issues.push(
-                    createIssue(
-                        'invalid_previous_chars',
-                        `${blockerPath}.chars`,
-                        `previousChar blocker in zone "${zone.name}" must include chars`,
-                        zone.name,
-                    ),
-                );
-            }
+            validatePreviousCharBlocker(blocker, blockerPath, zone.name, issues);
             break;
-        case 'authorityIntro':
         case 'intro':
+            break;
         case 'pageContinuation':
+            validateAuthorityPrecision(
+                issues,
+                blockerPath,
+                zone.name,
+                'invalid_continuation_precision',
+                'authorityPrecision',
+                blocker.authorityPrecision,
+                'pageContinuation',
+            );
             break;
         default:
             assertNever(blocker);

@@ -42,7 +42,7 @@ export type DictionaryCandidate = {
 };
 
 const lineEntryRegexCache = new WeakMap<LineEntryFamily, RegExp>();
-const inlineSubentryRegexCache = new WeakMap<InlineSubentryFamily, RegExp>();
+const inlineSubentryRegexCache = new WeakMap<InlineSubentryFamily, { matchRegex: RegExp; stripPrefixRegex: RegExp }>();
 const pairedFormsRegexCache = new WeakMap<PairedFormsFamily, RegExp>();
 
 const STATUS_LINE_RE = new RegExp(
@@ -186,17 +186,21 @@ const collectInlineSubentryCandidates = (
     line: DictionaryLine,
     family: InlineSubentryFamily,
 ): DictionaryCandidate[] => {
-    const cached = inlineSubentryRegexCache.get(family);
-    const prefixes = family.prefixes.length > 0 ? family.prefixes.map(escapeRegex).join('|') : escapeRegex('و');
-    const regex =
-        cached ??
-        new RegExp(`(^|[\\s،؛,:.])(?<lemma>(?:${prefixes})${ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN})\\s*:`, 'gu');
+    let cached = inlineSubentryRegexCache.get(family);
     if (!cached) {
-        inlineSubentryRegexCache.set(family, regex);
+        const prefixes = family.prefixes.length > 0 ? family.prefixes.map(escapeRegex).join('|') : escapeRegex('و');
+        cached = {
+            matchRegex: new RegExp(
+                `(^|[\\s،؛,:.])(?<lemma>(?:${prefixes})${ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN})\\s*:`,
+                'gu',
+            ),
+            stripPrefixRegex: new RegExp(`^(?:${prefixes})`, 'u'),
+        };
+        inlineSubentryRegexCache.set(family, cached);
     }
     const candidates: DictionaryCandidate[] = [];
 
-    for (const match of line.text.matchAll(regex)) {
+    for (const match of line.text.matchAll(cached.matchRegex)) {
         if (!match.groups?.lemma || match.index === undefined) {
             continue;
         }
@@ -207,7 +211,7 @@ const collectInlineSubentryCandidates = (
         }
         const candidateStart = match.index + lemmaIndex;
         const lemma = family.stripPrefixesFromLemma
-            ? match.groups.lemma.replace(new RegExp(`^(?:${prefixes})`, 'u'), '')
+            ? match.groups.lemma.replace(cached.stripPrefixRegex, '')
             : match.groups.lemma;
 
         candidates.push({

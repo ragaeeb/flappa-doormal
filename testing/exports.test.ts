@@ -6,6 +6,7 @@ import type {
     ArabicDictionaryProfile,
     Breakpoint,
     BreakpointRule,
+    BreakpointSuggestion,
     // Analysis
     CommonLineStartPattern,
     // Options
@@ -48,21 +49,30 @@ import type {
     PatternProcessor,
     // Rules
     PatternTypeKey,
+    PreprocessDetections,
+    PreprocessSuggestion,
     PreprocessTransform,
     RemoveZeroWidthRule,
     RepeatingSequenceExample,
     RepeatingSequenceOptions,
     RepeatingSequencePattern,
+    RuleSuggestionConfidence,
+    RuleSuggestionSource,
     // Rule Validation (pattern-validator.ts)
     RuleValidationResult,
     // Segment Validation (types/index.ts)
     Segment,
+    SegmentationAdvisorMode,
+    SegmentationAdvisorOptions,
+    SegmentationEvaluation,
     SegmentationOptions,
+    SegmentationSuggestionReport,
     SegmentValidationIssue,
     SegmentValidationIssueSeverity,
     SegmentValidationIssueType,
     SegmentValidationReport,
     SplitRule,
+    SuggestedRule,
     TokenKey,
     TokenMapping,
     TokenPatternName,
@@ -79,6 +89,7 @@ describe('Build Exports Validation', () => {
         // Analysis
         expect(flappa.analyzeCommonLineStarts).toBeFunction();
         expect(flappa.analyzeRepeatingSequences).toBeFunction();
+        expect(flappa.suggestSegmentationOptions).toBeFunction();
 
         // Detection
         expect(flappa.analyzeTextForRule).toBeFunction();
@@ -149,11 +160,16 @@ describe('Build Exports Validation', () => {
         const _commonPattern: CommonLineStartPattern = typedEmpty();
         const _dictionaryProfile: ArabicDictionaryProfile = typedEmpty();
         const _arabicDictionaryRuleOptions: ArabicDictionaryEntryRuleOptions = typedEmpty();
+        const _breakpointSuggestion: BreakpointSuggestion = typedEmpty();
         const _lsOptions: LineStartAnalysisOptions = typedEmpty();
         const _lsExample: LineStartPatternExample = typedEmpty();
+        const _preprocessDetections: PreprocessDetections = typedEmpty();
+        const _preprocessSuggestion: PreprocessSuggestion = typedEmpty();
         const _rsExample: RepeatingSequenceExample = typedEmpty();
         const _rsOptions: RepeatingSequenceOptions = typedEmpty();
         const _rsPattern: RepeatingSequencePattern = typedEmpty();
+        const _ruleSuggestionConfidence: RuleSuggestionConfidence = typedEmpty();
+        const _ruleSuggestionSource: RuleSuggestionSource = typedEmpty();
 
         // Detection
         const _detected: DetectedPattern = typedEmpty();
@@ -205,6 +221,11 @@ describe('Build Exports Validation', () => {
         const _prConstraint: PageRangeConstraint = typedEmpty();
         const _prExclude: PageRangeConstraintWithExclude = typedEmpty();
         const _segment: Segment = typedEmpty();
+        const _segmentationAdvisorMode: SegmentationAdvisorMode = typedEmpty();
+        const _segmentationAdvisorOptions: SegmentationAdvisorOptions = typedEmpty();
+        const _segmentationEvaluation: SegmentationEvaluation = typedEmpty();
+        const _segmentationSuggestionReport: SegmentationSuggestionReport = typedEmpty();
+        const _suggestedRule: SuggestedRule = typedEmpty();
 
         // Options
         const _ceRule: CondenseEllipsisRule = typedEmpty();
@@ -224,11 +245,16 @@ describe('Build Exports Validation', () => {
             _commonPattern,
             _dictionaryProfile,
             _arabicDictionaryRuleOptions,
+            _breakpointSuggestion,
             _lsOptions,
             _lsExample,
+            _preprocessDetections,
+            _preprocessSuggestion,
             _rsExample,
             _rsOptions,
             _rsPattern,
+            _ruleSuggestionConfidence,
+            _ruleSuggestionSource,
             _detected,
             _dictionaryBlocker,
             _dictionaryDiagnosticReason,
@@ -270,6 +296,10 @@ describe('Build Exports Validation', () => {
             _prConstraint,
             _prExclude,
             _segment,
+            _segmentationAdvisorMode,
+            _segmentationAdvisorOptions,
+            _segmentationEvaluation,
+            _segmentationSuggestionReport,
             _ceRule,
             _dictionaryEntryPatternOptions,
             _ftwRule,
@@ -279,6 +309,7 @@ describe('Build Exports Validation', () => {
             _segOptions,
             _ptKey,
             _splitRule,
+            _suggestedRule,
         ]).toBeDefined();
     });
 });

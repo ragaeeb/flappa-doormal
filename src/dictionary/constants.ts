@@ -199,10 +199,10 @@ export const GATE_TOKEN_MAP = {
 
 export const GATE_DELIMITER_RE = /[\s:،؛()[\]{}\-–—]/u;
 
-const normalizeStopLemmaWord = (text: string): string =>
+export const normalizeStopLemmaWord = (text: string): string =>
     normalizeArabicForComparison(text)
-        .replace(/^[\s:؛،,.!?؟()[\]{}«»"'""'']+/gu, '')
-        .replace(/[\s:؛،,.!?؟()[\]{}«»"'""'']+$/gu, '')
+        .replace(/^[\s:؛،,.!?؟()[\]{}«»"'“”‘’]+/gu, '')
+        .replace(/[\s:؛،,.!?؟()[\]{}«»"'“”‘’]+$/gu, '')
         .trim();
 
 /** Pre-normalized intro phrases for startsWith / endsWith checks. */

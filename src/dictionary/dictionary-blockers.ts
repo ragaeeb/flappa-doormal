@@ -3,7 +3,8 @@
  *
  * Each `rejectsVia*` function encapsulates a single blocker type.
  * `getCandidateRejection` is the orchestrating entry point used by both
- * `collectDictionarySplitPoints` and `diagnoseDictionaryProfile`.
+ * `collectDictionarySplitPoints` and `diagnoseDictionaryProfile`, including
+ * the non-configurable safety rejections reported via `rejectionReasons`.
  */
 
 import type {
@@ -27,6 +28,7 @@ import {
     NORMALIZED_STRUCTURAL_LEMMA_PREFIXES,
     NORMALIZED_STRUCTURAL_LINE_KEYWORDS,
     NORMALIZED_WLAL_PREFIX,
+    normalizeStopLemmaWord,
     STRONG_SENTENCE_TERMINATORS,
     STRUCTURAL_LINE_PATTERNS,
     TRAILING_PAGE_WRAP_NOISE,
@@ -39,13 +41,21 @@ export type RejectionResult = {
     reason: DictionaryDiagnosticReason;
 };
 
+/**
+ * Limit backwards scans to a small suffix; dictionary blockers only need the
+ * immediate local context rather than an unbounded full-page search.
+ */
+const LAST_ARABIC_WORD_LOOKBACK_CHARS = 256;
+const MAX_INTRO_CONTEXT_CHARS = 240;
+const IGNORABLE_BOUNDARY_CHAR_RE = /(?:\s|\u200B|\u200C|\u200D|\u200E|\u200F|\u061C)/u;
+
 const trimTrailingPageWrapNoise = (text: string) => text.trimEnd().replace(TRAILING_PAGE_WRAP_NOISE, '');
 
 export const endsWithStrongSentenceTerminator = (pageContent: string) =>
     STRONG_SENTENCE_TERMINATORS.test(trimTrailingPageWrapNoise(pageContent));
 
 const extractLastArabicWord = (text: string, endExclusive = text.length) => {
-    const windowStart = Math.max(0, endExclusive - 256);
+    const windowStart = Math.max(0, endExclusive - LAST_ARABIC_WORD_LOOKBACK_CHARS);
     const window = text.slice(windowStart, endExclusive);
     const withoutTrailingDelimiters = trimTrailingPageWrapNoise(window).replace(TRAILING_WORD_DELIMITERS, '');
     let lastMatch = '';
@@ -59,20 +69,26 @@ const extractLastArabicWord = (text: string, endExclusive = text.length) => {
 const previousNonWhitespaceChar = (text: string, endExclusive = text.length): string => {
     for (let index = endExclusive - 1; index >= 0; index--) {
         const char = text[index];
-        if (char && !/\s/u.test(char)) {
+        if (char && !IGNORABLE_BOUNDARY_CHAR_RE.test(char)) {
             return char;
         }
     }
     return '';
 };
 
-export const normalizeStopLemma = (text: string): string =>
-    normalizeArabicForComparison(text)
-        .replace(/^[\s:؛،,.!?؟()[\]{}«»"'""'']+/gu, '')
-        .replace(/[\s:؛،,.!?؟()[\]{}«»"'""'']+$/gu, '')
-        .trim();
+const isAtPageStart = (text: string, endExclusive: number): boolean => {
+    for (let index = endExclusive - 1; index >= 0; index--) {
+        const char = text[index];
+        if (char && !IGNORABLE_BOUNDARY_CHAR_RE.test(char)) {
+            return false;
+        }
+    }
+    return true;
+};
 
-const getTrailingContext = (text: string, endExclusive: number, maxChars = 240) =>
+export const normalizeStopLemma = normalizeStopLemmaWord;
+
+const getTrailingContext = (text: string, endExclusive: number, maxChars = MAX_INTRO_CONTEXT_CHARS) =>
     text.slice(Math.max(0, endExclusive - maxChars), endExclusive);
 
 const normalizeIntroContextText = (text: string): string =>
@@ -83,8 +99,7 @@ const normalizeIntroContextText = (text: string): string =>
         .trim();
 
 const normalizeForIntroTailCheck = (text: string): string =>
-    normalizeIntroContextText(text.trimEnd())
-        .trimEnd()
+    normalizeIntroContextText(text)
         .replace(/[:؛،,.!?؟]+$/u, '')
         .trimEnd();
 
@@ -218,23 +233,60 @@ const rejectsViaIntroBlocker = (
 const rejectsViaAuthorityBlocker = (candidate: DictionaryCandidate, blocker: NormalizedDictionaryBlocker) =>
     blocker.use === 'authorityIntro' && isAuthorityCandidate(candidate.probeText, blocker.precision);
 
-const rejectsViaStopLemmaBlocker = (candidate: DictionaryCandidate, blocker: NormalizedDictionaryBlocker) =>
-    blocker.use === 'stopLemma' &&
-    !!candidate.lemma &&
-    !!normalizeStopLemma(candidate.lemma) &&
-    blocker.normalizedWords.has(normalizeStopLemma(candidate.lemma));
+const rejectsViaStopLemmaBlocker = (candidate: DictionaryCandidate, blocker: NormalizedDictionaryBlocker) => {
+    if (blocker.use !== 'stopLemma' || !candidate.lemma) {
+        return false;
+    }
+
+    const normalizedLemma = normalizeStopLemma(candidate.lemma);
+    return !!normalizedLemma && blocker.normalizedWords.has(normalizedLemma);
+};
+
+const previousWordIsBlocked = (blocker: Extract<NormalizedDictionaryBlocker, { use: 'previousWord' }>, word: string) =>
+    !!word && blocker.normalizedWords.has(normalizeArabicForComparison(word));
+
+const rejectsViaPageStartPreviousWord = (
+    blocker: Extract<NormalizedDictionaryBlocker, { use: 'previousWord' }>,
+    pageIndex: number,
+    pages: PageContext[],
+) => {
+    if (pageIndex === 0) {
+        return false;
+    }
+
+    const previousPage = pages[pageIndex - 1];
+    if (!previousPage || endsWithStrongSentenceTerminator(previousPage.content)) {
+        return false;
+    }
+
+    return previousWordIsBlocked(blocker, extractLastArabicWord(previousPage.content));
+};
 
 const rejectsViaPreviousWordBlocker = (
     pageContent: string,
     localIndex: number,
     blocker: NormalizedDictionaryBlocker,
+    pageIndex: number,
+    pages: PageContext[],
 ) => {
     if (blocker.use !== 'previousWord') {
         return false;
     }
 
-    const lastWord = extractLastArabicWord(pageContent, localIndex);
-    return !!lastWord && blocker.normalizedWords.has(normalizeArabicForComparison(lastWord));
+    if (isAtPageStart(pageContent, localIndex)) {
+        if (blocker.scope === 'pageStart') {
+            return rejectsViaPageStartPreviousWord(blocker, pageIndex, pages);
+        }
+        if (blocker.scope === 'any' && rejectsViaPageStartPreviousWord(blocker, pageIndex, pages)) {
+            return true;
+        }
+    }
+
+    if (blocker.scope === 'pageStart') {
+        return false;
+    }
+
+    return previousWordIsBlocked(blocker, extractLastArabicWord(pageContent, localIndex));
 };
 
 const rejectsViaPreviousCharBlocker = (
@@ -253,7 +305,7 @@ const rejectsViaPreviousCharBlocker = (
 const rejectsViaPageContinuationBlocker = (
     candidate: DictionaryCandidate,
     blocker: NormalizedDictionaryBlocker,
-    localBeforeCandidate: string,
+    pageContent: string,
     pageIndex: number,
     pages: PageContext[],
 ) => {
@@ -261,7 +313,7 @@ const rejectsViaPageContinuationBlocker = (
         return false;
     }
 
-    const isPageStartCandidate = localBeforeCandidate.trim().length === 0;
+    const isPageStartCandidate = isAtPageStart(pageContent, candidate.localIndex);
     if (!isPageStartCandidate || pageIndex === 0) {
         return false;
     }
@@ -279,7 +331,7 @@ const rejectsViaPageContinuationBlocker = (
         previousWordBlocks ||
         endsWithIntroContext(previousPage.content) ||
         isIntroCandidate(candidate.probeText) ||
-        isAuthorityCandidate(candidate.probeText, 'high')
+        isAuthorityCandidate(candidate.probeText, blocker.authorityPrecision)
     );
 };
 
@@ -300,22 +352,31 @@ const getBlockerRejectionReason = (
     if (rejectsViaStopLemmaBlocker(candidate, blocker)) {
         return 'stopLemma';
     }
-    if (rejectsViaPreviousWordBlocker(pageContent, candidate.localIndex, blocker)) {
+    if (rejectsViaPreviousWordBlocker(pageContent, candidate.localIndex, blocker, pageIndex, pages)) {
         return 'previousWord';
     }
     if (rejectsViaPreviousCharBlocker(pageContent, candidate.localIndex, blocker)) {
         return 'previousChar';
     }
-    if (rejectsViaPageContinuationBlocker(candidate, blocker, localBeforeCandidate, pageIndex, pages)) {
+    if (rejectsViaPageContinuationBlocker(candidate, blocker, pageContent, pageIndex, pages)) {
         return 'pageContinuation';
     }
     return null;
 };
 
 /**
- * Evaluates all pre-blocker guards (qualifier tail, structural leak) and then
- * iterates the zone's blocker list, returning the first rejection reason found
- * or `null` if the candidate is accepted.
+ * Evaluates candidate rejection in two phases:
+ *
+ * Phase 1: global safety checks (not configurable per profile)
+ * - `qualifierTail`: rejects comma-tail qualifier fragments such as "أي" and "قال"
+ * - `structuralLeak`: rejects markdown artifacts, structural headings, and other non-lexeme leaks
+ *
+ * These are hard safety invariants for the Shamela-style dictionary surface,
+ * so diagnostics report them alongside configurable blocker reasons.
+ *
+ * Phase 2: zone blockers (configurable per zone)
+ * - iterates `zone.blockers` in declaration order
+ * - returns the first matching rejection reason
  */
 export const getCandidateRejection = (
     candidate: DictionaryCandidate,

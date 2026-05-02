@@ -84,23 +84,37 @@ const buildDiagnosticsPageMap = (pages: Page[], normalizedContents: string[]): P
         }
     }
 
+    const findBoundary = (off: number) => {
+        let lo = 0;
+        let hi = boundaries.length - 1;
+        while (lo <= hi) {
+            const mid = (lo + hi) >>> 1;
+            const boundary = boundaries[mid];
+            if (off < boundary.start) {
+                hi = mid - 1;
+                continue;
+            }
+            if (off > boundary.end) {
+                lo = mid + 1;
+                continue;
+            }
+            return boundary;
+        }
+        return boundaries.at(-1);
+    };
+
     return {
         boundaries,
-        getId: (off) => {
-            for (const boundary of boundaries) {
-                if (off >= boundary.start && off <= boundary.end) {
-                    return boundary.id;
-                }
-            }
-            return boundaries.at(-1)?.id ?? 0;
-        },
+        getId: (off) => findBoundary(off)?.id ?? 0,
         pageBreaks,
         pageIds: pages.map((page) => page.id),
     };
 };
 
 /**
- * Collects authoring diagnostics for a dictionary profile without creating segments.
+ * Collects tuning-oriented diagnostics for a dictionary profile without creating
+ * segments. This output is intended for profile authoring workflows rather than
+ * long-term compatibility guarantees.
  *
  * This is useful when tuning blockers and family choices for a new dictionary.
  */
@@ -117,7 +131,7 @@ export const diagnoseDictionaryProfile = (
 
     const sampleLimit = options.sampleLimit ?? 50;
     const acceptedKinds = createInitialKindCounts();
-    const blockerHits = createInitialReasonCounts();
+    const rejectionReasons = createInitialReasonCounts();
     const familyCounts = createInitialFamilyCounts();
     const zoneCounts: DictionaryProfileDiagnostics['zoneCounts'] = {};
     const rejectedLemmaCounts = new Map<string, number>();
@@ -152,7 +166,7 @@ export const diagnoseDictionaryProfile = (
 
                 if (rejection) {
                     rejectedCount += 1;
-                    blockerHits[rejection.reason] += 1;
+                    rejectionReasons[rejection.reason] += 1;
                     familyCounts[candidate.family as DictionaryFamilyUse].rejected += 1;
                     zoneCounts[zone.name]!.rejected += 1;
                     countLemma(rejectedLemmaCounts, candidate.lemma);
@@ -180,11 +194,11 @@ export const diagnoseDictionaryProfile = (
     return {
         acceptedCount,
         acceptedKinds,
-        blockerHits,
         familyCounts,
         pageCount: pages.length,
         rejectedCount,
         rejectedLemmas,
+        rejectionReasons,
         samples,
         zoneCounts,
     };

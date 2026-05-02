@@ -42,7 +42,10 @@ export type DictionaryProfileValidationIssueCode =
     | 'duplicate_activate_after_gate'
     | 'invalid_stop_words'
     | 'invalid_previous_words'
-    | 'invalid_previous_chars';
+    | 'invalid_previous_chars'
+    | 'invalid_previous_word_scope'
+    | 'invalid_authority_intro_precision'
+    | 'invalid_continuation_precision';
 
 export type DictionaryProfileValidationIssue = {
     code: DictionaryProfileValidationIssueCode;
@@ -97,6 +100,7 @@ export type DictionaryFamily =
 export type PageContinuationBlocker = {
     use: 'pageContinuation';
     appliesTo?: DictionaryFamily['use'][];
+    authorityPrecision?: 'high' | 'aggressive';
 };
 
 export type IntroBlocker = {
@@ -120,6 +124,7 @@ export type PreviousWordBlocker = {
     use: 'previousWord';
     appliesTo?: DictionaryFamily['use'][];
     words: string[];
+    scope?: 'samePage' | 'pageStart' | 'any';
 };
 
 export type PreviousCharBlocker = {
@@ -175,7 +180,7 @@ export type DictionaryProfileDiagnosticsOptions = {
 export type DictionaryProfileDiagnostics = {
     acceptedCount: number;
     acceptedKinds: Record<DictionarySegmentKind, number>;
-    blockerHits: Record<DictionaryDiagnosticReason, number>;
+    rejectionReasons: Record<DictionaryDiagnosticReason, number>;
     familyCounts: Record<DictionaryFamilyUse, { accepted: number; rejected: number }>;
     pageCount: number;
     rejectedCount: number;
@@ -220,12 +225,17 @@ export interface NormalizedAuthorityIntroBlocker extends AuthorityIntroBlocker {
     precision: 'high' | 'aggressive';
 }
 
+export interface NormalizedPageContinuationBlocker extends PageContinuationBlocker {
+    authorityPrecision: 'high' | 'aggressive';
+}
+
 export interface NormalizedStopLemmaBlocker extends StopLemmaBlocker {
     normalizedWords: ReadonlySet<string>;
 }
 
 export interface NormalizedPreviousWordBlocker extends PreviousWordBlocker {
     normalizedWords: ReadonlySet<string>;
+    scope: 'samePage' | 'pageStart' | 'any';
 }
 
 export interface NormalizedPreviousCharBlocker extends PreviousCharBlocker {
@@ -233,7 +243,7 @@ export interface NormalizedPreviousCharBlocker extends PreviousCharBlocker {
 }
 
 export type NormalizedDictionaryBlocker =
-    | PageContinuationBlocker
+    | NormalizedPageContinuationBlocker
     | IntroBlocker
     | NormalizedAuthorityIntroBlocker
     | NormalizedStopLemmaBlocker

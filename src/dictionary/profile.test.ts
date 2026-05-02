@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { ArabicDictionaryProfile } from '@/types/dictionary.js';
 import { DictionaryProfileValidationError, normalizeDictionaryProfile, validateDictionaryProfile } from './profile.js';
+import { PROFILE_1687, PROFILE_2553, PROFILE_7030, PROFILE_7031 } from './profiles.js';
 
 describe('dictionary profile normalization', () => {
     const minimalProfile = (): ArabicDictionaryProfile => ({
@@ -227,6 +228,112 @@ describe('dictionary profile normalization', () => {
                 ],
             }),
         ).toThrow('previousChar blocker in zone "main" must include chars');
+    });
+
+    it('defaults previousWord scope to samePage and pageContinuation authorityPrecision to high', () => {
+        const normalized = normalizeDictionaryProfile({
+            version: 2,
+            zones: [
+                {
+                    blockers: [{ use: 'previousWord', words: ['قال'] }, { use: 'pageContinuation' }],
+                    families: [{ emit: 'entry', use: 'lineEntry' }],
+                    name: 'main',
+                },
+            ],
+        });
+
+        expect(normalized.zones[0]?.blockers).toMatchObject([
+            { normalizedWords: expect.any(Set), scope: 'samePage', use: 'previousWord' },
+            { authorityPrecision: 'high', use: 'pageContinuation' },
+        ]);
+    });
+
+    it('preserves explicit previousWord scope and pageContinuation authorityPrecision values', () => {
+        const normalized = normalizeDictionaryProfile({
+            version: 2,
+            zones: [
+                {
+                    blockers: [
+                        { scope: 'pageStart', use: 'previousWord', words: ['قال'] },
+                        { authorityPrecision: 'aggressive', use: 'pageContinuation' },
+                    ],
+                    families: [{ emit: 'entry', use: 'lineEntry' }],
+                    name: 'main',
+                },
+            ],
+        });
+
+        expect(normalized.zones[0]?.blockers).toMatchObject([
+            { normalizedWords: expect.any(Set), scope: 'pageStart', use: 'previousWord' },
+            { authorityPrecision: 'aggressive', use: 'pageContinuation' },
+        ]);
+    });
+
+    it('returns validation issues for invalid previousWord scope values', () => {
+        const issues = validateDictionaryProfile({
+            version: 2,
+            zones: [
+                {
+                    blockers: [{ scope: 'everywhere' as never, use: 'previousWord', words: ['قال'] }],
+                    families: [{ emit: 'entry', use: 'lineEntry' }],
+                    name: 'main',
+                },
+            ],
+        });
+
+        expect(issues).toContainEqual(
+            expect.objectContaining({
+                code: 'invalid_previous_word_scope',
+                path: 'zones[main].blockers[0].scope',
+            }),
+        );
+    });
+
+    it('returns validation issues for invalid authorityIntro precision values', () => {
+        const issues = validateDictionaryProfile({
+            version: 2,
+            zones: [
+                {
+                    blockers: [{ precision: 'medium' as never, use: 'authorityIntro' }],
+                    families: [{ emit: 'entry', use: 'lineEntry' }],
+                    name: 'main',
+                },
+            ],
+        });
+
+        expect(issues).toContainEqual(
+            expect.objectContaining({
+                code: 'invalid_authority_intro_precision',
+                path: 'zones[main].blockers[0].precision',
+            }),
+        );
+    });
+
+    it('returns validation issues for invalid pageContinuation authorityPrecision values', () => {
+        const issues = validateDictionaryProfile({
+            version: 2,
+            zones: [
+                {
+                    blockers: [{ authorityPrecision: 'medium' as never, use: 'pageContinuation' }],
+                    families: [{ emit: 'entry', use: 'lineEntry' }],
+                    name: 'main',
+                },
+            ],
+        });
+
+        expect(issues).toContainEqual(
+            expect.objectContaining({
+                code: 'invalid_continuation_precision',
+                path: 'zones[main].blockers[0].authorityPrecision',
+            }),
+        );
+    });
+
+    it('normalizes all shipped profiles without validation errors', () => {
+        expect(() => normalizeDictionaryProfile(PROFILE_1687)).not.toThrow();
+        expect(() => normalizeDictionaryProfile(PROFILE_2553)).not.toThrow();
+        expect(() => normalizeDictionaryProfile(PROFILE_7030)).not.toThrow();
+        expect(() => normalizeDictionaryProfile(PROFILE_7031)).not.toThrow();
     });
 
     it('returns structured validation issues for invalid gates and inert heading families', () => {
