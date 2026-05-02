@@ -101,10 +101,40 @@ describe('validateSegments', () => {
             expect(report.ok).toBe(true);
         });
 
+        it('should report an explicit to-range mismatch when content ends on a later page', () => {
+            const spanningPages: Page[] = [
+                { content: 'He', id: 0 },
+                { content: 'llo', id: 1 },
+            ];
+            const segments: Segment[] = [{ content: 'He llo', from: 0, to: 0 }];
+
+            const report = validateSegments(spanningPages, { maxPages: undefined, rules: [] }, segments);
+
+            expect(report.ok).toBe(false);
+            const issue = report.issues.find((candidate) => candidate.type === 'max_pages_violation');
+            expect(issue).toBeDefined();
+            expect(issue?.actual).toEqual({ from: 0, to: 1 });
+            expect(issue?.expected).toEqual({ from: 0, to: 0 });
+            expect(issue?.evidence).toContain('ends on page 1 but segment.to is 0');
+        });
+
         it('should ignore maxPages check if segment.to is undefined', () => {
             const segments: Segment[] = [{ content: 'P0', from: 0 }];
             const report = validateSegments(pages, { maxPages: 0, rules: [] }, segments);
             expect(report.ok).toBe(true);
+        });
+
+        it('should report an implicit span violation when content crosses more pages than maxPages allows', () => {
+            const segments: Segment[] = [{ content: 'P0 P1 P2', from: 0 }];
+
+            const report = validateSegments(pages, { maxPages: 1, rules: [] }, segments);
+
+            expect(report.ok).toBe(false);
+            const issue = report.issues.find((candidate) => candidate.type === 'max_pages_violation');
+            expect(issue).toBeDefined();
+            expect(issue?.actual).toEqual({ from: 0, to: 2 });
+            expect(issue?.expected).toEqual({ from: 0, to: 1 });
+            expect(issue?.evidence).toContain('Segment spans 2 pages (maxPages=1)');
         });
     });
 

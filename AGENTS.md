@@ -32,6 +32,11 @@ src/
 │   └── segmenter.ts            # Internal segmenter types
 ├── dictionary/                 # Dictionary-specific compiler, runtime, profiles, diagnostics
 │   ├── arabic-dictionary-rule.ts
+│   ├── constants.ts
+│   ├── dictionary-blockers.ts
+│   ├── dictionary-candidates.ts
+│   ├── dictionary-diagnostics.ts
+│   ├── dictionary-zones.ts
 │   ├── heading-classifier.ts
 │   ├── profile.ts
 │   ├── profiles.ts
@@ -121,6 +126,24 @@ scripts/
     - `breakpoints.ts`: `Breakpoint` and `BreakpointRule` types
     - `options.ts`: Comprehensive `SegmentationOptions` and `Logger` definitions
     - `index.ts`: Public API types for consumers
+
+### Dictionary Blocker Notes
+
+- `previousWord.scope` defaults to `'samePage'` and only checks the same page's
+  preceding Arabic word unless you opt into cross-page behavior.
+- `previousWord.scope: 'pageStart'` only runs for page-start candidates and
+  compares against the previous page's last Arabic word, skipping the check when
+  the previous page ends with strong sentence punctuation.
+- `previousWord.scope: 'any'` combines the page-start cross-page check with the
+  usual same-page check for non-page-start candidates.
+- `pageContinuation.authorityPrecision` defaults to `'high'`; set it to
+  `'aggressive'` when page-start continuation blocking should treat
+  authority-like prefixes more conservatively.
+- `qualifierTail` and `structuralLeak` are intentionally non-configurable global
+  safety checks. They run before zone blockers and appear in diagnostics as
+  rejection reasons.
+- `diagnoseDictionaryProfile()` now reports `rejectionReasons` rather than
+  the former `blockerHits`.
 
 11. **`textUtils.ts`** - Low-level helpers (`src/utils/textUtils.ts`)
     - `makeDiacriticInsensitive()`: Arabic-aware regex generation

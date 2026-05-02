@@ -1,12 +1,22 @@
 export type {
+    BreakpointSuggestion,
     CommonLineStartPattern,
     LineStartAnalysisOptions,
     LineStartPatternExample,
+    PreprocessDetections,
+    PreprocessSuggestion,
     RepeatingSequenceExample,
     RepeatingSequenceOptions,
     RepeatingSequencePattern,
+    RuleSuggestionConfidence,
+    RuleSuggestionSource,
+    SegmentationAdvisorMode,
+    SegmentationAdvisorOptions,
+    SegmentationEvaluation,
+    SegmentationSuggestionReport,
+    SuggestedRule,
 } from './analysis/index.js';
-export { analyzeCommonLineStarts, analyzeRepeatingSequences } from './analysis/index.js';
+export { analyzeCommonLineStarts, analyzeRepeatingSequences, suggestSegmentationOptions } from './analysis/index.js';
 export type { DetectedPattern } from './detection.js';
 export {
     analyzeTextForRule,

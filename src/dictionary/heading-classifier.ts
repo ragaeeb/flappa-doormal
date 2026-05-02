@@ -59,6 +59,9 @@ const COLON_NOISE_RE = /^.+:\s*.+$/u;
 const CHAPTER_TERMS = ['باب', 'فصل', 'كتاب', 'حرف', 'أبواب'];
 const MARKER_PREFIXES = ['بسم الله', 'توكلت على الله', 'آخر كتاب', 'ويتلوه'];
 const NOISE_TOKENS = ['قال', 'وقيل', 'ويقال', 'وفي', 'يعني', 'فإذا'];
+const NORMALIZED_CHAPTER_TERMS = CHAPTER_TERMS.map(normalizeArabicForComparison);
+const NORMALIZED_MARKER_PREFIXES = MARKER_PREFIXES.map(normalizeArabicForComparison);
+const NORMALIZED_NOISE_TOKENS = NOISE_TOKENS.map(normalizeArabicForComparison);
 
 const emptyCounts = (): Record<DictionarySurfaceKind, number> => ({
     chapter: 0,
@@ -96,8 +99,7 @@ const isCodeHeading = (text: string): boolean => {
     return words.length === 1 && (words[0]?.length ?? 0) === 1;
 };
 
-const looksLikeNoiseHeading = (text: string): boolean => {
-    const normalized = normalizeArabicForComparison(text);
+const looksLikeNoiseHeading = (text: string, normalizedText: string): boolean => {
     const wordCount = text.trim().split(/\s+/u).filter(Boolean).length;
 
     if (/(?:مستعمل|مهمل|مستعملة|مستعملان)(?=$|[.،,:؛\s])/u.test(text)) {
@@ -108,7 +110,7 @@ const looksLikeNoiseHeading = (text: string): boolean => {
         return true;
     }
 
-    return NOISE_TOKENS.some((token) => normalized.includes(normalizeArabicForComparison(token))) && wordCount >= 4;
+    return NORMALIZED_NOISE_TOKENS.some((token) => normalizedText.includes(token)) && wordCount >= 4;
 };
 
 /**
@@ -117,6 +119,8 @@ const looksLikeNoiseHeading = (text: string): boolean => {
 export const classifyDictionaryHeading = (line: string): DictionaryHeadingScanClass => {
     const text = line.startsWith(HEADING_PREFIX) ? line.slice(HEADING_PREFIX.length).trim() : line.trim();
     const unwrapped = stripLeadingWrappers(text);
+    const normalizedText = normalizeArabicForComparison(text);
+    const normalizedUnwrapped = normalizeArabicForComparison(unwrapped);
 
     if (!text) {
         return 'noise';
@@ -124,14 +128,12 @@ export const classifyDictionaryHeading = (line: string): DictionaryHeadingScanCl
 
     if (
         CHAPTER_HEADING_RE.test(text) ||
-        CHAPTER_TERMS.some((term) =>
-            isDelimitedPrefixMatch(normalizeArabicForComparison(unwrapped), normalizeArabicForComparison(term)),
-        )
+        NORMALIZED_CHAPTER_TERMS.some((term) => isDelimitedPrefixMatch(normalizedUnwrapped, term))
     ) {
         return 'chapter';
     }
 
-    if (looksLikeNoiseHeading(text)) {
+    if (looksLikeNoiseHeading(text, normalizedText)) {
         return 'noise';
     }
 
@@ -139,11 +141,7 @@ export const classifyDictionaryHeading = (line: string): DictionaryHeadingScanCl
         return 'marker';
     }
 
-    if (
-        MARKER_PREFIXES.some((token) =>
-            normalizeArabicForComparison(unwrapped).startsWith(normalizeArabicForComparison(token)),
-        )
-    ) {
+    if (NORMALIZED_MARKER_PREFIXES.some((token) => normalizedUnwrapped.startsWith(token))) {
         return 'marker';
     }
 

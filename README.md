@@ -390,6 +390,18 @@ Why this is preferred:
 - compatible with diagnostics tooling via `diagnoseDictionaryProfile()`
 - first-class validation via `validateDictionaryProfile()`
 
+Blocker authoring notes:
+- `previousWord.scope` defaults to `'samePage'`
+- set `scope: 'pageStart'` to compare only against the previous page's last
+  Arabic word for page-start candidates
+- set `scope: 'any'` to combine the page-start cross-page check with the normal
+  same-page check
+- `pageContinuation.authorityPrecision` defaults to `'high'`; use
+  `'aggressive'` when page-start continuation filtering should treat
+  authority-like prefixes more conservatively
+- `qualifierTail` and `structuralLeak` are always-on global safety checks and
+  show up in diagnostics even though they are not zone-declared blockers
+
 The production dictionary implementation now lives under `src/dictionary/`
 inside the repo, separate from the generic segmentation internals.
 
@@ -418,7 +430,7 @@ Prefer the top-level `dictionary` profile when:
 - segmenting an entire dictionary book
 - persisting JSON config for a corpus
 - the book changes layout in different sections
-- you need diagnostics, blocker hit rates, or book-specific profile tuning
+- you need diagnostics, rejection-reason rates, or book-specific profile tuning
 
 Decision guide:
 
@@ -582,7 +594,7 @@ const diagnostics = diagnoseDictionaryProfile(pages, profile, {
   sampleLimit: 25,
 });
 
-console.log(diagnostics.blockerHits);
+console.log(diagnostics.rejectionReasons);
 console.log(diagnostics.rejectedLemmas.slice(0, 10));
 ```
 
@@ -590,9 +602,14 @@ Returned diagnostics include:
 - accepted vs rejected candidate counts
 - accepted counts by `kind`
 - accepted/rejected counts by family and zone
-- blocker hit counts (`intro`, `stopLemma`, `pageContinuation`, etc.)
+- rejection-reason counts (`intro`, `stopLemma`, `pageContinuation`,
+  `qualifierTail`, `structuralLeak`, etc.)
 - top rejected lemmas
 - sampled accepted/rejected candidates for quick inspection
+
+`diagnoseDictionaryProfile()` is primarily a tuning API for profile authoring,
+so consumers should treat its output shape as less stable than the segmentation
+API itself.
 
 Validate profiles before persisting them or shipping them to an editor/CI step:
 
@@ -1379,6 +1396,80 @@ const segments = segmentPages(pages, { rules });
 //   { content: 'حَدَّثَنِي مُحَمَّدٌ...', from: 2, meta: { type: 'hadith', num: '٦٦٩٨' } },
 // ]
 ```
+
+## Agent Advisor Workflow
+
+If you want an AI agent to start from raw pages and get to a draft configuration with less hand-written glue, use `suggestSegmentationOptions()`:
+
+```typescript
+import { suggestSegmentationOptions } from 'flappa-doormal';
+
+const report = suggestSegmentationOptions(pages, {
+  maxRules: 4,
+  topLineStarts: 12,
+  topRepeatingSequences: 8,
+});
+
+console.log(report.assessment);
+console.log(report.recommendedOptions);
+console.log(report.ruleSuggestions.slice(0, 5));
+```
+
+The report includes:
+
+- preprocess cleanup hints (`removeZeroWidth`, `condenseEllipsis`, `fixTrailingWaw`)
+- an assessment of whether the book looks `structured`, `continuous`, or `mixed`
+- draft `SplitRule[]` suggestions with examples and confidence
+- a ready-to-run `recommendedOptions` object
+- rule validation output
+- self-evaluation of the generated segmentation draft
+- optional breakpoint suggestions when the draft still produces very large segments
+
+For local JSON files, you can run the bundled script:
+
+```bash
+bun run segment:advise -- --input ./pages.json
+bun run segment:advise -- --input ./book.json --format markdown --out ./segmentation-report.md
+```
+
+Input can be either:
+
+- `Page[]`
+- `{ pages: Page[] }`
+
+## MCP Server
+
+The repo now includes a stdio MCP server wrapper for agent workflows:
+
+```bash
+bun run mcp:serve
+```
+
+When packaged, the server binary is:
+
+```bash
+flappa-doormal-mcp
+```
+
+Exposed MCP tools:
+
+- `inspect_book`
+  Input: `{ pages, advisorOptions? }`
+  Returns preprocess detections, line-start analysis, repeating sequences, and draft rule suggestions.
+- `suggest_segmentation_options`
+  Input: `{ pages, advisorOptions? }`
+  Returns the full advisor report, including `recommendedOptions`.
+- `preview_segmentation`
+  Input: `{ pages, options, sampleSegments? }`
+  Runs segmentation and returns segments, samples, and validation.
+- `validate_segmentation`
+  Input: `{ pages, options, segments }`
+  Validates caller-provided segments against the source book.
+- `score_candidate_options`
+  Input: `{ pages, candidates, sampleSegments? }`
+  Ranks multiple `SegmentationOptions` candidates using validation and segment-shape heuristics.
+
+All tool results are returned as JSON-friendly objects so agents can iterate without scraping prose output.
 
 ## Advanced: Metadata Extraction & Data Migration
 

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import type { Page } from '@/index.js';
 import { loadDictionaryFixturePages, loadDictionaryFixturePagesUpTo } from '../../testing/fixtures/dictionary-books.js';
+import { DICTIONARY_FIXTURE_PAGE_IDS } from '../../testing/fixtures/dictionary-fixture-manifest.js';
 import { segmentPages } from '../segmentation/segmenter.js';
 import { PROFILE_1687, PROFILE_2553, PROFILE_7030, PROFILE_7031 } from './profiles.js';
 
@@ -9,6 +11,33 @@ const loadBookPages = (filename: string, ids: number[]): Promise<Page[]> =>
 
 const loadBookPagesUpTo = (filename: string, maxId: number): Promise<Page[]> =>
     loadDictionaryFixturePagesUpTo(filename.replace('.json', '') as '1687' | '2553' | '7030' | '7031', maxId);
+
+const summarizeProfileRegression = (segments: ReturnType<typeof segmentPages>) => {
+    const counts = { chapter: 0, entry: 0, marker: 0, none: 0 };
+    for (const segment of segments) {
+        const kind = segment.meta?.kind ?? 'none';
+        counts[kind] += 1;
+    }
+
+    const uniqueEntryLemmas = [
+        ...new Set(
+            segments
+                .filter((segment) => segment.meta?.kind === 'entry')
+                .map((segment) => segment.meta?.lemma)
+                .filter(Boolean),
+        ),
+    ].sort();
+    const lemmaHash = createHash('sha256').update(uniqueEntryLemmas.join('\n')).digest('hex');
+
+    return {
+        counts,
+        first5: uniqueEntryLemmas.slice(0, 5),
+        last5: uniqueEntryLemmas.slice(-5),
+        lemmaHash,
+        segmentCount: segments.length,
+        uniqueLemmaCount: uniqueEntryLemmas.length,
+    };
+};
 
 describe('dictionary book profiles', () => {
     it('1687 profile does not treat early commentary as dictionary entries', async () => {
@@ -1137,5 +1166,70 @@ describe('dictionary book profiles', () => {
             .map((segment) => segment.meta?.lemma);
 
         expect(appendixEntries).toEqual(['الْوَاو', 'أَوَى']);
+    });
+
+    it('keeps the shipped profile outputs stable across the fixture corpus', async () => {
+        const cases = [
+            {
+                bookId: '1687' as const,
+                expected: {
+                    counts: { chapter: 31, entry: 1016, marker: 0, none: 100 },
+                    first5: ['أبق', 'أبل', 'أبن', 'أبي', 'أتأ'],
+                    last5: ['ووِتاراً', 'ويقرؤُون', 'ويَتَرَدَّد', 'وَالْمَجْهُودُ', 'يَأَسَ'],
+                    lemmaHash: '25277e3b261659947cb6c9ee676579f402a2f2ce91e6be665e269cd0796b33d3',
+                    segmentCount: 1147,
+                    uniqueLemmaCount: 925,
+                },
+                profile: PROFILE_1687,
+            },
+            {
+                bookId: '2553' as const,
+                expected: {
+                    counts: { chapter: 36, entry: 418, marker: 0, none: 67 },
+                    first5: ['آء', 'أرب', 'أرر', 'أسي', 'أيا'],
+                    last5: ['ومَرْحُوضٌ', 'ونُشْبة', 'وهاء', 'ويعكس', 'يلب'],
+                    lemmaHash: '75cceb52368e9386ec9076b39b84311650673c8f606fa29af3751b1bc2e4dcf4',
+                    segmentCount: 521,
+                    uniqueLemmaCount: 402,
+                },
+                profile: PROFILE_2553,
+            },
+            {
+                bookId: '7030' as const,
+                expected: {
+                    counts: { chapter: 6, entry: 105, marker: 0, none: 133 },
+                    first5: ['أبأ', 'أتأ', 'أنبجن', 'أنجذان', 'الدَّلْو'],
+                    last5: ['وفتْحِها', 'وكسَحَابَةٍ', 'وكَلٌّ', 'ومِنْبَرٍ', 'ويَمْؤُودَةٌ'],
+                    lemmaHash: '4b2a233f7fc43d31f37319b6449c9d4d061d0869defa8d70c6efe72be0586917',
+                    segmentCount: 244,
+                    uniqueLemmaCount: 102,
+                },
+                profile: PROFILE_7030,
+            },
+            {
+                bookId: '7031' as const,
+                expected: {
+                    counts: { chapter: 26, entry: 292, marker: 66, none: 124 },
+                    first5: ['أشل', 'أكي', 'ألق', 'أم', 'أول'],
+                    last5: ['وَسن', 'وَقل', 'وَمثل', 'يين', 'يُزَهَّد'],
+                    lemmaHash: 'da3b4065d14bf014a0a6a7040f37291430d57b3e70443d751982f15f0e1a184f',
+                    segmentCount: 508,
+                    uniqueLemmaCount: 285,
+                },
+                profile: PROFILE_7031,
+            },
+        ];
+
+        for (const { bookId, expected, profile } of cases) {
+            const pages = await loadDictionaryFixturePages(bookId, [...DICTIONARY_FIXTURE_PAGE_IDS[bookId]]);
+            const segments = segmentPages(pages, {
+                breakpoints: ['{{tarqim}}'],
+                dictionary: profile,
+                maxPages: 1,
+                preprocess: ['removeZeroWidth'],
+            });
+
+            expect(summarizeProfileRegression(segments)).toEqual(expected);
+        }
     });
 });

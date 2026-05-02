@@ -10,7 +10,145 @@ const loadBookPage = (filename: string, id: number): Promise<Page> =>
 const loadBookPages = (filename: string, ids: number[]): Promise<Page[]> =>
     loadDictionaryFixturePages(filename.replace('.json', '') as '1687' | '2553' | '7030' | '7031', ids);
 
+const lineEntryProfile = (blockers: NonNullable<ArabicDictionaryProfile['zones'][number]['blockers']>) => ({
+    version: 2 as const,
+    zones: [
+        {
+            blockers,
+            families: [{ emit: 'entry', use: 'lineEntry', wrappers: 'none' as const }],
+            name: 'main',
+        },
+    ],
+});
+
+const entryLemmasFor = (pages: Page[], profile: ArabicDictionaryProfile) =>
+    segmentPages(pages, { dictionary: profile, maxPages: 1 })
+        .filter((segment) => segment.meta?.kind === 'entry')
+        .map((segment) => segment.meta?.lemma);
+
 describe('dictionary segmentation runtime', () => {
+    it('rejects mid-page candidates via previousWord scope=samePage', () => {
+        const pages: Page[] = [{ content: 'تمهيد.\nقال\nلع: جذر مرفوض.\nعك: جذر مقبول.', id: 1 }];
+        const profile = lineEntryProfile([{ scope: 'samePage', use: 'previousWord', words: ['قال'] }]);
+
+        expect(entryLemmasFor(pages, profile)).toEqual(['عك']);
+    });
+
+    it('does not cross the page boundary via previousWord scope=samePage', () => {
+        const pages: Page[] = [
+            { content: 'قال', id: 1 },
+            { content: 'لع: جذر مسموح.\nعك: جذر آخر.', id: 2 },
+        ];
+        const profile = lineEntryProfile([{ scope: 'samePage', use: 'previousWord', words: ['قال'] }]);
+
+        expect(entryLemmasFor(pages, profile)).toEqual(['لع', 'عك']);
+    });
+
+    it('rejects page-start candidates via previousWord scope=pageStart', () => {
+        const pages: Page[] = [
+            { content: 'قال', id: 1 },
+            { content: 'لع: جذر مرفوض.\nعك: جذر مقبول.', id: 2 },
+        ];
+        const profile = lineEntryProfile([{ scope: 'pageStart', use: 'previousWord', words: ['قال'] }]);
+
+        expect(entryLemmasFor(pages, profile)).toEqual(['عك']);
+    });
+
+    it('does not reject mid-page candidates via previousWord scope=pageStart', () => {
+        const pages: Page[] = [{ content: 'قال\nلع: جذر مقبول.\nعك: جذر آخر.', id: 1 }];
+        const profile = lineEntryProfile([{ scope: 'pageStart', use: 'previousWord', words: ['قال'] }]);
+
+        expect(entryLemmasFor(pages, profile)).toEqual(['لع', 'عك']);
+    });
+
+    it('skips pageStart previousWord rejection when the previous page ends with a strong sentence terminator', () => {
+        const pages: Page[] = [
+            { content: 'قال.', id: 1 },
+            { content: 'لع: جذر مقبول.\nعك: جذر آخر.', id: 2 },
+        ];
+        const profile = lineEntryProfile([{ scope: 'pageStart', use: 'previousWord', words: ['قال'] }]);
+
+        expect(entryLemmasFor(pages, profile)).toEqual(['لع', 'عك']);
+    });
+
+    it('skips pageStart previousWord rejection for the first page candidate', () => {
+        const pages: Page[] = [{ content: 'لع: جذر مقبول.\nعك: جذر آخر.', id: 1 }];
+        const profile = lineEntryProfile([{ scope: 'pageStart', use: 'previousWord', words: ['قال'] }]);
+
+        expect(entryLemmasFor(pages, profile)).toEqual(['لع', 'عك']);
+    });
+
+    it('rejects both page-start and mid-page candidates via previousWord scope=any', () => {
+        const pages: Page[] = [
+            { content: 'قال', id: 1 },
+            { content: 'لع: جذر مرفوض.\nقال\nعك: جذر مرفوض.\nبكأ: جذر مقبول.', id: 2 },
+        ];
+        const profile = lineEntryProfile([{ scope: 'any', use: 'previousWord', words: ['قال'] }]);
+
+        expect(entryLemmasFor(pages, profile)).toEqual(['بكأ']);
+    });
+
+    it('skips cross-page previousWord rejection via scope=any when the previous page ends with a strong sentence terminator', () => {
+        const pages: Page[] = [
+            { content: 'قال.', id: 1 },
+            { content: 'لع: جذر مقبول.\nقال\nعك: جذر مرفوض.\nبكأ: جذر مقبول.', id: 2 },
+        ];
+        const profile = lineEntryProfile([{ scope: 'any', use: 'previousWord', words: ['قال'] }]);
+
+        expect(entryLemmasFor(pages, profile)).toEqual(['لع', 'بكأ']);
+    });
+
+    it('treats zero-width prefix marks as page-start context for previousWord blockers', () => {
+        const pages: Page[] = [
+            { content: 'قال', id: 1 },
+            { content: '\u200Bلع: جذر مرفوض.\nعك: جذر مقبول.', id: 2 },
+        ];
+        const profile = lineEntryProfile([{ scope: 'pageStart', use: 'previousWord', words: ['قال'] }]);
+
+        expect(entryLemmasFor(pages, profile)).toEqual(['عك']);
+    });
+
+    it('rejects page-start continuation candidates with aggressive-only authority precision', () => {
+        const pages: Page[] = [
+            { content: 'شرح ممتد بلا فاصلة ختامية', id: 1 },
+            { content: 'الليثي: تتمة تفسيرية.\nعك: جذر مقبول.', id: 2 },
+        ];
+        const defaultProfile = lineEntryProfile([{ appliesTo: ['lineEntry'], use: 'pageContinuation' }]);
+        const aggressiveProfile = lineEntryProfile([
+            { appliesTo: ['lineEntry'], authorityPrecision: 'aggressive', use: 'pageContinuation' },
+        ]);
+
+        expect(entryLemmasFor(pages, defaultProfile)).toEqual(['الليثي', 'عك']);
+        expect(entryLemmasFor(pages, aggressiveProfile)).toEqual(['عك']);
+    });
+
+    it('reports previousWord scope=pageStart and aggressive pageContinuation rejections in diagnostics', () => {
+        const profile: ArabicDictionaryProfile = {
+            version: 2,
+            zones: [
+                {
+                    blockers: [
+                        { appliesTo: ['lineEntry'], scope: 'pageStart', use: 'previousWord', words: ['قال'] },
+                        { appliesTo: ['lineEntry'], authorityPrecision: 'aggressive', use: 'pageContinuation' },
+                    ],
+                    families: [{ emit: 'entry', use: 'lineEntry', wrappers: 'none' }],
+                    name: 'main',
+                },
+            ],
+        };
+        const pages: Page[] = [
+            { content: 'قال', id: 1 },
+            { content: 'لع: جذر مرفوض.\nعك: جذر مقبول.', id: 2 },
+            { content: 'شرح ممتد بلا فاصلة ختامية', id: 3 },
+            { content: 'الليثي: تتمة تفسيرية.\nبكأ: جذر مقبول.', id: 4 },
+        ];
+
+        const diagnostics = diagnoseDictionaryProfile(pages, profile, { sampleLimit: 10 });
+
+        expect(diagnostics.rejectionReasons.previousWord).toBe(1);
+        expect(diagnostics.rejectionReasons.pageContinuation).toBe(1);
+    });
+
     it('segments heading-driven pages with chapter and entry output kinds', async () => {
         const page = await loadBookPage('7030.json', 125);
         const profile: ArabicDictionaryProfile = {
@@ -355,6 +493,7 @@ describe('dictionary segmentation runtime', () => {
             zones: [
                 {
                     families: [
+                        { emit: 'entry', separator: 'comma', use: 'pairedForms' },
                         { classes: ['entry'], emit: 'entry', use: 'heading' },
                         { emit: 'entry', use: 'lineEntry', wrappers: 'none' },
                     ],
@@ -681,7 +820,7 @@ describe('dictionary segmentation runtime', () => {
         expect((segments[0]?.meta as any)?._flappa?.rule?.patternType).toBe('lineStartsWith');
     });
 
-    it('produces diagnostics with blocker hit counts and rejected lemmas', () => {
+    it('produces diagnostics with rejection reason counts and rejected lemmas', () => {
         const profile: ArabicDictionaryProfile = {
             version: 2,
             zones: [
@@ -709,8 +848,8 @@ describe('dictionary segmentation runtime', () => {
         expect(diagnostics.acceptedCount).toBe(1);
         expect(diagnostics.rejectedCount).toBe(2);
         expect(diagnostics.acceptedKinds.entry).toBe(1);
-        expect(diagnostics.blockerHits.stopLemma).toBe(1);
-        expect(diagnostics.blockerHits.intro).toBe(1);
+        expect(diagnostics.rejectionReasons.stopLemma).toBe(1);
+        expect(diagnostics.rejectionReasons.intro).toBe(1);
         expect(diagnostics.rejectedLemmas).toEqual([
             { count: 1, lemma: 'طاؤوس' },
             { count: 1, lemma: 'ومعناه' },
@@ -722,5 +861,32 @@ describe('dictionary segmentation runtime', () => {
                 line: expect.any(Number),
             }),
         );
+    });
+
+    it('includes qualifierTail and structuralLeak in rejectionReasons diagnostics', () => {
+        const profile: ArabicDictionaryProfile = {
+            version: 2,
+            zones: [
+                {
+                    families: [
+                        { emit: 'entry', separator: 'comma', use: 'pairedForms' },
+                        { classes: ['entry'], emit: 'entry', use: 'heading' },
+                        { emit: 'entry', use: 'lineEntry', wrappers: 'none' },
+                    ],
+                    name: 'main',
+                },
+            ],
+        };
+        const pages: Page[] = [
+            {
+                content: 'شناح، أي: طويل.\n## (المعجمة في المثناة الفوقية)\nعول: الأصل الصحيح.',
+                id: 1,
+            },
+        ];
+
+        const diagnostics = diagnoseDictionaryProfile(pages, profile, { sampleLimit: 10 });
+
+        expect(diagnostics.rejectionReasons.qualifierTail).toBeGreaterThan(0);
+        expect(diagnostics.rejectionReasons.structuralLeak).toBeGreaterThan(0);
     });
 });

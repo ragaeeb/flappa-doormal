@@ -164,8 +164,8 @@ const formatSummary = (book: string, diagnostics: ReturnType<typeof diagnoseDict
         lines.push(`  ${kind}: ${count}`);
     }
     lines.push('');
-    lines.push('blockerHits:');
-    for (const [reason, count] of Object.entries(diagnostics.blockerHits).sort(
+    lines.push('rejectionReasons:');
+    for (const [reason, count] of Object.entries(diagnostics.rejectionReasons).sort(
         (a, b) => b[1] - a[1] || a[0].localeCompare(b[0]),
     )) {
         if (count > 0) {
