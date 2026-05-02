@@ -12,35 +12,32 @@ import type {
     NormalizedDictionaryZone,
 } from '@/types/dictionary.js';
 import { normalizeArabicForComparison } from '../utils/textUtils.js';
-import type { DictionaryCandidate, DictionaryFamilyUse } from './dictionary-candidates.js';
 import {
     ARABIC_WORD_REGEX,
-    AUTHORITY_AGGRESSIVE_TERMS,
-    AUTHORITY_HEAD_WORDS,
     AUTHORITY_RE,
     BARE_CODE_LEMMA_RE,
-    CONTINUATION_PREV_WORDS,
     HEADING_PREFIX,
-    INTRO_PHRASES,
     INTRO_TAIL_PATTERNS,
-    INTRO_TAIL_PHRASES,
-    QUALIFIER_TAIL_PREFIXES,
+    NORMALIZED_AUTHORITY_AGGRESSIVE_TERMS,
+    NORMALIZED_AUTHORITY_HEAD_WORDS_SET,
+    NORMALIZED_CONTINUATION_PREV_WORDS_SET,
+    NORMALIZED_INTRO_PHRASES,
+    NORMALIZED_INTRO_TAIL_PHRASES,
+    NORMALIZED_QUALIFIER_TAIL_PREFIXES,
+    NORMALIZED_STRUCTURAL_LEMMA_PREFIXES,
+    NORMALIZED_STRUCTURAL_LINE_KEYWORDS,
+    NORMALIZED_WLAL_PREFIX,
     STRONG_SENTENCE_TERMINATORS,
-    STRUCTURAL_LEMMA_PREFIXES,
-    STRUCTURAL_LINE_KEYWORDS,
     STRUCTURAL_LINE_PATTERNS,
     TRAILING_PAGE_WRAP_NOISE,
     TRAILING_WORD_DELIMITERS,
-} from './dictionary-constants.js';
+} from './constants.js';
+import type { DictionaryCandidate, DictionaryFamilyUse } from './dictionary-candidates.js';
 import type { PageContext } from './dictionary-zones.js';
 
 export type RejectionResult = {
     reason: DictionaryDiagnosticReason;
 };
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Text helpers (private to this module)
-// ──────────────────────────────────────────────────────────────────────────────
 
 const trimTrailingPageWrapNoise = (text: string) => text.trimEnd().replace(TRAILING_PAGE_WRAP_NOISE, '');
 
@@ -69,12 +66,6 @@ const previousNonWhitespaceChar = (text: string, endExclusive = text.length): st
     return '';
 };
 
-const normalizedEquals = (left: string, right: string): boolean =>
-    normalizeArabicForComparison(left) === normalizeArabicForComparison(right);
-
-const normalizedStartsWith = (text: string, prefix: string): boolean =>
-    normalizeArabicForComparison(text).startsWith(normalizeArabicForComparison(prefix));
-
 export const normalizeStopLemma = (text: string): string =>
     normalizeArabicForComparison(text)
         .replace(/^[\s:؛،,.!?؟()[\]{}«»"'""'']+/gu, '')
@@ -97,25 +88,9 @@ const normalizeForIntroTailCheck = (text: string): string =>
         .replace(/[:؛،,.!?؟]+$/u, '')
         .trimEnd();
 
-const startsWithConfiguredWord = (words: string[], candidate: string): boolean =>
-    words.some((word) => normalizedStartsWith(candidate, word));
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Blocker sub-checks
-// ──────────────────────────────────────────────────────────────────────────────
-
 const isIntroCandidate = (text: string) => {
     const normalized = normalizeIntroContextText(text);
-    return INTRO_PHRASES.some((phrase) => normalized.startsWith(normalizeArabicForComparison(phrase)));
-};
-
-const endsWithIntroPhrase = (text: string) => {
-    const trimmed = text.trimEnd();
-    if (STRONG_SENTENCE_TERMINATORS.test(trimmed)) {
-        return false;
-    }
-    const normalized = normalizeForIntroTailCheck(trimmed);
-    return INTRO_PHRASES.some((phrase) => normalized.endsWith(normalizeArabicForComparison(phrase)));
+    return NORMALIZED_INTRO_PHRASES.some((phrase) => normalized.startsWith(phrase));
 };
 
 const endsWithIntroContext = (text: string) => {
@@ -128,11 +103,11 @@ const endsWithIntroContext = (text: string) => {
         return false;
     }
 
-    if (INTRO_PHRASES.some((phrase) => normalized.endsWith(normalizeArabicForComparison(phrase)))) {
+    if (NORMALIZED_INTRO_PHRASES.some((phrase) => normalized.endsWith(phrase))) {
         return true;
     }
 
-    if (INTRO_TAIL_PHRASES.some((phrase) => normalized.endsWith(normalizeArabicForComparison(phrase)))) {
+    if (NORMALIZED_INTRO_TAIL_PHRASES.some((phrase) => normalized.endsWith(phrase))) {
         return true;
     }
 
@@ -141,7 +116,7 @@ const endsWithIntroContext = (text: string) => {
 
 const isAuthorityCandidate = (text: string, precision: 'high' | 'aggressive') => {
     const head = normalizeStopLemma(text.split(':', 1)[0] ?? text);
-    if (head && AUTHORITY_HEAD_WORDS.some((term) => normalizeStopLemma(term) === head)) {
+    if (head && NORMALIZED_AUTHORITY_HEAD_WORDS_SET.has(head)) {
         return true;
     }
 
@@ -151,7 +126,7 @@ const isAuthorityCandidate = (text: string, precision: 'high' | 'aggressive') =>
 
     if (precision === 'aggressive') {
         const normalized = normalizeIntroContextText(text);
-        return AUTHORITY_AGGRESSIVE_TERMS.some((term) => normalized.startsWith(normalizeArabicForComparison(term)));
+        return NORMALIZED_AUTHORITY_AGGRESSIVE_TERMS.some((term) => normalized.startsWith(term));
     }
 
     return false;
@@ -166,8 +141,8 @@ const hasBlockedQualifierTail = (lemma: string): boolean => {
         return false;
     }
 
-    const tail = parts.slice(1).join(' ');
-    return startsWithConfiguredWord(QUALIFIER_TAIL_PREFIXES, tail);
+    const tail = normalizeArabicForComparison(parts.slice(1).join(' '));
+    return NORMALIZED_QUALIFIER_TAIL_PREFIXES.some((prefix) => tail.startsWith(prefix));
 };
 
 const looksLikeStructuralLeak = (candidate: DictionaryCandidate): boolean => {
@@ -202,11 +177,11 @@ const looksLikeStructuralLeak = (candidate: DictionaryCandidate): boolean => {
         return true;
     }
 
-    if (startsWithConfiguredWord(STRUCTURAL_LEMMA_PREFIXES, candidate.lemma)) {
+    if (NORMALIZED_STRUCTURAL_LEMMA_PREFIXES.some((prefix) => normalizedLemma.startsWith(prefix))) {
         return true;
     }
 
-    if (normalizedLemma.startsWith(normalizeArabicForComparison('ولل'))) {
+    if (normalizedLemma.startsWith(NORMALIZED_WLAL_PREFIX)) {
         return true;
     }
 
@@ -219,17 +194,11 @@ const looksLikeStructuralLeak = (candidate: DictionaryCandidate): boolean => {
 
     const normalizedText = normalizeArabicForComparison(structuralText);
     if (STRUCTURAL_LINE_PATTERNS.some((pattern) => pattern.test(structuralText))) {
-        return STRUCTURAL_LINE_KEYWORDS.some((keyword) =>
-            normalizedText.includes(normalizeArabicForComparison(keyword)),
-        );
+        return NORMALIZED_STRUCTURAL_LINE_KEYWORDS.some((keyword) => normalizedText.includes(keyword));
     }
 
     return false;
 };
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Blocker-specific rejection predicates
-// ──────────────────────────────────────────────────────────────────────────────
 
 const blockerApplies = (blocker: NormalizedDictionaryBlocker, family: DictionaryFamilyUse) =>
     !blocker.appliesTo || blocker.appliesTo.includes(family);
@@ -243,11 +212,7 @@ const rejectsViaIntroBlocker = (
         return false;
     }
 
-    return (
-        isIntroCandidate(candidate.probeText) ||
-        endsWithIntroPhrase(localBeforeCandidate) ||
-        endsWithIntroContext(localBeforeCandidate)
-    );
+    return isIntroCandidate(candidate.probeText) || endsWithIntroContext(localBeforeCandidate);
 };
 
 const rejectsViaAuthorityBlocker = (candidate: DictionaryCandidate, blocker: NormalizedDictionaryBlocker) =>
@@ -308,7 +273,7 @@ const rejectsViaPageContinuationBlocker = (
 
     const previousWord = extractLastArabicWord(previousPage.content);
     const previousWordBlocks =
-        !!previousWord && CONTINUATION_PREV_WORDS.some((word) => normalizedEquals(word, previousWord));
+        !!previousWord && NORMALIZED_CONTINUATION_PREV_WORDS_SET.has(normalizeArabicForComparison(previousWord));
 
     return (
         previousWordBlocks ||
@@ -346,10 +311,6 @@ const getBlockerRejectionReason = (
     }
     return null;
 };
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Public API
-// ──────────────────────────────────────────────────────────────────────────────
 
 /**
  * Evaluates all pre-blocker guards (qualifier tail, structural leak) and then

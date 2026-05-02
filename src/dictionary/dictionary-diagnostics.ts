@@ -22,10 +22,6 @@ import { collectCandidatesForLine } from './dictionary-candidates.js';
 import { createPageContexts, createZoneActivationMap, resolveActiveZone } from './dictionary-zones.js';
 import { normalizeDictionaryProfile } from './profile.js';
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Diagnostic counter factories
-// ──────────────────────────────────────────────────────────────────────────────
-
 export const createInitialKindCounts = (): Record<DictionarySegmentKind, number> => ({
     chapter: 0,
     entry: 0,
@@ -102,10 +98,6 @@ const buildDiagnosticsPageMap = (pages: Page[], normalizedContents: string[]): P
         pageIds: pages.map((page) => page.id),
     };
 };
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Public API
-// ──────────────────────────────────────────────────────────────────────────────
 
 /**
  * Collects authoring diagnostics for a dictionary profile without creating segments.

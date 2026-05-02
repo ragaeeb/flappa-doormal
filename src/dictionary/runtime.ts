@@ -27,10 +27,6 @@ import { normalizeDictionaryProfile } from './profile.js';
 
 export { diagnoseDictionaryProfile } from './dictionary-diagnostics.js';
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Split point conversion
-// ──────────────────────────────────────────────────────────────────────────────
-
 const candidateToSplitPoint = (
     candidate: ReturnType<typeof collectCandidatesForLine>[number],
     debugMetaKey?: string,
@@ -52,10 +48,6 @@ const candidateToSplitPoint = (
         meta,
     };
 };
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Public API
-// ──────────────────────────────────────────────────────────────────────────────
 
 /**
  * Collects dictionary-profile split points using the pages-only markdown surface.

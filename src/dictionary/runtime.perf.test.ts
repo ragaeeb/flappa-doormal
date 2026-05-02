@@ -60,7 +60,7 @@ perfDescribe('Dictionary Runtime Performance', () => {
         const elapsed = performance.now() - start;
 
         expect(segments.length).toBeGreaterThan(PAGE_COUNT);
-        expect(elapsed).toBeLessThan(3500 * CI_MULTIPLIER);
+        expect(elapsed).toBeLessThan(1000 * CI_MULTIPLIER);
     });
 
     it('collects diagnostics without a large runtime cliff', () => {
@@ -71,6 +71,6 @@ perfDescribe('Dictionary Runtime Performance', () => {
         expect(diagnostics.acceptedCount).toBeGreaterThan(PAGE_COUNT);
         expect(diagnostics.rejectedCount).toBeGreaterThan(0);
         expect(diagnostics.samples.length).toBe(25);
-        expect(elapsed).toBeLessThan(2500 * CI_MULTIPLIER);
+        expect(elapsed).toBeLessThan(800 * CI_MULTIPLIER);
     });
 });

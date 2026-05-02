@@ -7,6 +7,7 @@
  */
 
 import { ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN, getTokenPattern } from '../segmentation/tokens.js';
+import { normalizeArabicForComparison } from '../utils/textUtils.js';
 
 export const INTRO_PHRASES = [
     'وقال',
@@ -197,3 +198,44 @@ export const GATE_TOKEN_MAP = {
 } as const;
 
 export const GATE_DELIMITER_RE = /[\s:،؛()[\]{}\-–—]/u;
+
+const normalizeStopLemmaWord = (text: string): string =>
+    normalizeArabicForComparison(text)
+        .replace(/^[\s:؛،,.!?؟()[\]{}«»"'""'']+/gu, '')
+        .replace(/[\s:؛،,.!?؟()[\]{}«»"'""'']+$/gu, '')
+        .trim();
+
+/** Pre-normalized intro phrases for startsWith / endsWith checks. */
+export const NORMALIZED_INTRO_PHRASES: readonly string[] = INTRO_PHRASES.map(normalizeArabicForComparison);
+
+/** Pre-normalized intro tail phrases for endsWith checks. */
+export const NORMALIZED_INTRO_TAIL_PHRASES: readonly string[] = INTRO_TAIL_PHRASES.map(normalizeArabicForComparison);
+
+/** Pre-normalized authority head words as a Set for O(1) lookup. */
+export const NORMALIZED_AUTHORITY_HEAD_WORDS_SET: ReadonlySet<string> = new Set(
+    AUTHORITY_HEAD_WORDS.map(normalizeStopLemmaWord),
+);
+
+/** Pre-normalized aggressive authority terms for startsWith checks. */
+export const NORMALIZED_AUTHORITY_AGGRESSIVE_TERMS: readonly string[] =
+    AUTHORITY_AGGRESSIVE_TERMS.map(normalizeArabicForComparison);
+
+/** Pre-normalized qualifier tail prefixes for startsWith checks. */
+export const NORMALIZED_QUALIFIER_TAIL_PREFIXES: readonly string[] =
+    QUALIFIER_TAIL_PREFIXES.map(normalizeArabicForComparison);
+
+/** Pre-normalized structural lemma prefixes for startsWith checks. */
+export const NORMALIZED_STRUCTURAL_LEMMA_PREFIXES: readonly string[] =
+    STRUCTURAL_LEMMA_PREFIXES.map(normalizeArabicForComparison);
+
+/** Pre-normalized structural line keywords for includes checks. */
+export const NORMALIZED_STRUCTURAL_LINE_KEYWORDS: readonly string[] =
+    STRUCTURAL_LINE_KEYWORDS.map(normalizeArabicForComparison);
+
+/** Pre-normalized continuation prev words as a Set for O(1) lookup. */
+export const NORMALIZED_CONTINUATION_PREV_WORDS_SET: ReadonlySet<string> = new Set(
+    CONTINUATION_PREV_WORDS.map(normalizeArabicForComparison),
+);
+
+/** Pre-normalized 'ولل' prefix. */
+export const NORMALIZED_WLAL_PREFIX: string = normalizeArabicForComparison('ولل');

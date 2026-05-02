@@ -11,7 +11,7 @@ import type {
 import type { Page } from '@/types/index.js';
 import type { PageMap } from '../types/segmenter.js';
 import { normalizeArabicForComparison, normalizeLineEndings } from '../utils/textUtils.js';
-import { GATE_DELIMITER_RE, GATE_TOKEN_MAP, HEADING_PREFIX } from './dictionary-constants.js';
+import { GATE_DELIMITER_RE, GATE_TOKEN_MAP, HEADING_PREFIX } from './constants.js';
 
 export type DictionaryLine = {
     lineNumber: number;

@@ -16,13 +16,9 @@ import type {
 } from '@/types/dictionary.js';
 import { ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN } from '../segmentation/tokens.js';
 import { escapeRegex } from '../utils/textUtils.js';
-import { CODE_LINE_PATTERN, HEADING_PREFIX, STATUS_TAIL_PATTERN } from './dictionary-constants.js';
+import { CODE_LINE_PATTERN, HEADING_PREFIX, STATUS_TAIL_PATTERN } from './constants.js';
 import type { DictionaryLine } from './dictionary-zones.js';
 import { classifyDictionaryHeading } from './heading-classifier.js';
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Types
-// ──────────────────────────────────────────────────────────────────────────────
 
 export type DictionaryFamilyUse = NormalizedDictionaryFamily['use'];
 
@@ -45,17 +41,9 @@ export type DictionaryCandidate = {
     text: string;
 };
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Regex caches (keyed by family object, reset when profile is re-normalized)
-// ──────────────────────────────────────────────────────────────────────────────
-
 const lineEntryRegexCache = new WeakMap<LineEntryFamily, RegExp>();
 const inlineSubentryRegexCache = new WeakMap<InlineSubentryFamily, RegExp>();
 const pairedFormsRegexCache = new WeakMap<PairedFormsFamily, RegExp>();
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Shared regex constants
-// ──────────────────────────────────────────────────────────────────────────────
 
 const STATUS_LINE_RE = new RegExp(
     `^(?:${CODE_LINE_PATTERN}|${ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN}(?:\\s*[،,]\\s*${ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN})+)\\s*:?[\\s]*${STATUS_TAIL_PATTERN}(?=$|[.،,:؛\\s])`,
@@ -64,10 +52,6 @@ const STATUS_LINE_RE = new RegExp(
 
 const CODE_CORE_RE = new RegExp(`^${CODE_LINE_PATTERN}$`, 'u');
 const STATUS_SUFFIX_RE = new RegExp(`(?:\\s*:?[\\s]*${STATUS_TAIL_PATTERN}.*)?$`, 'u');
-
-// ──────────────────────────────────────────────────────────────────────────────
-// LineEntry helpers
-// ──────────────────────────────────────────────────────────────────────────────
 
 const optionalSecondWord = (allowMultiWord: boolean) =>
     allowMultiWord ? `(?:\\s+${ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN})?` : '';
@@ -100,10 +84,6 @@ const createLineEntryRegex = (family: LineEntryFamily): RegExp => {
     return regex;
 };
 
-// ──────────────────────────────────────────────────────────────────────────────
-// CodeLine helpers
-// ──────────────────────────────────────────────────────────────────────────────
-
 const parseWrappedCode = (text: string) => {
     const paired = text.match(/^(?<open>[[(])(?<inner>.+)(?<close>[)\]])$/u);
     if (!paired?.groups?.inner || !paired.groups.open || !paired.groups.close) {
@@ -118,10 +98,6 @@ const parseWrappedCode = (text: string) => {
             (paired.groups.open === '[' && paired.groups.close === ']'),
     };
 };
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Family-specific candidate collectors
-// ──────────────────────────────────────────────────────────────────────────────
 
 const collectHeadingCandidates = (
     pageStartOffset: number,
@@ -326,17 +302,9 @@ const collectPairedFormsCandidates = (
     ] satisfies DictionaryCandidate[];
 };
 
-// ──────────────────────────────────────────────────────────────────────────────
-// assertNever guard
-// ──────────────────────────────────────────────────────────────────────────────
-
 const assertNever = (value: never): never => {
     throw new Error(`Unhandled dictionary candidate family: ${JSON.stringify(value)}`);
 };
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Public API
-// ──────────────────────────────────────────────────────────────────────────────
 
 const collectCandidatesForFamily = (
     pageStartOffset: number,
