@@ -51,6 +51,31 @@ describe('dictionary-zones', () => {
         expect(headingMatchesGate('فَصْل الهمزة', { token: 'fasl', use: 'headingToken' })).toBe(true);
     });
 
+    it('should keep pre-normalized headingText gate matches after profile normalization', () => {
+        const profile: ArabicDictionaryProfile = {
+            version: 2,
+            zones: [
+                {
+                    families: [{ classes: ['entry'], emit: 'entry', use: 'heading' }],
+                    name: 'main',
+                    when: {
+                        activateAfter: [{ fuzzy: true, match: ' بَاب ', use: 'headingText' }],
+                    },
+                },
+            ],
+        };
+
+        const [gate] = normalizeDictionaryProfile(profile).zones[0]?.when?.activateAfter ?? [];
+
+        expect(gate).toMatchObject({
+            fuzzy: true,
+            match: ' بَاب ',
+            normalizedMatch: 'باب',
+            trimmedMatch: 'بَاب',
+            use: 'headingText',
+        });
+    });
+
     it('should activate and resolve zones only within their page bounds', () => {
         const profile: ArabicDictionaryProfile = {
             version: 2,
@@ -92,10 +117,12 @@ describe('dictionary-zones', () => {
 
         const normalizedFromContent = createPageContexts(pages, pageMap);
         expect(normalizedFromContent[0]?.content).toBe('alpha\nbeta');
+        expect(Object.getOwnPropertyDescriptor(normalizedFromContent[0], 'lines')?.get).toBeFunction();
         expect(normalizedFromContent[0]?.lines).toEqual([
             { lineNumber: 1, start: 0, text: 'alpha' },
             { lineNumber: 2, start: 6, text: 'beta' },
         ]);
+        expect(normalizedFromContent[0]?.lines).toBe(normalizedFromContent[0]?.lines);
 
         const overridden = createPageContexts(pages, pageMap, ['normalized body']);
         expect(overridden[0]?.content).toBe('normalized body');

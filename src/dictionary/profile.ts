@@ -8,6 +8,7 @@ import type {
     NormalizedArabicDictionaryProfile,
     NormalizedDictionaryBlocker,
     NormalizedDictionaryFamily,
+    NormalizedDictionaryGate,
     NormalizedDictionaryZone,
 } from '@/types/dictionary.js';
 import { normalizeArabicForComparison } from '@/utils/textUtils.js';
@@ -96,13 +97,26 @@ const normalizeBlocker = (blocker: DictionaryBlocker): NormalizedDictionaryBlock
     }
 };
 
+const normalizeGate = (gate: DictionaryGate): NormalizedDictionaryGate => {
+    if (gate.use === 'headingToken') {
+        return gate;
+    }
+
+    const trimmedMatch = gate.match.trim();
+    return {
+        ...gate,
+        normalizedMatch: normalizeArabicForComparison(trimmedMatch),
+        trimmedMatch,
+    };
+};
+
 const normalizeZone = (zone: DictionaryZone): NormalizedDictionaryZone => ({
     blockers: (zone.blockers ?? []).map(normalizeBlocker),
     families: zone.families.map(normalizeFamily),
     name: zone.name,
     when: zone.when
         ? {
-              activateAfter: zone.when.activateAfter,
+              activateAfter: zone.when.activateAfter?.map(normalizeGate),
               maxPageId: zone.when.maxPageId,
               minPageId: zone.when.minPageId,
           }

@@ -37,6 +37,39 @@ describe('optimizeRules', () => {
             expect(result).toHaveLength(1);
         });
 
+        it('merges equivalent rules regardless of option and nested meta key order', () => {
+            const reversedNestedMeta = Object.fromEntries([
+                ['second', 2],
+                ['first', 1],
+            ]);
+            const reversedMeta = Object.fromEntries([
+                ['type', 'x'],
+                ['nested', reversedNestedMeta],
+            ]);
+            const reorderedRule = Object.assign(
+                {},
+                { split: 'at' },
+                { meta: reversedMeta },
+                { lineStartsWith: ['b'] },
+                { fuzzy: true },
+            ) as SplitRule;
+            const rules: SplitRule[] = [
+                {
+                    fuzzy: true,
+                    lineStartsWith: ['a'],
+                    meta: { nested: { first: 1, second: 2 }, type: 'x' },
+                    split: 'at',
+                },
+                reorderedRule,
+            ];
+
+            const { mergedCount, rules: result } = optimizeRules(rules);
+
+            expect(mergedCount).toBe(1);
+            expect(result).toHaveLength(1);
+            expect((result[0] as any).lineStartsWith).toEqual(['a', 'b']);
+        });
+
         it('does not merge when meta differs', () => {
             const rules: SplitRule[] = [
                 { lineStartsWith: ['a'], meta: { type: 'x' } },
