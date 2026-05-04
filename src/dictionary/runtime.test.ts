@@ -122,6 +122,27 @@ describe('dictionary segmentation runtime', () => {
         expect(entryLemmasFor(pages, aggressiveProfile)).toEqual(['عك']);
     });
 
+    it('blocks harakat-rich authority intros with high precision', () => {
+        const pages: Page[] = [
+            {
+                content: 'أَبُو مَنْصُورٍ: تفسير منسوب.\nوَقَالَ أَبُو: تتمة منسوبة.\nعك: جذر مقبول.',
+                id: 1,
+            },
+        ];
+        const profile: ArabicDictionaryProfile = {
+            version: 2,
+            zones: [
+                {
+                    blockers: [{ appliesTo: ['lineEntry'], precision: 'high', use: 'authorityIntro' }],
+                    families: [{ allowMultiWord: true, emit: 'entry', use: 'lineEntry', wrappers: 'none' }],
+                    name: 'main',
+                },
+            ],
+        };
+
+        expect(entryLemmasFor(pages, profile)).toEqual(['عك']);
+    });
+
     it('reports previousWord scope=pageStart and aggressive pageContinuation rejections in diagnostics', () => {
         const profile: ArabicDictionaryProfile = {
             version: 2,

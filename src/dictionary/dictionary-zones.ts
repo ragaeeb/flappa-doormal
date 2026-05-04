@@ -6,6 +6,7 @@
 import type {
     DictionaryGate,
     NormalizedArabicDictionaryProfile,
+    NormalizedDictionaryGate,
     NormalizedDictionaryZone,
 } from '@/types/dictionary.js';
 import type { Page } from '@/types/index.js';
@@ -27,6 +28,9 @@ export type PageContext = {
     page: Page;
 };
 
+type RuntimeDictionaryGate = DictionaryGate | NormalizedDictionaryGate;
+type RuntimeHeadingTextGate = Extract<RuntimeDictionaryGate, { use: 'headingText' }>;
+
 const normalizedStartsWith = (text: string, prefix: string): boolean =>
     normalizeArabicForComparison(text).startsWith(normalizeArabicForComparison(prefix));
 
@@ -39,6 +43,13 @@ const isDelimitedPrefixMatch = (text: string, prefix: string) => {
     }
     const nextChar = text[prefix.length];
     return nextChar === undefined || GATE_DELIMITER_RE.test(nextChar);
+};
+
+const getHeadingTextGateMatch = (gate: RuntimeHeadingTextGate, useFuzzy: boolean) => {
+    if (useFuzzy) {
+        return 'normalizedMatch' in gate ? gate.normalizedMatch : normalizeArabicForComparison(gate.match);
+    }
+    return 'trimmedMatch' in gate ? gate.trimmedMatch : gate.match.trim();
 };
 
 export const buildPageLines = (content: string): DictionaryLine[] => {
@@ -55,18 +66,44 @@ export const buildPageLines = (content: string): DictionaryLine[] => {
     return lines;
 };
 
-export const headingMatchesGate = (headingText: string, gate: DictionaryGate): boolean => {
+export const headingMatchesGate = (headingText: string, gate: RuntimeDictionaryGate): boolean => {
     if (gate.use === 'headingText') {
         const useFuzzy = gate.fuzzy ?? false;
         const source = useFuzzy ? normalizeArabicForComparison(headingText) : headingText.trim();
-        const match = useFuzzy ? normalizeArabicForComparison(gate.match) : gate.match.trim();
+        const match = getHeadingTextGateMatch(gate, useFuzzy);
         return !!match && isDelimitedPrefixMatch(source, match);
     }
 
     return normalizedStartsWith(headingText, GATE_TOKEN_MAP[gate.token]);
 };
 
-const pageMatchesAnyGate = (page: PageContext, gates: DictionaryGate[]) =>
+const createPageContext = (
+    page: Page,
+    boundary: NonNullable<PageMap['boundaries'][number]>,
+    content: string,
+    index: number,
+): PageContext => {
+    let cachedLines: DictionaryLine[] | undefined;
+    const context = {
+        boundary,
+        content,
+        index,
+        page,
+    } as PageContext;
+
+    Object.defineProperty(context, 'lines', {
+        configurable: true,
+        enumerable: true,
+        get: () => {
+            cachedLines ??= buildPageLines(content);
+            return cachedLines;
+        },
+    });
+
+    return context;
+};
+
+const pageMatchesAnyGate = (page: PageContext, gates: RuntimeDictionaryGate[]) =>
     page.lines.some((line) => {
         const trimmed = line.text.trim();
         if (!trimmed.startsWith(HEADING_PREFIX)) {
@@ -172,13 +209,7 @@ export const createPageContexts = (pages: Page[], pageMap: PageMap, normalizedPa
         }
 
         const content = normalizedPages?.[index] ?? normalizeLineEndings(page.content);
-        contexts.push({
-            boundary,
-            content,
-            index,
-            lines: buildPageLines(content),
-            page,
-        });
+        contexts.push(createPageContext(page, boundary, content, index));
     }
     return contexts;
 };

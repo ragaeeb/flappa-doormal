@@ -333,6 +333,21 @@ const collectCandidatesForFamily = (
     }
 };
 
+export const familyMayMatchLine = (family: NormalizedDictionaryFamily, trimmed: string): boolean => {
+    switch (family.use) {
+        case 'heading':
+            return trimmed.startsWith(HEADING_PREFIX);
+        case 'lineEntry':
+        case 'inlineSubentry':
+        case 'pairedForms':
+            return trimmed.includes(':');
+        case 'codeLine':
+            return /^(?:[[(])?\p{Script=Arabic}/u.test(trimmed);
+        default:
+            return assertNever(family);
+    }
+};
+
 /**
  * Collects all family candidates for a single dictionary line within a zone.
  */
@@ -349,6 +364,9 @@ export const collectCandidatesForLine = (
 
     const candidates: DictionaryCandidate[] = [];
     for (const family of zone.families) {
+        if (!familyMayMatchLine(family, trimmed)) {
+            continue;
+        }
         candidates.push(...collectCandidatesForFamily(pageStartOffset, line, nextLine, family, trimmed));
     }
 
