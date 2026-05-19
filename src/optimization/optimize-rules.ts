@@ -37,6 +37,62 @@ const getPatternString = (rule: SplitRule, key: PatternTypeKey) => {
 const normalizePatterns = (patterns: string[]) =>
     [...new Set(patterns)].sort((a, b) => b.length - a.length || a.localeCompare(b));
 
+const serializePrimitive = (value: null | boolean | number | string | bigint | symbol | undefined) => {
+    if (value === undefined) {
+        return 'undefined';
+    }
+    if (typeof value === 'number') {
+        return Number.isFinite(value) ? JSON.stringify(value) : JSON.stringify(String(value));
+    }
+    if (typeof value === 'bigint') {
+        return JSON.stringify(`${value}n`);
+    }
+    if (typeof value === 'symbol') {
+        return JSON.stringify(value.toString());
+    }
+    return JSON.stringify(value);
+};
+
+const stableSerializeArray = (values: unknown[], seen: WeakSet<object>): string =>
+    `[${values.map((value) => stableSerializeValue(value, seen)).join(',')}]`;
+
+const stableSerializeObject = (value: object, seen: WeakSet<object>): string => {
+    if (seen.has(value)) {
+        throw new TypeError('Cannot optimize rules with circular option values');
+    }
+
+    seen.add(value);
+    const entries = Object.entries(value as Record<string, unknown>)
+        .filter(([, entryValue]) => entryValue !== undefined)
+        .sort(([left], [right]) => left.localeCompare(right));
+    const serialized = entries
+        .map(([entryKey, entryValue]) => `${JSON.stringify(entryKey)}:${stableSerializeValue(entryValue, seen)}`)
+        .join(',');
+    seen.delete(value);
+    return `{${serialized}}`;
+};
+
+const stableSerializeValue = (value: unknown, seen: WeakSet<object>): string => {
+    if (typeof value === 'function') {
+        return JSON.stringify(`[Function:${value.name || 'anonymous'}]`);
+    }
+    if (!value || typeof value !== 'object') {
+        return serializePrimitive(value as null | boolean | number | string | bigint | symbol | undefined);
+    }
+    if (Array.isArray(value)) {
+        return stableSerializeArray(value, seen);
+    }
+    if (value instanceof Date) {
+        return JSON.stringify(value.toISOString());
+    }
+    if (value instanceof RegExp) {
+        return JSON.stringify(value.toString());
+    }
+    return stableSerializeObject(value, seen);
+};
+
+const stableSerialize = (value: unknown) => stableSerializeValue(value, new WeakSet<object>());
+
 const getDictionaryEntrySpecificityScore = (rule: SplitRule) => {
     if (!('dictionaryEntry' in rule) || !rule.dictionaryEntry) {
         return 0;
@@ -75,8 +131,8 @@ const getSpecificityScore = (rule: SplitRule) => {
 
 const createMergeKey = (rule: SplitRule) => {
     const key = getPatternKey(rule);
-    const { [key]: _, ...rest } = rule as any;
-    return `${key}|${JSON.stringify(rest)}`;
+    const options = Object.fromEntries(Object.entries(rule).filter(([field]) => field !== key));
+    return `${key}|${stableSerialize(options)}`;
 };
 
 export const optimizeRules = (rules: SplitRule[]) => {

@@ -25,6 +25,7 @@ Use them for:
 - dictionary runtime regressions
 - heading classifier regressions
 - book-profile acceptance coverage
+- compact golden summaries of per-profile segmentation output
 
 Do not use them as the source of truth for production corpus data. They are
 only representative samples.
@@ -45,3 +46,15 @@ bun run dictionary:extract-fixtures -- --books-dir /path/to/books
 
 The main test suite should continue to pass even when the local `books/`
 directory is absent.
+
+## Regression and Perf Coverage
+
+`testing/dictionary-fixtures.test.ts` checks fixture shape directly, compares
+representative per-book segmentation summaries against
+`dictionary-golden-summaries.ts`, and rejects accidental focused test
+declarations such as `it.only(...)`.
+
+Corpus-scale runtime expectations remain opt-in through `bun run test:perf`.
+The dictionary runtime perf harness includes `intro`, `stopLemma`,
+`previousWord`, and `pageContinuation` blocker paths so hot-path regressions can
+be measured without making full-corpus timing mandatory in normal CI.

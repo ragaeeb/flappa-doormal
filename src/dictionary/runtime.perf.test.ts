@@ -27,6 +27,8 @@ const profile: ArabicDictionaryProfile = {
     zones: [
         {
             blockers: [
+                { appliesTo: ['lineEntry'], scope: 'samePage', use: 'previousWord', words: ['قال'] },
+                { appliesTo: ['lineEntry'], use: 'pageContinuation' },
                 { appliesTo: ['lineEntry', 'inlineSubentry'], use: 'intro' },
                 { appliesTo: ['lineEntry', 'inlineSubentry'], use: 'stopLemma', words: ['ومعناه', 'ويقال', 'وقيل'] },
             ],
@@ -42,12 +44,16 @@ const profile: ArabicDictionaryProfile = {
 
 const generatePages = (count: number): Page[] =>
     Array.from({ length: count }, (_, index) => {
-        const lines = [`## باب ${randomWord()}`];
+        const lines = [`${randomWord()}: ${sentence(8)}`];
+        lines.push(`## باب ${randomWord()}`);
         lines.push(`${randomWord()}: ${sentence(12)}`);
         lines.push(`${sentence(4)} والعزوز: ${sentence(6)}`);
         lines.push(`ومعناه: ${sentence(5)}`);
         lines.push(`وقيل: ${sentence(5)}`);
+        lines.push('قال');
         lines.push(`${randomWord()}: ${sentence(10)}`);
+        lines.push(`${randomWord()}: ${sentence(10)}`);
+        lines.push('قال');
         return { content: lines.join('\n'), id: index + 1 };
     });
 
@@ -70,6 +76,8 @@ perfDescribe('Dictionary Runtime Performance', () => {
 
         expect(diagnostics.acceptedCount).toBeGreaterThan(PAGE_COUNT);
         expect(diagnostics.rejectedCount).toBeGreaterThan(0);
+        expect(diagnostics.rejectionReasons.pageContinuation).toBeGreaterThan(0);
+        expect(diagnostics.rejectionReasons.previousWord).toBeGreaterThan(0);
         expect(diagnostics.samples.length).toBe(25);
         expect(elapsed).toBeLessThan(800 * CI_MULTIPLIER);
     });

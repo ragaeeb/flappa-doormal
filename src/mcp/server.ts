@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { McpServer, StdioServerTransport } from '@modelcontextprotocol/server';
-import { z } from 'zod';
+import * as v from 'valibot';
+import { name, version } from '../../package.json';
 import {
     inspectBook,
     previewSegmentation,
@@ -10,22 +11,22 @@ import {
     validateSegmentationPreview,
 } from './tools.js';
 
-const pageSchema = z.object({
-    content: z.string(),
-    id: z.number(),
+const pageSchema = v.object({
+    content: v.string(),
+    id: v.number(),
 });
 
-const segmentSchema = z.object({
-    content: z.string(),
-    from: z.number(),
-    meta: z.record(z.string(), z.unknown()).optional(),
-    to: z.number().optional(),
+const segmentSchema = v.object({
+    content: v.string(),
+    from: v.number(),
+    meta: v.optional(v.record(v.string(), v.unknown())),
+    to: v.optional(v.number()),
 });
 
-const looseObjectSchema = z.object({}).catchall(z.unknown());
-const pagesSchema = z.array(pageSchema);
+const looseObjectSchema = v.record(v.string(), v.unknown());
+const pagesSchema = v.array(pageSchema);
 const optionsSchema = looseObjectSchema;
-const candidatesSchema = z.array(looseObjectSchema);
+const candidatesSchema = v.array(looseObjectSchema);
 const outputSchema = looseObjectSchema;
 
 const jsonResult = (payload: Record<string, unknown>) => ({
@@ -34,8 +35,8 @@ const jsonResult = (payload: Record<string, unknown>) => ({
 });
 
 const server = new McpServer({
-    name: 'flappa-doormal-mcp',
-    version: '2.20.0',
+    name: `${name}-mcp`,
+    version,
 });
 
 server.registerTool(
@@ -43,8 +44,8 @@ server.registerTool(
     {
         description:
             'Inspect a book of Arabic pages and return analysis hints: preprocess detections, line-start patterns, repeating sequences, and draft rule suggestions.',
-        inputSchema: z.object({
-            advisorOptions: looseObjectSchema.optional(),
+        inputSchema: v.object({
+            advisorOptions: v.optional(looseObjectSchema),
             pages: pagesSchema,
         }),
         outputSchema,
@@ -60,8 +61,8 @@ server.registerTool(
     {
         description:
             'Generate a draft segmentation report and recommended SegmentationOptions for a book of Arabic pages.',
-        inputSchema: z.object({
-            advisorOptions: looseObjectSchema.optional(),
+        inputSchema: v.object({
+            advisorOptions: v.optional(looseObjectSchema),
             pages: pagesSchema,
         }),
         outputSchema,
@@ -77,10 +78,10 @@ server.registerTool(
     {
         description:
             'Run segmentPages on a book with caller-supplied SegmentationOptions and return segments, samples, and validation.',
-        inputSchema: z.object({
+        inputSchema: v.object({
             options: optionsSchema,
             pages: pagesSchema,
-            sampleSegments: z.number().int().min(1).max(100).optional(),
+            sampleSegments: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100))),
         }),
         outputSchema,
     },
@@ -95,10 +96,10 @@ server.registerTool(
     {
         description:
             'Validate a caller-provided segmentation result against source pages and the SegmentationOptions used to produce it.',
-        inputSchema: z.object({
+        inputSchema: v.object({
             options: optionsSchema,
             pages: pagesSchema,
-            segments: z.array(segmentSchema),
+            segments: v.array(segmentSchema),
         }),
         outputSchema,
     },
@@ -113,10 +114,10 @@ server.registerTool(
     {
         description:
             'Evaluate multiple SegmentationOptions candidates against the same book and rank them using validation and segment-shape heuristics.',
-        inputSchema: z.object({
+        inputSchema: v.object({
             candidates: candidatesSchema,
             pages: pagesSchema,
-            sampleSegments: z.number().int().min(1).max(100).optional(),
+            sampleSegments: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1), v.maxValue(100))),
         }),
         outputSchema,
     },

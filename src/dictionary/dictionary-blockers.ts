@@ -15,12 +15,12 @@ import type {
 import { normalizeArabicForComparison } from '../utils/textUtils.js';
 import {
     ARABIC_WORD_REGEX,
-    AUTHORITY_RE,
     BARE_CODE_LEMMA_RE,
     HEADING_PREFIX,
     INTRO_TAIL_PATTERNS,
     NORMALIZED_AUTHORITY_AGGRESSIVE_TERMS,
     NORMALIZED_AUTHORITY_HEAD_WORDS_SET,
+    NORMALIZED_AUTHORITY_RE,
     NORMALIZED_CONTINUATION_PREV_WORDS_SET,
     NORMALIZED_INTRO_PHRASES,
     NORMALIZED_INTRO_TAIL_PHRASES,
@@ -135,12 +135,12 @@ const isAuthorityCandidate = (text: string, precision: 'high' | 'aggressive') =>
         return true;
     }
 
-    if (AUTHORITY_RE.test(text)) {
+    const normalized = normalizeIntroContextText(text);
+    if (NORMALIZED_AUTHORITY_RE.test(normalized)) {
         return true;
     }
 
     if (precision === 'aggressive') {
-        const normalized = normalizeIntroContextText(text);
         return NORMALIZED_AUTHORITY_AGGRESSIVE_TERMS.some((term) => normalized.startsWith(term));
     }
 

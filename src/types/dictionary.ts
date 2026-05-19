@@ -27,6 +27,13 @@ export type DictionaryGate =
     | { use: 'headingText'; match: string; fuzzy?: boolean }
     | { use: 'headingToken'; token: 'bab' | 'fasl' | 'kitab' };
 
+export type NormalizedDictionaryGate =
+    | ({ use: 'headingText'; match: string; fuzzy?: boolean } & {
+          normalizedMatch: string;
+          trimmedMatch: string;
+      })
+    | { use: 'headingToken'; token: 'bab' | 'fasl' | 'kitab' };
+
 export type DictionaryProfileValidationIssueCode =
     | 'invalid_version'
     | 'missing_zones'
@@ -253,7 +260,7 @@ export type NormalizedDictionaryBlocker =
 export type NormalizedDictionaryZone = {
     name: string;
     when?: {
-        activateAfter?: DictionaryGate[];
+        activateAfter?: NormalizedDictionaryGate[];
         maxPageId?: number;
         minPageId?: number;
     };

@@ -7,7 +7,7 @@
  */
 
 import { ARABIC_WORD_WITH_OPTIONAL_MARKS_PATTERN, getTokenPattern } from '../segmentation/tokens.js';
-import { normalizeArabicForComparison } from '../utils/textUtils.js';
+import { escapeRegex, normalizeArabicForComparison } from '../utils/textUtils.js';
 
 export const INTRO_PHRASES = [
     'وقال',
@@ -148,8 +148,15 @@ export const CONTINUATION_PREV_WORDS = [
     'وجل',
 ];
 
-export const AUTHORITY_RE =
-    /^(?:(?:و)?قال\s+(?:أبو|ابن|ثعلب|الليث|الأزهري|الجوهري|الفراء)\b|(?:أبو|ابن|ثعلب|الليث|الأزهري|الجوهري|الفراء)\s+\S+)/u;
+const AUTHORITY_INTRO_TERMS = ['أبو', 'ابن', 'ثعلب', 'الليث', 'الأزهري', 'الجوهري', 'الفراء'];
+const NORMALIZED_AUTHORITY_INTRO_PATTERN = AUTHORITY_INTRO_TERMS.map((term) =>
+    escapeRegex(normalizeArabicForComparison(term)),
+).join('|');
+
+export const NORMALIZED_AUTHORITY_RE = new RegExp(
+    `^(?:(?:و)?قال\\s+(?:${NORMALIZED_AUTHORITY_INTRO_PATTERN})(?=$|[\\s:،؛,.])|(?:${NORMALIZED_AUTHORITY_INTRO_PATTERN})\\s+\\S+)`,
+    'u',
+);
 
 export const AUTHORITY_HEAD_WORDS = [
     'الأزهري',
