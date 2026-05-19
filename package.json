@@ -11,6 +11,7 @@
         "shamela": "^1.5.3",
         "tsdown": "^0.22.0",
         "typescript": "^6.0.3",
+        "unrun": "^0.3.0",
         "valibot": "^1.4.0"
     },
     "engines": {
